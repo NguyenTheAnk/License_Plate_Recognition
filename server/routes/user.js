@@ -70,70 +70,55 @@ router.get('/:id/detailed',
 
 router.put('/:id', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.update'), 
     updateUserValidator, 
     updateUser
 );
 
 router.put('/:id/status', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.update'), 
     updateUserStatus
 );
 
 router.delete('/:id', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.delete'), 
     deleteUserValidator, 
     deleteUser
 );
 
 router.delete('/:id/hard', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.delete'), 
     hardDeleteUser
 );
 
 router.put('/:id/restore', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.update'), 
     restoreUser
 );
 
 // Search and filter routes
 router.get('/search/users', 
     auth, 
-    checkPermission('users.search'), 
     searchUsers
 );
 
 router.post('/search/criteria', 
     auth, 
-    checkPermission('users.search'), 
     searchUsersByCriteria
 );
 
 router.get('/role/:roleName', 
     auth, 
-    checkPermission('users.view'), 
     getUsersByRole
 );
 
 router.get('/permission/:permissionCode', 
     auth, 
-    checkPermission('users.view'), 
     getUsersByPermission
 );
 
 // Activity and reporting routes
 router.get('/activity/report', 
     auth, 
-    checkPermission('logs.view'), 
     getUserActivityReport
 );
 
@@ -141,7 +126,6 @@ router.get('/activity/report',
 router.post('/:id/assign-role', 
     auth, 
     onlyAdminAccess, 
-    checkPermission('users.update'), 
     async (req, res) => {
         const db = require('../config/db');
         const connection = await db.promise();
