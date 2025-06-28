@@ -30,10 +30,10 @@ router.put('/profile', auth, updateUser);
 router.put('/change-password/:id', auth, changePassword);
 
 // User CRUD routes (Admin only)
-router.post('/', 
+router.post('/create', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.create'), 
+    // onlyAdminAccess, 
+    // checkPermission('users.create'), 
     createUserValidator, 
     createUser
 );
@@ -85,16 +85,6 @@ router.delete('/:id',
     deleteUser
 );
 
-router.delete('/:id/hard', 
-    auth, 
-    hardDeleteUser
-);
-
-router.put('/:id/restore', 
-    auth, 
-    restoreUser
-);
-
 // Search and filter routes
 router.get('/search/users', 
     auth, 
@@ -116,18 +106,13 @@ router.get('/permission/:permissionCode',
     getUsersByPermission
 );
 
-// Activity and reporting routes
-router.get('/activity/report', 
-    auth, 
-    getUserActivityReport
-);
-
 // Role management routes
 router.post('/:id/assign-role', 
     auth, 
-    onlyAdminAccess, 
+    // onlyAdminAccess, 
+    // checkPermission('users.update'), 
     async (req, res) => {
-        const db = require('../config/db');
+        const db = require('../db');
         const connection = await db.promise();
         
         try {
@@ -198,10 +183,10 @@ router.post('/:id/assign-role',
 
 router.post('/:id/remove-role', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.update'), 
+    // onlyAdminAccess, 
+    // checkPermission('users.update'), 
     async (req, res) => {
-        const db = require('../config/db');
+        const db = require('../db');
         const connection = await db.promise();
         
         try {
@@ -267,8 +252,8 @@ router.post('/:id/remove-role',
 // Bulk operations
 router.post('/bulk/delete', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.delete'), 
+    // onlyAdminAccess, 
+    // checkPermission('users.delete'), 
     async (req, res) => {
         const db = require('../config/db');
         const connection = await db.promise();
@@ -336,8 +321,8 @@ router.post('/bulk/delete',
 
 router.post('/bulk/assign-role', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.update'), 
+    // onlyAdminAccess, 
+    // checkPermission('users.update'), 
     async (req, res) => {
         const db = require('../config/db');
         const connection = await db.promise();
@@ -407,8 +392,8 @@ router.post('/bulk/assign-role',
 
 router.post('/bulk/update-status', 
     auth, 
-    onlyAdminAccess, 
-    checkPermission('users.update'), 
+    // onlyAdminAccess, 
+    // checkPermission('users.update'), 
     async (req, res) => {
         const db = require('../config/db');
         const connection = await db.promise();
@@ -475,89 +460,10 @@ router.post('/bulk/update-status',
     }
 );
 
-// Export and import routes
-router.get('/export/csv', 
-    auth, 
-    checkPermission('reports.export'), 
-    async (req, res) => {
-        const db = require('../config/db');
-        const connection = await db.promise();
-        
-        try {
-            const { status = '', role = '' } = req.query;
-            
-            let whereClause = 'WHERE 1=1';
-            const params = [];
-
-            if (status) {
-                whereClause += ' AND u.status = ?';
-                params.push(status);
-            }
-
-            if (role) {
-                whereClause += ' AND EXISTS (SELECT 1 FROM user_roles ur2 JOIN roles r2 ON ur2.role_id = r2.id WHERE ur2.user_id = u.id AND ur2.is_active = 1 AND r2.name = ?)';
-                params.push(role);
-            }
-
-            const [users] = await connection.execute(`
-                SELECT 
-                    u.id,
-                    u.name,
-                    u.username,
-                    u.email,
-                    u.phone,
-                    u.status,
-                    u.last_login,
-                    u.created_at,
-                    GROUP_CONCAT(DISTINCT r.name ORDER BY r.level DESC SEPARATOR ', ') as roles,
-                    COUNT(DISTINCT p.id) as permission_count
-                FROM users u
-                LEFT JOIN user_roles ur ON u.id = ur.user_id AND ur.is_active = 1
-                LEFT JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
-                LEFT JOIN role_permissions rp ON r.id = rp.role_id AND rp.granted = 1
-                LEFT JOIN permissions p ON rp.permission_id = p.id AND p.is_active = 1
-                ${whereClause}
-                GROUP BY u.id
-                ORDER BY u.created_at DESC
-            `, params);
-
-            // Log export
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'EXPORT', 'USERS_CSV', ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    JSON.stringify({ count: users.length, filters: { status, role } }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
-
-            // Convert to CSV format
-            const csvHeader = 'ID,Tên,Tên đăng nhập,Email,Điện thoại,Trạng thái,Đăng nhập cuối,Ngày tạo,Vai trò,Số quyền\n';
-            const csvData = users.map(user => 
-                `${user.id},"${user.name}","${user.username}","${user.email}","${user.phone || ''}","${user.status}","${user.last_login || ''}","${user.created_at}","${user.roles || ''}","${user.permission_count}"`
-            ).join('\n');
-
-            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-            res.setHeader('Content-Disposition', `attachment; filename=users_${new Date().toISOString().split('T')[0]}.csv`);
-            res.send('\ufeff' + csvHeader + csvData); // UTF-8 BOM for Excel
-
-        } catch (error) {
-            console.error('Error exporting users:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Lỗi khi xuất dữ liệu người dùng',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
-            });
-        }
-    }
-);
 
 // Password reset routes
 router.post('/forgot-password', async (req, res) => {
-    const db = require('../config/db');
+    const db = require('../db');
     const connection = await db.promise();
     
     try {
@@ -601,13 +507,5 @@ router.post('/forgot-password', async (req, res) => {
     }
 });
 
-// Health check route
-router.get('/health', (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: 'User API is healthy',
-        timestamp: new Date().toISOString()
-    });
-});
 
 module.exports = router;

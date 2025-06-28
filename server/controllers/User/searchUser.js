@@ -277,7 +277,7 @@ const searchUsersByCriteria = async (req, res) => {
     }
 };
 
-// Get users by role - FIXED VERSION
+// Get users by role - USING QUERY INSTEAD OF EXECUTE
 const getUsersByRole = async (req, res) => {
     const connection = await db.promise();
     
@@ -292,29 +292,40 @@ const getUsersByRole = async (req, res) => {
             });
         }
 
-        const offset = (page - 1) * limit;
-        let whereClause = 'AND r.name = ?';
-        const params = [roleName];
+        // Ensure proper data types and decode URL params
+        const decodedRoleName = decodeURIComponent(roleName);
+        const pageNum = parseInt(page) || 1;
+        const limitNum = parseInt(limit) || 10;
+        const offset = (pageNum - 1) * limitNum;
 
-        if (status) {
-            whereClause += ' AND u.status = ?';
-            params.push(status);
+        console.log('Debug - roleName:', decodedRoleName, 'status:', status, 'page:', pageNum, 'limit:', limitNum);
+
+        // Escape string values to prevent SQL injection
+        const escapedRoleName = connection.escape(decodedRoleName);
+        const escapedStatus = status && status.trim() !== '' ? connection.escape(status.trim()) : null;
+
+        // First, get the role ID
+        const roleQuery = `SELECT id FROM roles WHERE name = ${escapedRoleName} AND is_active = 1`;
+        const [roleResult] = await connection.query(roleQuery);
+
+        if (roleResult.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy vai trò'
+            });
         }
 
-        // Get total count
-        const [countResult] = await connection.execute(`
+        const roleId = roleResult[0].id;
+
+        // Build queries using string interpolation with escaped values
+        let countQuery = `
             SELECT COUNT(DISTINCT u.id) as total
             FROM users u
             JOIN user_roles ur ON u.id = ur.user_id AND ur.is_active = 1
-            JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
-            WHERE 1=1 ${whereClause}
-        `, params);
+            WHERE ur.role_id = ${roleId}
+        `;
 
-        const totalUsers = countResult[0].total;
-        const totalPages = Math.ceil(totalUsers / limit);
-
-        // Get users basic info
-        const [users] = await connection.execute(`
+        let userQuery = `
             SELECT DISTINCT
                 u.id,
                 u.name,
@@ -323,31 +334,53 @@ const getUsersByRole = async (req, res) => {
                 u.phone,
                 u.status,
                 u.last_login,
-                u.created_at,
-                ur.assigned_at,
-                ab.name as assigned_by_name
+                u.created_at
             FROM users u
             JOIN user_roles ur ON u.id = ur.user_id AND ur.is_active = 1
-            JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
-            LEFT JOIN users ab ON ur.assigned_by = ab.id
-            WHERE 1=1 ${whereClause}
-            ORDER BY u.name ASC
-            LIMIT ? OFFSET ?
-        `, [...params, parseInt(limit), parseInt(offset)]);
+            WHERE ur.role_id = ${roleId}
+        `;
 
-        // Get all roles for each user
+        if (escapedStatus) {
+            countQuery += ` AND u.status = ${escapedStatus}`;
+            userQuery += ` AND u.status = ${escapedStatus}`;
+        }
+
+        userQuery += ` ORDER BY u.name ASC LIMIT ${limitNum} OFFSET ${offset}`;
+
+        console.log('Count Query:', countQuery);
+        console.log('User Query:', userQuery);
+
+        // Execute queries
+        const [countResult] = await connection.query(countQuery);
+        const totalUsers = countResult[0].total;
+        const totalPages = Math.ceil(totalUsers / limitNum);
+
+        const [users] = await connection.query(userQuery);
+
+        // Get additional details for each user
         for (let user of users) {
-            const [allRoles] = await connection.execute(`
-                SELECT DISTINCT
-                    r.id,
-                    r.name,
-                    r.description,
-                    r.level
+            // Get assignment details for this specific role
+            const assignmentQuery = `
+                SELECT ur.assigned_at, ab.name as assigned_by_name
+                FROM user_roles ur
+                LEFT JOIN users ab ON ur.assigned_by = ab.id
+                WHERE ur.user_id = ${user.id} AND ur.role_id = ${roleId} AND ur.is_active = 1
+            `;
+            const [assignmentDetails] = await connection.query(assignmentQuery);
+
+            if (assignmentDetails.length > 0) {
+                user.assigned_at = assignmentDetails[0].assigned_at;
+                user.assigned_by_name = assignmentDetails[0].assigned_by_name;
+            }
+
+            // Get all roles for this user
+            const rolesQuery = `
+                SELECT DISTINCT r.id, r.name, r.description, r.level
                 FROM user_roles ur
                 JOIN roles r ON ur.role_id = r.id
-                WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
-            `, [user.id]);
-
+                WHERE ur.user_id = ${user.id} AND ur.is_active = 1 AND r.is_active = 1
+            `;
+            const [allRoles] = await connection.query(rolesQuery);
             user.all_roles = allRoles;
         }
 
@@ -356,14 +389,14 @@ const getUsersByRole = async (req, res) => {
             message: 'Lấy danh sách người dùng theo vai trò thành công',
             data: {
                 users,
-                roleName,
+                roleName: decodedRoleName,
                 pagination: {
-                    currentPage: parseInt(page),
+                    currentPage: pageNum,
                     totalPages,
                     totalUsers,
-                    limit: parseInt(limit),
-                    hasNextPage: page < totalPages,
-                    hasPrevPage: page > 1
+                    limit: limitNum,
+                    hasNextPage: pageNum < totalPages,
+                    hasPrevPage: pageNum > 1
                 }
             }
         });
@@ -379,7 +412,6 @@ const getUsersByRole = async (req, res) => {
     }
 };
 
-// Get users by permission - FIXED VERSION
 const getUsersByPermission = async (req, res) => {
     const connection = await db.promise();
     
@@ -394,24 +426,47 @@ const getUsersByPermission = async (req, res) => {
             });
         }
 
-        const offset = (page - 1) * limit;
+        // Ensure proper data types and decode URL params
+        const decodedPermissionCode = decodeURIComponent(permissionCode);
+        const pageNum = parseInt(page) || 1;
+        const limitNum = parseInt(limit) || 10;
+        const offset = (pageNum - 1) * limitNum;
+
+        console.log('Debug - permissionCode:', decodedPermissionCode, 'page:', pageNum, 'limit:', limitNum);
+
+        // Escape string values to prevent SQL injection
+        const escapedPermissionCode = connection.escape(decodedPermissionCode);
+
+        // First, check if permission exists
+        const permissionCheckQuery = `SELECT id FROM permissions WHERE code = ${escapedPermissionCode} AND is_active = 1`;
+        const [permissionResult] = await connection.query(permissionCheckQuery);
+
+        if (permissionResult.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy quyền'
+            });
+        }
 
         // Get total count
-        const [countResult] = await connection.execute(`
+        const countQuery = `
             SELECT COUNT(DISTINCT u.id) as total
             FROM users u
             JOIN user_roles ur ON u.id = ur.user_id AND ur.is_active = 1
             JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
             JOIN role_permissions rp ON r.id = rp.role_id AND rp.granted = 1
             JOIN permissions p ON rp.permission_id = p.id AND p.is_active = 1
-            WHERE p.code = ?
-        `, [permissionCode]);
+            WHERE p.code = ${escapedPermissionCode}
+        `;
 
+        console.log('Count Query:', countQuery);
+
+        const [countResult] = await connection.query(countQuery);
         const totalUsers = countResult[0].total;
-        const totalPages = Math.ceil(totalUsers / limit);
+        const totalPages = Math.ceil(totalUsers / limitNum);
 
         // Get users basic info
-        const [users] = await connection.execute(`
+        const userQuery = `
             SELECT DISTINCT
                 u.id,
                 u.name,
@@ -426,14 +481,18 @@ const getUsersByPermission = async (req, res) => {
             JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
             JOIN role_permissions rp ON r.id = rp.role_id AND rp.granted = 1
             JOIN permissions p ON rp.permission_id = p.id AND p.is_active = 1
-            WHERE p.code = ?
+            WHERE p.code = ${escapedPermissionCode}
             ORDER BY u.name ASC
-            LIMIT ? OFFSET ?
-        `, [permissionCode, parseInt(limit), parseInt(offset)]);
+            LIMIT ${limitNum} OFFSET ${offset}
+        `;
+
+        console.log('User Query:', userQuery);
+
+        const [users] = await connection.query(userQuery);
 
         // Get roles with this permission for each user
         for (let user of users) {
-            const [rolesWithPermission] = await connection.execute(`
+            const rolesQuery = `
                 SELECT DISTINCT
                     r.id,
                     r.name,
@@ -443,9 +502,10 @@ const getUsersByPermission = async (req, res) => {
                 JOIN roles r ON ur.role_id = r.id
                 JOIN role_permissions rp ON r.id = rp.role_id
                 JOIN permissions p ON rp.permission_id = p.id
-                WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1 AND rp.granted = 1 AND p.is_active = 1 AND p.code = ?
-            `, [user.id, permissionCode]);
+                WHERE ur.user_id = ${user.id} AND ur.is_active = 1 AND r.is_active = 1 AND rp.granted = 1 AND p.is_active = 1 AND p.code = ${escapedPermissionCode}
+            `;
 
+            const [rolesWithPermission] = await connection.query(rolesQuery);
             user.roles_with_permission = rolesWithPermission;
         }
 
@@ -454,14 +514,14 @@ const getUsersByPermission = async (req, res) => {
             message: 'Lấy danh sách người dùng theo quyền thành công',
             data: {
                 users,
-                permissionCode,
+                permissionCode: decodedPermissionCode,
                 pagination: {
-                    currentPage: parseInt(page),
+                    currentPage: pageNum,
                     totalPages,
                     totalUsers,
-                    limit: parseInt(limit),
-                    hasNextPage: page < totalPages,
-                    hasPrevPage: page > 1
+                    limit: limitNum,
+                    hasNextPage: pageNum < totalPages,
+                    hasPrevPage: pageNum > 1
                 }
             }
         });

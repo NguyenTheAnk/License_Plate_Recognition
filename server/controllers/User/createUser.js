@@ -57,7 +57,7 @@ const createUser = async (req, res) => {
             );
         }
 
-        // Get created user basic info - FIXED VERSION
+        // Get created user with roles and permissions
         const [userWithRoles] = await connection.execute(`
             SELECT 
                 u.id,
@@ -67,41 +67,32 @@ const createUser = async (req, res) => {
                 u.phone,
                 u.status,
                 u.created_at,
-                u.updated_at
+                u.updated_at,
+                JSON_ARRAYAGG(
+                    DISTINCT JSON_OBJECT(
+                        'id', r.id,
+                        'name', r.name,
+                        'description', r.description,
+                        'level', r.level
+                    )
+                ) as roles,
+                JSON_ARRAYAGG(
+                    DISTINCT JSON_OBJECT(
+                        'id', p.id,
+                        'module', p.module,
+                        'action', p.action,
+                        'code', p.code,
+                        'description', p.description
+                    )
+                ) as permissions
             FROM users u
+            LEFT JOIN user_roles ur ON u.id = ur.user_id AND ur.is_active = 1
+            LEFT JOIN roles r ON ur.role_id = r.id AND r.is_active = 1
+            LEFT JOIN role_permissions rp ON r.id = rp.role_id AND rp.granted = 1
+            LEFT JOIN permissions p ON rp.permission_id = p.id AND p.is_active = 1
             WHERE u.id = ?
+            GROUP BY u.id
         `, [userId]);
-
-        // Get roles separately
-        const [userRoles] = await connection.execute(`
-            SELECT DISTINCT
-                r.id,
-                r.name,
-                r.description,
-                r.level
-            FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
-        `, [userId]);
-
-        // Get permissions separately
-        const [userPermissions] = await connection.execute(`
-            SELECT DISTINCT
-                p.id,
-                p.module,
-                p.action,
-                p.code,
-                p.description
-            FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            JOIN role_permissions rp ON r.id = rp.role_id
-            JOIN permissions p ON rp.permission_id = p.id
-            WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1 AND rp.granted = 1 AND p.is_active = 1
-        `, [userId]);
-
-        const user = userWithRoles[0];
-        user.roles = userRoles;
-        user.permissions = userPermissions;
 
         // Log access
         await connection.execute(
@@ -121,7 +112,7 @@ const createUser = async (req, res) => {
             success: true,
             message: 'Tạo người dùng thành công',
             data: {
-                user
+                user: userWithRoles[0]
             }
         });
 
@@ -129,21 +120,17 @@ const createUser = async (req, res) => {
         console.error('Error creating user:', error);
         
         // Log failed access
-        try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'CREATE', 'USER', 'FAILURE', ?, ?, ?, NOW())`,
-                [
-                    req.user?.userId,
-                    req.user?.username,
-                    error.message,
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
-        } catch (logError) {
-            console.error('Error logging failed access:', logError);
-        }
+        await connection.execute(
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'CREATE', 'USER', 'FAILURE', ?, ?, ?, NOW())`,
+            [
+                req.user?.userId,
+                req.user?.username,
+                error.message,
+                req.ip,
+                req.get('User-Agent')
+            ]
+        );
 
         res.status(500).json({
             success: false,

@@ -58,20 +58,11 @@ const deleteUser = async (req, res) => {
             });
         }
 
-        // Soft delete: set status to inactive instead of actually deleting
-        await connection.execute(
-            'UPDATE users SET status = ?, updated_at = NOW() WHERE id = ?',
-            ['inactive', userId]
-        );
+        // Start transaction for data integrity
+        await connection.beginTransaction();
 
-        // Deactivate all user roles
-        await connection.execute(
-            'UPDATE user_roles SET is_active = 0 WHERE user_id = ?',
-            [userId]
-        );
-
-        // Log access
         try {
+            // Log the deletion before actually deleting (important for audit trail)
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
                  VALUES (?, ?, 'DELETE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
@@ -80,18 +71,103 @@ const deleteUser = async (req, res) => {
                     req.user.username,
                     userId,
                     JSON.stringify(currentUser[0]),
-                    req.ip,
-                    req.get('User-Agent')
+                    req.ip || 'unknown',
+                    req.get('User-Agent') || 'unknown'
                 ]
             );
-        } catch (logError) {
-            console.error('Error logging access:', logError);
-        }
 
-        res.status(200).json({
-            success: true,
-            message: 'Xóa người dùng thành công'
-        });
+            // Step 1: Delete user roles (due to foreign key constraints)
+            await connection.execute(
+                'DELETE FROM user_roles WHERE user_id = ?',
+                [userId]
+            );
+
+            // Step 2: Update any records that reference this user to NULL or handle them
+            // Update access_logs to preserve history but set user_id to NULL
+            await connection.execute(
+                'UPDATE access_logs SET user_id = NULL WHERE user_id = ?',
+                [userId]
+            );
+
+            // Update login_logs to preserve history but set user_id to NULL
+            await connection.execute(
+                'UPDATE login_logs SET user_id = NULL WHERE user_id = ?',
+                [userId]
+            );
+
+            // Update any assignments/created_by fields that reference this user
+            // Access control lists - set added_by to NULL
+            await connection.execute(
+                'UPDATE access_control_lists SET added_by = NULL WHERE added_by = ?',
+                [userId]
+            );
+
+            // Update user_roles assigned_by to NULL
+            await connection.execute(
+                'UPDATE user_roles SET assigned_by = NULL WHERE assigned_by = ?',
+                [userId]
+            );
+
+            // Update any other tables that might reference this user
+            // Alerts - set user_id, acknowledged_by, resolved_by to NULL
+            await connection.execute(
+                'UPDATE alerts SET user_id = NULL WHERE user_id = ?',
+                [userId]
+            );
+
+            await connection.execute(
+                'UPDATE alerts SET acknowledged_by = NULL WHERE acknowledged_by = ?',
+                [userId]
+            );
+
+            await connection.execute(
+                'UPDATE alerts SET resolved_by = NULL WHERE resolved_by = ?',
+                [userId]
+            );
+
+            // License plate detections - set verified_by to NULL
+            await connection.execute(
+                'UPDATE license_plate_detections SET verified_by = NULL WHERE verified_by = ?',
+                [userId]
+            );
+
+            // Data integrity logs - set checked_by to NULL
+            await connection.execute(
+                'UPDATE data_integrity_logs SET checked_by = NULL WHERE checked_by = ?',
+                [userId]
+            );
+
+            // Step 3: Finally delete the user
+            const [deleteResult] = await connection.execute(
+                'DELETE FROM users WHERE id = ?',
+                [userId]
+            );
+
+            if (deleteResult.affectedRows === 0) {
+                throw new Error('Không thể xóa người dùng - có thể đã bị xóa bởi người khác');
+            }
+
+            // Commit transaction
+            await connection.commit();
+
+            res.status(200).json({
+                success: true,
+                message: 'Xóa người dùng thành công',
+                data: {
+                    deletedUserId: userId,
+                    deletedUserInfo: {
+                        username: currentUser[0].username,
+                        email: currentUser[0].email,
+                        name: currentUser[0].name
+                    }
+                }
+            });
+
+        } catch (transactionError) {
+            // Rollback transaction on error
+            await connection.rollback();
+            throw transactionError;
+        }
 
     } catch (error) {
         console.error('Error deleting user:', error);
@@ -102,12 +178,12 @@ const deleteUser = async (req, res) => {
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
                  VALUES (?, ?, 'DELETE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
                 [
-                    req.user?.userId,
-                    req.user?.username,
-                    req.params.id,
+                    req.user?.userId || null,
+                    req.user?.username || 'unknown',
+                    userId,
                     error.message,
-                    req.ip,
-                    req.get('User-Agent')
+                    req.ip || 'unknown',
+                    req.get('User-Agent') || 'unknown'
                 ]
             );
         } catch (logError) {
@@ -122,210 +198,8 @@ const deleteUser = async (req, res) => {
     }
 };
 
-// Hard delete user (permanently remove from database)
-const hardDeleteUser = async (req, res) => {
-    const connection = await db.promise();
-    
-    try {
-        const userId = req.params.id;
 
-        if (!userId || isNaN(userId)) {
-            return res.status(400).json({
-                success: false,
-                message: 'ID người dùng không hợp lệ'
-            });
-        }
-
-        // Check if user exists
-        const [currentUser] = await connection.execute(
-            'SELECT * FROM users WHERE id = ?',
-            [userId]
-        );
-
-        if (currentUser.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Không tìm thấy người dùng'
-            });
-        }
-
-        // Prevent self-deletion
-        if (parseInt(userId) === req.user.userId) {
-            return res.status(400).json({
-                success: false,
-                message: 'Không thể xóa tài khoản của chính mình'
-            });
-        }
-
-        // Check if user has related data that prevents deletion
-        const [relatedData] = await connection.execute(`
-            SELECT 
-                (SELECT COUNT(*) FROM license_plate_detections WHERE verified_by = ?) as detection_count,
-                (SELECT COUNT(*) FROM access_control_lists WHERE added_by = ?) as acl_count,
-                (SELECT COUNT(*) FROM alerts WHERE acknowledged_by = ? OR resolved_by = ?) as alert_count
-        `, [userId, userId, userId, userId]);
-
-        if (relatedData[0].detection_count > 0 || relatedData[0].acl_count > 0 || relatedData[0].alert_count > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Không thể xóa người dùng này vì còn có dữ liệu liên quan trong hệ thống. Vui lòng sử dụng xóa mềm (soft delete).'
-            });
-        }
-
-        // Begin transaction for hard delete
-        await connection.execute('START TRANSACTION');
-
-        try {
-            // Delete user roles first (foreign key constraint)
-            await connection.execute('DELETE FROM user_roles WHERE user_id = ?', [userId]);
-            
-            // Delete user
-            await connection.execute('DELETE FROM users WHERE id = ?', [userId]);
-
-            // Commit transaction
-            await connection.execute('COMMIT');
-
-            // Log access
-            try {
-                await connection.execute(
-                    `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
-                     VALUES (?, ?, 'DELETE', 'USER_HARD', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                    [
-                        req.user.userId,
-                        req.user.username,
-                        userId,
-                        JSON.stringify(currentUser[0]),
-                        req.ip,
-                        req.get('User-Agent')
-                    ]
-                );
-            } catch (logError) {
-                console.error('Error logging access:', logError);
-            }
-
-            res.status(200).json({
-                success: true,
-                message: 'Xóa người dùng vĩnh viễn thành công'
-            });
-
-        } catch (transactionError) {
-            // Rollback transaction
-            await connection.execute('ROLLBACK');
-            throw transactionError;
-        }
-
-    } catch (error) {
-        console.error('Error hard deleting user:', error);
-        
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi khi xóa người dùng vĩnh viễn',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
-
-// Restore soft deleted user - FIXED VERSION
-const restoreUser = async (req, res) => {
-    const connection = await db.promise();
-    
-    try {
-        const userId = req.params.id;
-
-        if (!userId || isNaN(userId)) {
-            return res.status(400).json({
-                success: false,
-                message: 'ID người dùng không hợp lệ'
-            });
-        }
-
-        // Check if user exists and is inactive
-        const [currentUser] = await connection.execute(
-            'SELECT * FROM users WHERE id = ? AND status = ?',
-            [userId, 'inactive']
-        );
-
-        if (currentUser.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Không tìm thấy người dùng đã bị xóa'
-            });
-        }
-
-        // Restore user
-        await connection.execute(
-            'UPDATE users SET status = ?, updated_at = NOW() WHERE id = ?',
-            ['active', userId]
-        );
-
-        // Get user with roles after restore - FIXED VERSION
-        const [restoredUser] = await connection.execute(`
-            SELECT 
-                u.id,
-                u.name,
-                u.username,
-                u.email,
-                u.phone,
-                u.status,
-                u.created_at,
-                u.updated_at
-            FROM users u
-            WHERE u.id = ?
-        `, [userId]);
-
-        const user = restoredUser[0];
-
-        // Get roles separately
-        const [userRoles] = await connection.execute(`
-            SELECT DISTINCT
-                r.id,
-                r.name,
-                r.description,
-                r.level
-            FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            WHERE ur.user_id = ? AND r.is_active = 1
-        `, [userId]);
-
-        user.roles = userRoles;
-
-        // Log access
-        try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'RESTORE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    userId,
-                    JSON.stringify({ status: 'active' }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
-        } catch (logError) {
-            console.error('Error logging access:', logError);
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Khôi phục người dùng thành công',
-            data: { user }
-        });
-
-    } catch (error) {
-        console.error('Error restoring user:', error);
-        
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi khi khôi phục người dùng',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
 
 module.exports = {
-    deleteUser,
-    hardDeleteUser,
-    restoreUser
+    deleteUser
 };
