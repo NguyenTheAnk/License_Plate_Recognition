@@ -106,6 +106,8 @@ router.get('/permission/:permissionCode',
     getUsersByPermission
 );
 
+
+/// Từ đây chưa tiến hành test api do chưa biết có sử dụng hay không
 // Role management routes
 router.post('/:id/assign-role', 
     auth, 
