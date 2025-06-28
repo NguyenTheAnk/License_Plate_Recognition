@@ -1,131 +1,113 @@
-
 const express = require('express');
 const router = express.Router();
 const auth = require('../middlewares/authMiddleware');
-const {onlyAdminAccess} = require('../middlewares//adminMiddleware.js');
+const { onlyAdminAccess } = require('../middlewares/adminMiddleware.js');
 const checkPermission = require('../middlewares/checkPermission');
-const permissionController = require('../controllers/admin/permissionController');
-var permissionEditId;
-// router.get(`/`, async (req, res) => {
-//     try{
-//         const page = parseInt(req.query.page) || 1;
-//         const perPage = req.query.perPage;
-//         const totalPosts = await Permissions.countDocuments();
-//         const totalPages = Math.ceil(totalPosts / perPage);
 
-//         if(page > totalPages){
-//             return res.status(404).json({message: "No data found!"})
-//         }
+// Import all permission controllers
+const { createPermission } = require('../controllers/Permissions/createPermission');
+const { getPermissionById, getAllPermissions } = require('../controllers/Permissions/getPermission');
+const { updatePermission } = require('../controllers/Permissions/updatePermission');
+const { deletePermission, bulkDeletePermissions } = require('../controllers/Permissions/deletePermission');
+const { searchPermissions, getPermissionsByModule, getPermissionSuggestions } = require('../controllers/Permissions/searchPermission');
+const { getPermissionUsageAnalytics, exportPermissions, compareRolePermissions, getPermissionHierarchy } = require('../controllers/Permissions/viewPermission');
 
-//         let permissionList = [];
-//         if(req.query.page !==undefined && req.query.perPage !==undefined){
-//             permissionList = await Permissions.find()
-//             .skip((page -1)* perPage)
-//             .limit(perPage)
-//             .exec();
-//         }
-//         else{
-//             permissionList = await Permissions.find()
-//             .exec();
-//         }
-        
+// Basic CRUD routes
+// GET /permissions - Get all permissions with pagination and filtering
+router.get('/', 
+    auth, 
+    // checkPermission('permissions.view'),
+    getAllPermissions
+);
 
-//         if(!permissionList){
-//             res.status(500).json({success: false})
-//         }
+// GET /permissions/:id - Get permission by ID
+router.get('/:id', 
+    auth, 
+    //checkPermission('permissions.view'),
+    getPermissionById
+);
 
-//         return res.status(200).json({
-//             "permissionList": permissionList,
-//             "totalPages": totalPages,
-//             "totalPosts": totalPosts,
-//             "page": page
-//         });
+// POST /permissions - Create new permission
+router.post('/', 
+    auth, 
+    //checkPermission('permissions.create'),
+    createPermission
+);
 
-//     }catch(error){
-//         res.status(500).json({success: false})
-//     }
+// PUT /permissions/:id - Update permission
+router.put('/:id', 
+    auth, 
+    //checkPermission('permissions.update'),
+    updatePermission
+);
 
-// });
-// router.get(`/:id`, async (req, res) => {
-//     router.get('/:id', async (req, res) => {
-//         try {
-//             const permission = await Permissions.findById(req.params.id);
-            
-//             if (!permission) {
-//                 return res.status(404).json({
-//                     success: false,
-//                     message: 'Permission with the given ID was not found'
-//                 });
-//             }
-    
-//             return res.status(200).json({
-//                 success: true,
-//                 data: permission
-//             });
-    
-//         } catch (error) {
-//             return res.status(500).json({
-//                 success: false,
-//                 message: 'Error retrieving permission',
-//                 error: error.message
-//             });
-//         }
-//     });
-// })
-// router.post('/create', async (req, res) => {
-
-//     permission = new Permissions({
-//         permissionTitle: req.body.permissionTitle,
-//         permissionConstantName: req.body.permissionConstantName
-//     });
-//     permission = await permission.save();
-//     if(!permission){
-//         res.status(500).json({
-//             error: err,
-//             success: false
-//         })
-//     }
-//     res.status(201).json(permission);
-// });
-
-// router.delete(`/:id`, async (req, res) => {
-//     const deletedPermission = await Permissions.findByIdAndDelete(req.params.id);
-//     if(!deletedPermission){
-//         res.status(404).json({
-//             message: 'Permission not found!',
-//             success: false
-//         })
-//     }
-
-//     res.status(200).json({
-//         success: true,
-//         message: 'Permission Deleted!'
-//     })
-// });
-// router.put('/:id', async (req, res) => {
+// DELETE /permissions/:id - Delete permission
+router.delete('/:id', 
+    auth, 
+    //checkPermission('permissions.delete'),
+    deletePermission
+);
 
 
-//     const permission = await Permissions.findByIdAndUpdate(
-//         req.params.id,{
-//             permissionTitle: req.body.permissionTitle,
-//             permissionConstantName: req.body.permissionConstantName
-//         },
-//         {new: true}
-//         )
-//         if(!permission) {
-//             return res.status(500).json({
-//                 message: 'Permission cannot be updated',
-//                 success: false
-//             })
-//         }
-//         res.send(permission);
-// });
+// CHƯA TESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+// Advanced search and filtering routes
+// GET /permissions/search/advanced - Search permissions with advanced filters
+router.get('/search/advanced', 
+    auth, 
+    //checkPermission('permissions.view'),
+    searchPermissions
+);
 
+// GET /permissions/search/suggestions - Get permission suggestions for autocomplete
+router.get('/search/suggestions', 
+    auth, 
+    //checkPermission('permissions.view'),
+    getPermissionSuggestions
+);
 
-router.get('/', auth, permissionController.getAllPermissions);
-router.get('/:id', auth, permissionController.getPermissionById);
-router.post('/', auth, permissionController.createPermission);
-router.put('/:id', auth, permissionController.updatePermission);
-router.delete('/:id', auth, permissionController.deletePermission);
+// Organization and structure routes
+// GET /permissions/modules/grouped - Get permissions grouped by module
+router.get('/modules/grouped', 
+    auth, 
+    //checkPermission('permissions.view'),
+    getPermissionsByModule
+);
+
+// GET /permissions/hierarchy/structure - Get permission hierarchy and dependencies
+router.get('/hierarchy/structure', 
+    auth, 
+    //checkPermission('permissions.view'),
+    getPermissionHierarchy
+);
+
+// Analytics and reporting routes
+// GET /permissions/analytics/usage - Get permission usage analytics
+router.get('/analytics/usage', 
+    auth, 
+    //checkPermission('permissions.view'),
+    getPermissionUsageAnalytics
+);
+
+// GET /permissions/analytics/compare-roles - Compare permissions between roles
+router.get('/analytics/compare-roles', 
+    auth, 
+    //checkPermission('permissions.view'),
+    compareRolePermissions
+);
+
+// Export and bulk operations routes
+// GET /permissions/export/data - Export permissions to various formats
+router.get('/export/data', 
+    auth, 
+    //checkPermission('permissions.view'),
+    exportPermissions
+);
+
+// DELETE /permissions/bulk/delete - Bulk delete permissions
+router.delete('/bulk/delete', 
+    auth, 
+    //checkPermission('permissions.delete'),
+    bulkDeletePermissions
+);
 
 module.exports = router;

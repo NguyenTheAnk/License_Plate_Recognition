@@ -1,5 +1,6 @@
 const db = require('../../db');
 
+// Lấy các permission được gán cho Role và các Permission còn lại chưa được gán và thống kê chi tiết
 const getRolePermissionsWithRemaining = async (req, res) => {
     const connection = await db.promise();
     

@@ -1,0 +1,349 @@
+const db = require('../../db');
+
+const deletePermission = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const { id } = req.params;
+
+        // Validate ID
+        if (!id || isNaN(parseInt(id))) {
+            return res.status(400).json({
+                success: false,
+                message: 'ID quyền không hợp lệ'
+            });
+        }
+
+        // Get current permission data
+        const [currentPermission] = await connection.execute(
+            'SELECT * FROM permissions WHERE id = ?',
+            [id]
+        );
+
+        if (currentPermission.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy quyền với ID đã cho'
+            });
+        }
+
+        const oldValues = currentPermission[0];
+
+        // Check if permission is being used by any roles
+        const [rolePermissions] = await connection.execute(
+            `SELECT 
+                COUNT(*) as count, 
+                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name) as role_names,
+                COUNT(DISTINCT CASE WHEN rp.granted = 1 THEN rp.role_id END) as granted_count,
+                COUNT(DISTINCT CASE WHEN rp.granted = 0 THEN rp.role_id END) as denied_count
+             FROM role_permissions rp 
+             JOIN roles r ON rp.role_id = r.id 
+             WHERE rp.permission_id = ?`,
+            [id]
+        );
+
+        if (rolePermissions[0].count > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Không thể xóa quyền đang được sử dụng bởi ${rolePermissions[0].count} vai trò: ${rolePermissions[0].role_names}. Vui lòng xóa khỏi các vai trò trước.`,
+                data: {
+                    usedByRoles: rolePermissions[0].role_names.split(','),
+                    grantedCount: rolePermissions[0].granted_count,
+                    deniedCount: rolePermissions[0].denied_count
+                }
+            });
+        }
+
+        // Check if this is a system permission (prevent deletion of critical permissions)
+        const systemPermissions = [
+            'users.view', 'users.create', 'users.update', 'users.delete',
+            'roles.view', 'roles.create', 'roles.update', 'roles.delete',
+            'permissions.view', 'permissions.create', 'permissions.update', 'permissions.delete'
+        ];
+
+        if (systemPermissions.includes(oldValues.code)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Không thể xóa quyền hệ thống. Quyền này là cần thiết cho hoạt động của hệ thống.'
+            });
+        }
+
+        // Start transaction for safe deletion
+        await connection.beginTransaction();
+
+        try {
+            // Delete any role_permissions entries (should be 0 based on check above, but for safety)
+            await connection.execute(
+                'DELETE FROM role_permissions WHERE permission_id = ?',
+                [id]
+            );
+
+            // Delete the permission
+            const [deleteResult] = await connection.execute(
+                'DELETE FROM permissions WHERE id = ?',
+                [id]
+            );
+
+            if (deleteResult.affectedRows === 0) {
+                await connection.rollback();
+                return res.status(404).json({
+                    success: false,
+                    message: 'Quyền không tồn tại hoặc đã bị xóa'
+                });
+            }
+
+            // Commit transaction
+            await connection.commit();
+
+            // Log access
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'DELETE', 'PERMISSION', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                [
+                    req.user.userId,
+                    req.user.username,
+                    id,
+                    JSON.stringify(oldValues),
+                    req.ip,
+                    req.get('User-Agent')
+                ]
+            );
+
+            res.status(200).json({
+                success: true,
+                message: 'Xóa quyền thành công',
+                data: {
+                    deletedPermission: {
+                        id: oldValues.id,
+                        module: oldValues.module,
+                        action: oldValues.action,
+                        code: oldValues.code,
+                        description: oldValues.description
+                    }
+                }
+            });
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        }
+
+    } catch (error) {
+        console.error('Error deleting permission:', error);
+        
+        // Log failed access
+        await connection.execute(
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'DELETE', 'PERMISSION', ?, 'FAILURE', ?, ?, ?, NOW())`,
+            [
+                req.user?.userId,
+                req.user?.username,
+                req.params.id,
+                error.message,
+                req.ip,
+                req.get('User-Agent')
+            ]
+        );
+
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi xóa quyền',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Bulk delete permissions
+const bulkDeletePermissions = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const { ids } = req.body;
+
+        // Validate input
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Danh sách ID không hợp lệ'
+            });
+        }
+
+        // Validate all IDs
+        const invalidIds = ids.filter(id => !id || isNaN(parseInt(id)));
+        if (invalidIds.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Một số ID không hợp lệ'
+            });
+        }
+
+        // Get permissions data
+        const placeholders = ids.map(() => '?').join(',');
+        const [permissions] = await connection.execute(
+            `SELECT * FROM permissions WHERE id IN (${placeholders})`,
+            ids
+        );
+
+        if (permissions.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy quyền nào với các ID đã cho'
+            });
+        }
+
+        // Check for system permissions
+        const systemPermissions = [
+            'users.view', 'users.create', 'users.update', 'users.delete',
+            'roles.view', 'roles.create', 'roles.update', 'roles.delete',
+            'permissions.view', 'permissions.create', 'permissions.update', 'permissions.delete'
+        ];
+
+        const systemPermissionFound = permissions.find(p => systemPermissions.includes(p.code));
+        if (systemPermissionFound) {
+            return res.status(400).json({
+                success: false,
+                message: `Không thể xóa quyền hệ thống: ${systemPermissionFound.code}`
+            });
+        }
+
+        // Check if any permissions are being used
+        const [usageCheck] = await connection.execute(
+            `SELECT 
+                rp.permission_id,
+                p.code,
+                COUNT(*) as usage_count,
+                GROUP_CONCAT(DISTINCT r.name) as role_names
+             FROM role_permissions rp 
+             JOIN permissions p ON rp.permission_id = p.id
+             JOIN roles r ON rp.role_id = r.id 
+             WHERE rp.permission_id IN (${placeholders})
+             GROUP BY rp.permission_id, p.code`,
+            ids
+        );
+
+        if (usageCheck.length > 0) {
+            const usedPermissions = usageCheck.map(usage => ({
+                id: usage.permission_id,
+                code: usage.code,
+                usageCount: usage.usage_count,
+                roleNames: usage.role_names.split(',')
+            }));
+
+            return res.status(400).json({
+                success: false,
+                message: 'Một số quyền đang được sử dụng và không thể xóa',
+                data: {
+                    usedPermissions
+                }
+            });
+        }
+
+        // Start transaction
+        await connection.beginTransaction();
+
+        try {
+            const deletedPermissions = [];
+            let successCount = 0;
+            let failedCount = 0;
+
+            for (const permission of permissions) {
+                try {
+                    // Delete role_permissions first (should be none based on check above)
+                    await connection.execute(
+                        'DELETE FROM role_permissions WHERE permission_id = ?',
+                        [permission.id]
+                    );
+
+                    // Delete the permission
+                    const [deleteResult] = await connection.execute(
+                        'DELETE FROM permissions WHERE id = ?',
+                        [permission.id]
+                    );
+
+                    if (deleteResult.affectedRows > 0) {
+                        deletedPermissions.push({
+                            id: permission.id,
+                            module: permission.module,
+                            action: permission.action,
+                            code: permission.code,
+                            description: permission.description
+                        });
+                        successCount++;
+                    } else {
+                        failedCount++;
+                    }
+
+                } catch (error) {
+                    console.error(`Error deleting permission ${permission.id}:`, error);
+                    failedCount++;
+                }
+            }
+
+            if (successCount === 0) {
+                await connection.rollback();
+                return res.status(400).json({
+                    success: false,
+                    message: 'Không thể xóa bất kỳ quyền nào'
+                });
+            }
+
+            // Commit transaction
+            await connection.commit();
+
+            // Log bulk delete access
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'DELETE', 'PERMISSION_BULK', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                [
+                    req.user.userId,
+                    req.user.username,
+                    ids.join(','),
+                    JSON.stringify({ deletedCount: successCount, failedCount, deletedPermissions }),
+                    req.ip,
+                    req.get('User-Agent')
+                ]
+            );
+
+            res.status(200).json({
+                success: true,
+                message: `Xóa thành công ${successCount} quyền${failedCount > 0 ? `, ${failedCount} quyền thất bại` : ''}`,
+                data: {
+                    deletedCount: successCount,
+                    failedCount,
+                    deletedPermissions
+                }
+            });
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        }
+
+    } catch (error) {
+        console.error('Error bulk deleting permissions:', error);
+        
+        // Log failed access
+        await connection.execute(
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'DELETE', 'PERMISSION_BULK', 'FAILURE', ?, ?, ?, NOW())`,
+            [
+                req.user?.userId,
+                req.user?.username,
+                error.message,
+                req.ip,
+                req.get('User-Agent')
+            ]
+        );
+
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi xóa hàng loạt quyền',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+module.exports = { 
+    deletePermission, 
+    bulkDeletePermissions 
+};

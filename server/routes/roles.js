@@ -28,12 +28,14 @@ router.put('/:id/rolePermission', auth, updateRolePermissions);
 // Delete role (hard delete)
 router.delete('/:id', auth, deleteRole);
 
-// Get role permissions with remaining available permissions
+// Lấy thông tin role đó có những quyền nào ứng với module nào
 router.get('/:id/permissions', auth, getRolePermissionsWithRemaining);
 
-// Get all available permissions (grouped by module)
+// Lấy tất cả các quyền ứng với từng module
 router.get('/permissions/all', auth, getAllPermissions);
 
+
+// 3 cái cuối chưa test
 // Search roles with advanced filters
 router.get('/search/advanced', auth, searchRoles);
 

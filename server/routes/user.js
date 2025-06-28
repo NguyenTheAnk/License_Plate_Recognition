@@ -7,7 +7,7 @@ const { getUserById, getAllUsers, getUserProfile } = require('../controllers/Use
 const { updateUser, changePassword, updateUserStatus } = require('../controllers/User/updateUser');
 const { deleteUser, hardDeleteUser, restoreUser } = require('../controllers/User/deleteUser');
 const { searchUsers, searchUsersByCriteria, getUsersByRole, getUsersByPermission } = require('../controllers/User/searchUser');
-const { getUserStatistics, getUserDetailedView, getUsersWithRolePermissionSummary, getUserActivityReport, getOnlineUsers } = require('../controllers/User/viewUser');
+const { getUserStatistics, getUserDetailedView, getUsersWithRolePermissionSummary, getOnlineUsers } = require('../controllers/User/viewUser');
 
 // Import middlewares
 const auth = require('../middlewares/authMiddleware');
