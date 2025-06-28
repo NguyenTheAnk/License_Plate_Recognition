@@ -1,29 +1,54 @@
 const express = require('express');
 const router = express.Router();
 
-const auth = require('../middlewares/authMiddleware');
+// Import controllers
 const authController = require('../controllers/authController');
 
-// Routes không cần authentication
-// Chú ý: Frontend gọi api/auth/register và api/auth/login
-router.post('/register', authController.registerUser);
-router.post('/login', authController.loginUser);
+// Import middlewares
+const auth = require('../middlewares/authMiddleware');
 
-// Routes cần authentication
-router.get('/profile', auth, authController.getProfile);
-router.get('/permissions', auth, authController.getUserPermissions);
+// Import validators
+const { 
+    registerValidator, 
+    loginValidator, 
+    refreshTokenValidator,
+    resetPasswordValidator,
+    changeEmailValidator,
+    forgotPasswordValidator
+} = require('../helper/validator');
 
-// Test route
-router.get('/test', (req, res) => {
-  res.json({ 
-    message: 'Auth routes working!',
-    routes: [
-      'POST /api/auth/register',
-      'POST /api/auth/login', 
-      'GET /api/auth/profile',
-      'GET /api/auth/permissions'
-    ]
-  });
+// Authentication routes
+router.post('/register', registerValidator, authController.registerUser);
+router.post('/login', loginValidator, authController.loginUser);
+router.post('/refresh-token', refreshTokenValidator, authController.refreshToken);
+router.post('/logout', auth, authController.logoutUser);
+
+// Password management routes
+router.post('/forgot-password', forgotPasswordValidator, authController.resetPassword);
+router.post('/reset-password', resetPasswordValidator, authController.resetPassword);
+
+// Email management
+router.put('/change-email', auth, changeEmailValidator, authController.changeEmail);
+
+// Permission check
+router.get('/check-permission/:permissionCode', auth, authController.checkUserPermission);
+
+// User sessions
+router.get('/sessions', auth, authController.getUserSessions);
+
+// Email verification (for future use)
+router.get('/verify-email/:token', authController.verifyEmail);
+
+// 2FA management (for future use)
+router.post('/toggle-2fa', auth, authController.toggle2FA);
+
+// Health check
+router.get('/health', (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: 'Auth API is healthy',
+        timestamp: new Date().toISOString()
+    });
 });
 
 module.exports = router;

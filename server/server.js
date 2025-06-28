@@ -31,6 +31,7 @@ const accessControlRoutes = require('./routes/accessControl');
 const rolesRoutes = require('./routes/roles');
 const permissionsRoutes = require('./routes/permissions');
 const authRoute = require('./routes/authRoute');
+const userRoute = require('./routes/user');
 // Thêm các routes khác nếu có
 
 
@@ -69,6 +70,7 @@ app.use('/api/access-control', accessControlRoutes);
 app.use('/api/roles', rolesRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/auth', authRoute);
+app.use('/api/user', userRoute);
 // Đăng ký các routes khác nếu có
 
 server.listen(port, () => {
