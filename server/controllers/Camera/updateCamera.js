@@ -171,8 +171,8 @@ const updateCamera = async (req, res) => {
                 cameraId,
                 JSON.stringify(oldValues),
                 JSON.stringify(fieldsToUpdate),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 
@@ -188,18 +188,22 @@ const updateCamera = async (req, res) => {
         console.error('Error updating camera:', error);
         
         // Log failed access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'UPDATE', 'CAMERA', ?, 'FAILURE', ?, ?, ?, NOW())`,
-            [
-                req.user?.userId,
-                req.user?.username,
-                req.params.id,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'UPDATE', 'CAMERA', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                [
+                    req.user?.userId || null,
+                    req.user?.username || 'Unknown',
+                    req.params.id,
+                    error.message,
+                    req.ip || '127.0.0.1',
+                    req.get('User-Agent') || 'Unknown'
+                ]
+            );
+        } catch (logError) {
+            console.error('Error logging failed access:', logError);
+        }
 
         res.status(500).json({
             success: false,
@@ -264,8 +268,8 @@ const updateCameraStatus = async (req, res) => {
                 cameraId,
                 JSON.stringify({ status: oldStatus }),
                 JSON.stringify({ status }),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 
@@ -384,8 +388,8 @@ const bulkUpdateCameraStatus = async (req, res) => {
                 req.user.userId,
                 req.user.username,
                 JSON.stringify({ cameraIds, status, count: cameraIds.length }),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 

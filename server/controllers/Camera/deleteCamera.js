@@ -43,8 +43,8 @@ const deleteCamera = async (req, res) => {
                     req.user.username,
                     cameraId,
                     JSON.stringify(oldValues),
-                    req.ip,
-                    req.get('User-Agent')
+                    req.ip || '127.0.0.1',
+                    req.get('User-Agent') || 'Unknown'
                 ]
             );
 
@@ -71,8 +71,8 @@ const deleteCamera = async (req, res) => {
                 req.user.username,
                 cameraId,
                 JSON.stringify(oldValues),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 
@@ -90,18 +90,22 @@ const deleteCamera = async (req, res) => {
         console.error('Error deleting camera:', error);
         
         // Log failed access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'DELETE', 'CAMERA', ?, 'FAILURE', ?, ?, ?, NOW())`,
-            [
-                req.user?.userId,
-                req.user?.username,
-                req.params.id,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'DELETE', 'CAMERA', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                [
+                    req.user?.userId || null,
+                    req.user?.username || 'Unknown',
+                    req.params.id,
+                    error.message,
+                    req.ip || '127.0.0.1',
+                    req.get('User-Agent') || 'Unknown'
+                ]
+            );
+        } catch (logError) {
+            console.error('Error logging failed access:', logError);
+        }
 
         res.status(500).json({
             success: false,
@@ -160,8 +164,8 @@ const hardDeleteCamera = async (req, res) => {
                 req.user.username,
                 cameraId,
                 JSON.stringify(oldValues),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 
@@ -230,8 +234,8 @@ const restoreCamera = async (req, res) => {
                 req.user.username,
                 cameraId,
                 JSON.stringify({ is_active: 1, status: 'offline' }),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 
@@ -324,8 +328,8 @@ const bulkDeleteCameras = async (req, res) => {
                     hard_deleted: camerasWithoutDetections,
                     total_deleted: existingCameraIds.length
                 }),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 

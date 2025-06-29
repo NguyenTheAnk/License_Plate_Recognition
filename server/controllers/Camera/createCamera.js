@@ -104,9 +104,18 @@ const createCamera = async (req, res) => {
                 maintenance_schedule, status, is_active, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offline', 1, NOW(), NOW())`,
             [
-                name, code, url, location_id, direction, camera_type, camera_role,
-                monitoring_location_id, resolution, fps, installation_date, 
-                maintenance_schedule
+                name, 
+                code || null, 
+                url || null, 
+                location_id, 
+                direction, 
+                camera_type, 
+                camera_role || null,
+                monitoring_location_id || null, 
+                resolution || null, 
+                fps, 
+                installation_date || null, 
+                maintenance_schedule || null
             ]
         );
 
@@ -137,8 +146,8 @@ const createCamera = async (req, res) => {
                     name, code, url, location_id, direction, camera_type, 
                     camera_role, monitoring_location_id, resolution, fps
                 }),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                req.get('User-Agent') || 'Unknown'
             ]
         );
 
@@ -154,17 +163,21 @@ const createCamera = async (req, res) => {
         console.error('Error creating camera:', error);
         
         // Log failed access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'CREATE', 'CAMERA', 'FAILURE', ?, ?, ?, NOW())`,
-            [
-                req.user?.userId,
-                req.user?.username,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'CREATE', 'CAMERA', 'FAILURE', ?, ?, ?, NOW())`,
+                [
+                    req.user?.userId || null,
+                    req.user?.username || 'Unknown',
+                    error.message,
+                    req.ip || '127.0.0.1',
+                    req.get('User-Agent') || 'Unknown'
+                ]
+            );
+        } catch (logError) {
+            console.error('Error logging failed access:', logError);
+        }
 
         res.status(500).json({
             success: false,

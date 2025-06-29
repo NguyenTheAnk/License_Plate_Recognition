@@ -45,24 +45,28 @@ const getCameraById = async (req, res) => {
             WHERE camera_id = ? AND detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
         `, [cameraId]);
 
-        // Get camera maintenance logs (if any related table exists)
         const camera = {
             ...cameras[0],
             recent_stats: recentDetections[0]
         };
 
         // Log access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'CAMERA', ?, 'SUCCESS', ?, ?, NOW())`,
-            [
-                req.user.userId,
-                req.user.username,
-                cameraId,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'VIEW', 'CAMERA', ?, 'SUCCESS', ?, ?, NOW())`,
+                [
+                    req.user?.userId || null,
+                    req.user?.username || 'Anonymous',
+                    cameraId,
+                    req.ip || '127.0.0.1',
+                    req.get('User-Agent') || 'Unknown'
+                ]
+            );
+        } catch (logError) {
+            console.error('Error logging access:', logError);
+            // Continue without failing
+        }
 
         res.status(200).json({
             success: true,
@@ -97,58 +101,84 @@ const getAllCameras = async (req, res) => {
             direction
         } = req.query;
 
-        const offset = (page - 1) * limit;
+        // Convert to numbers early and validate
+        const pageNum = Math.max(1, parseInt(page) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20)); // Cap at 100
+        const offsetNum = (pageNum - 1) * limitNum;
         
-        // Build where conditions
+        // Build where conditions and parameters separately
         let whereConditions = ['c.is_active = 1'];
         let queryParams = [];
 
-        if (status) {
+        if (status && status.trim()) {
             whereConditions.push('c.status = ?');
-            queryParams.push(status);
+            queryParams.push(status.trim());
         }
 
-        if (location_id) {
+        if (location_id && location_id.trim()) {
             whereConditions.push('(c.location_id = ? OR c.monitoring_location_id = ?)');
-            queryParams.push(location_id, location_id);
+            queryParams.push(location_id.trim(), location_id.trim());
         }
 
-        if (camera_type) {
+        if (camera_type && camera_type.trim()) {
             whereConditions.push('c.camera_type = ?');
-            queryParams.push(camera_type);
+            queryParams.push(camera_type.trim());
         }
 
-        if (camera_role) {
+        if (camera_role && camera_role.trim()) {
             whereConditions.push('c.camera_role = ?');
-            queryParams.push(camera_role);
+            queryParams.push(camera_role.trim());
         }
 
-        if (direction) {
+        if (direction && direction.trim()) {
             whereConditions.push('c.direction = ?');
-            queryParams.push(direction);
+            queryParams.push(direction.trim());
         }
 
-        const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+        const whereClause = 'WHERE ' + whereConditions.join(' AND ');
 
         // Validate sort field
         const allowedSortFields = ['id', 'name', 'code', 'status', 'created_at', 'updated_at', 'last_heartbeat'];
         const sortField = allowedSortFields.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-        // Get total count
-        const [countResult] = await connection.execute(`
+        console.log('Debug - WHERE clause:', whereClause);
+        console.log('Debug - Query params:', queryParams);
+        console.log('Debug - Limit/Offset:', { limitNum, offsetNum });
+
+        // Get total count first
+        const countQuery = `
             SELECT COUNT(*) as total 
             FROM cameras c 
             JOIN locations l ON c.location_id = l.id 
             ${whereClause}
-        `, queryParams);
-
+        `;
+        
+        console.log('Debug - Count query:', countQuery);
+        const [countResult] = await connection.execute(countQuery, queryParams);
         const total = countResult[0].total;
 
-        // Get cameras with pagination
-        const [cameras] = await connection.execute(`
+        // Build main query with string interpolation for ORDER BY (safe since validated)
+        const mainQuery = `
             SELECT 
-                c.*,
+                c.id,
+                c.name,
+                c.code,
+                c.url,
+                c.location_id,
+                c.direction,
+                c.camera_type,
+                c.camera_role,
+                c.monitoring_location_id,
+                c.resolution,
+                c.fps,
+                c.installation_date,
+                c.maintenance_schedule,
+                c.status,
+                c.last_heartbeat,
+                c.is_active,
+                c.created_at,
+                c.updated_at,
                 l.name as location_name,
                 l.address as location_address,
                 l.zone_type as location_zone_type,
@@ -160,46 +190,97 @@ const getAllCameras = async (req, res) => {
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
-                END as connection_status,
-                (SELECT COUNT(*) FROM license_plate_detections lpd 
-                 WHERE lpd.camera_id = c.id AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) as detections_24h
+                END as connection_status
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             ${whereClause}
             ORDER BY c.${sortField} ${sortOrder}
-            LIMIT ? OFFSET ?
-        `, [...queryParams, parseInt(limit), offset]);
+            LIMIT ${limitNum} OFFSET ${offsetNum}
+        `;
 
-        // Log access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'CAMERAS', 'SUCCESS', ?, ?, NOW())`,
-            [
-                req.user.userId,
-                req.user.username,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        console.log('Debug - Main query:', mainQuery);
+        
+        // Execute main query with only the WHERE clause parameters
+        const [cameras] = await connection.execute(mainQuery, queryParams);
+
+        // Get detection counts separately
+        const cameraIds = cameras.map(camera => camera.id);
+        let detectionCounts = {};
+        
+        if (cameraIds.length > 0) {
+            // Use IN clause with proper parameter binding
+            const placeholders = cameraIds.map(() => '?').join(',');
+            const detectionQuery = `
+                SELECT 
+                    camera_id, 
+                    COUNT(*) as count 
+                FROM license_plate_detections 
+                WHERE camera_id IN (${placeholders}) 
+                AND detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                GROUP BY camera_id
+            `;
+            
+            try {
+                const [detections] = await connection.execute(detectionQuery, cameraIds);
+                detections.forEach(detection => {
+                    detectionCounts[detection.camera_id] = detection.count;
+                });
+            } catch (detectionError) {
+                console.error('Error getting detection counts:', detectionError);
+                // Continue without detection counts
+            }
+        }
+
+        // Add detection counts to cameras
+        const camerasWithDetections = cameras.map(camera => ({
+            ...camera,
+            detections_24h: detectionCounts[camera.id] || 0
+        }));
+
+        // Log access (simplified)
+        try {
+            await connection.execute(
+                'INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
+                [
+                    req.user?.userId || null,
+                    req.user?.username || 'Anonymous',
+                    'VIEW',
+                    'CAMERAS',
+                    'SUCCESS',
+                    req.ip || '127.0.0.1',
+                    req.get('User-Agent') || 'Unknown'
+                ]
+            );
+        } catch (logError) {
+            console.error('Error logging access:', logError);
+        }
 
         res.status(200).json({
             success: true,
             data: {
-                cameras: cameras,
+                cameras: camerasWithDetections,
                 pagination: {
-                    current_page: parseInt(page),
-                    per_page: parseInt(limit),
+                    current_page: pageNum,
+                    per_page: limitNum,
                     total: total,
-                    total_pages: Math.ceil(total / limit),
-                    has_next: page * limit < total,
-                    has_prev: page > 1
+                    total_pages: Math.ceil(total / limitNum),
+                    has_next: pageNum * limitNum < total,
+                    has_prev: pageNum > 1
                 }
             }
         });
 
     } catch (error) {
         console.error('Error getting cameras:', error);
+        console.error('Error details:', {
+            message: error.message,
+            code: error.code,
+            errno: error.errno,
+            sqlState: error.sqlState,
+            sql: error.sql
+        });
+        
         res.status(500).json({
             success: false,
             message: 'Lỗi khi lấy danh sách camera',
@@ -207,7 +288,6 @@ const getAllCameras = async (req, res) => {
         });
     }
 };
-
 const getCamerasByLocation = async (req, res) => {
     const connection = await db.promise();
     

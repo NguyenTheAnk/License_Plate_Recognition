@@ -32,6 +32,8 @@ const rolesRoutes = require('./routes/roles');
 const permissionsRoutes = require('./routes/permissions');
 const authRoute = require('./routes/authRoute');
 const userRoute = require('./routes/user');
+const cameraRoute = require('./routes/camera');
+const locationRoute = require('./routes/location');
 // Thêm các routes khác nếu có
 
 
@@ -71,6 +73,8 @@ app.use('/api/roles', rolesRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/auth', authRoute);
 app.use('/api/user', userRoute);
+app.use('/api/camera', cameraRoute);
+app.use('/api/location', locationRoute);
 // Đăng ký các routes khác nếu có
 
 server.listen(port, () => {
