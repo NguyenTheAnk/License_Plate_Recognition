@@ -55,8 +55,8 @@ const createCamera = async (req, res) => {
             });
         }
 
-        // Check monitoring location if provided
-        if (monitoring_location_id) {
+        // Check monitoring location if provided (only if it's not null/undefined)
+        if (monitoring_location_id !== null && monitoring_location_id !== undefined && monitoring_location_id !== '') {
             const [monitoringLocation] = await connection.execute(
                 'SELECT id FROM locations WHERE id = ? AND is_active = 1',
                 [monitoring_location_id]
@@ -96,6 +96,9 @@ const createCamera = async (req, res) => {
             });
         }
 
+        // Normalize monitoring_location_id (convert empty string to null)
+        const normalizedMonitoringLocationId = monitoring_location_id === '' ? null : monitoring_location_id;
+
         // Create camera
         const [cameraResult] = await connection.execute(
             `INSERT INTO cameras (
@@ -111,7 +114,7 @@ const createCamera = async (req, res) => {
                 direction, 
                 camera_type, 
                 camera_role || null,
-                monitoring_location_id || null, 
+                normalizedMonitoringLocationId, 
                 resolution || null, 
                 fps, 
                 installation_date || null, 
@@ -144,7 +147,7 @@ const createCamera = async (req, res) => {
                 cameraId.toString(),
                 JSON.stringify({
                     name, code, url, location_id, direction, camera_type, 
-                    camera_role, monitoring_location_id, resolution, fps
+                    camera_role, monitoring_location_id: normalizedMonitoringLocationId, resolution, fps
                 }),
                 req.ip || '127.0.0.1',
                 req.get('User-Agent') || 'Unknown'

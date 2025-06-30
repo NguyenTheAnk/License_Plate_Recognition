@@ -66,11 +66,16 @@ const updateCamera = async (req, res) => {
             }
         }
 
-        // Check monitoring location if provided
-        if (monitoring_location_id) {
+        // Normalize monitoring_location_id (convert empty string to null)
+        const normalizedMonitoringLocationId = monitoring_location_id === '' || monitoring_location_id === null || monitoring_location_id === undefined 
+            ? null 
+            : monitoring_location_id;
+
+        // Check monitoring location if provided (only if it's not null after normalization)
+        if (normalizedMonitoringLocationId !== null) {
             const [monitoringLocation] = await connection.execute(
                 'SELECT id FROM locations WHERE id = ? AND is_active = 1',
-                [monitoring_location_id]
+                [normalizedMonitoringLocationId]
             );
 
             if (monitoringLocation.length === 0) {
@@ -119,10 +124,21 @@ const updateCamera = async (req, res) => {
         const updateFields = [];
         const updateValues = [];
 
+        // Prepare fields with normalized values
         const fieldsToUpdate = {
-            name, code, url, location_id, direction, camera_type, camera_role,
-            monitoring_location_id, resolution, fps, installation_date, 
-            maintenance_schedule, status
+            name, 
+            code, 
+            url, 
+            location_id, 
+            direction, 
+            camera_type, 
+            camera_role,
+            monitoring_location_id: normalizedMonitoringLocationId, // Use normalized value
+            resolution, 
+            fps, 
+            installation_date, 
+            maintenance_schedule, 
+            status
         };
 
         Object.entries(fieldsToUpdate).forEach(([key, value]) => {
@@ -258,16 +274,16 @@ const updateCameraStatus = async (req, res) => {
             );
         }
 
-        // Log access
+        // Log access - Sử dụng 'UPDATE' thay vì 'UPDATE_STATUS'
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'UPDATE_STATUS', 'CAMERA', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+             VALUES (?, ?, 'UPDATE', 'CAMERA', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username,
                 cameraId,
-                JSON.stringify({ status: oldStatus }),
-                JSON.stringify({ status }),
+                JSON.stringify({ status: oldStatus, action: 'status_update' }), // Thêm thông tin chi tiết vào old_values
+                JSON.stringify({ status, action: 'status_update' }), // Thêm thông tin chi tiết vào new_values
                 req.ip || '127.0.0.1',
                 req.get('User-Agent') || 'Unknown'
             ]
@@ -285,6 +301,25 @@ const updateCameraStatus = async (req, res) => {
 
     } catch (error) {
         console.error('Error updating camera status:', error);
+        
+        // Log failed access
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'UPDATE', 'CAMERA', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                [
+                    req.user?.userId || null,
+                    req.user?.username || 'Unknown',
+                    cameraId,
+                    error.message,
+                    req.ip || '127.0.0.1',
+                    req.get('User-Agent') || 'Unknown'
+                ]
+            );
+        } catch (logError) {
+            console.error('Error logging failed access:', logError);
+        }
+
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật trạng thái camera',
@@ -293,49 +328,6 @@ const updateCameraStatus = async (req, res) => {
     }
 };
 
-const updateCameraHeartbeat = async (req, res) => {
-    const connection = await db.promise();
-    
-    try {
-        const cameraId = req.params.id;
-
-        // Check if camera exists
-        const [existingCamera] = await connection.execute(
-            'SELECT id, name FROM cameras WHERE id = ? AND is_active = 1',
-            [cameraId]
-        );
-
-        if (existingCamera.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Không tìm thấy camera'
-            });
-        }
-
-        // Update heartbeat and status
-        await connection.execute(
-            'UPDATE cameras SET last_heartbeat = NOW(), status = "online", updated_at = NOW() WHERE id = ?',
-            [cameraId]
-        );
-
-        res.status(200).json({
-            success: true,
-            message: 'Cập nhật heartbeat thành công',
-            data: {
-                camera_id: parseInt(cameraId),
-                last_heartbeat: new Date().toISOString()
-            }
-        });
-
-    } catch (error) {
-        console.error('Error updating camera heartbeat:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi khi cập nhật heartbeat camera',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
 
 const bulkUpdateCameraStatus = async (req, res) => {
     const connection = await db.promise();
@@ -415,6 +407,5 @@ const bulkUpdateCameraStatus = async (req, res) => {
 module.exports = { 
     updateCamera, 
     updateCameraStatus, 
-    updateCameraHeartbeat, 
     bulkUpdateCameraStatus 
 };

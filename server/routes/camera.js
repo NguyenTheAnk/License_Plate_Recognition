@@ -4,10 +4,10 @@ const router = express.Router();
 // Import controllers
 const { createCamera } = require('../controllers/Camera/createCamera');
 const { getCameraById, getAllCameras, getCamerasByLocation, getCameraStatistics } = require('../controllers/Camera/getCamera');
-const { updateCamera, updateCameraStatus, updateCameraHeartbeat, bulkUpdateCameraStatus } = require('../controllers/Camera/updateCamera');
-const { deleteCamera, hardDeleteCamera, restoreCamera, bulkDeleteCameras } = require('../controllers/Camera/deleteCamera');
+const { updateCamera, updateCameraStatus, bulkUpdateCameraStatus } = require('../controllers/Camera/updateCamera');
+const { deleteCamera, bulkDeleteCameras } = require('../controllers/Camera/deleteCamera');
 const { searchCameras, searchCamerasByCriteria, getCamerasByStatus, getCamerasByType, getCamerasByRole, getOfflineCameras } = require('../controllers/Camera/searchCamera');
-const { getCameraDetailedView, getCameraHealthReport, getCameraPerformanceReport, getCameraComparisonReport } = require('../controllers/Camera/viewCamera');
+const { getCameraDetailedView, getCameraHealthReport } = require('../controllers/Camera/viewCamera');
 
 // Import middlewares
 const auth = require('../middlewares/authMiddleware');
@@ -16,20 +16,18 @@ const { onlyAdminAccess } = require('../middlewares/adminMiddleware');
 const {
     createCameraValidator,
     updateCameraValidator,
-    deleteCameraValidator,
     updateStatusValidator,
     bulkOperationValidator,
     bulkStatusUpdateValidator,
     searchValidator,
+    deleteCameraValidator,
     searchCriteriaValidator,
-    comparisonReportValidator,
     locationParamValidator,
     statusParamValidator,
     typeParamValidator,
     roleParamValidator,
     offlineCamerasValidator,
     healthReportValidator,
-    performanceReportValidator
 } = require('../helper/cameraValidator');
 
 // Camera CRUD routes
@@ -59,19 +57,6 @@ router.get('/health-report',
     getCameraHealthReport
 );
 
-router.get('/performance-report', 
-    auth, 
-    // checkPermission('cameras.view'), 
-    performanceReportValidator,
-    getCameraPerformanceReport
-);
-
-router.post('/comparison-report', 
-    auth, 
-    // checkPermission('cameras.view'), 
-    comparisonReportValidator,
-    getCameraComparisonReport
-);
 
 router.get('/:id', 
     auth, 
@@ -101,12 +86,6 @@ router.put('/:id/status',
     updateCameraStatus
 );
 
-router.put('/:id/heartbeat', 
-    auth, 
-    // checkPermission('cameras.update'), 
-    deleteCameraValidator,
-    updateCameraHeartbeat
-);
 
 router.delete('/:id', 
     auth, 
@@ -115,20 +94,7 @@ router.delete('/:id',
     deleteCamera
 );
 
-router.delete('/:id/hard', 
-    auth, 
-    // onlyAdminAccess, 
-    // checkPermission('cameras.delete'), 
-    deleteCameraValidator,
-    hardDeleteCamera
-);
 
-router.put('/:id/restore', 
-    auth, 
-    // checkPermission('cameras.update'), 
-    deleteCameraValidator,
-    restoreCamera
-);
 
 // Search and filter routes
 router.get('/search/cameras', 

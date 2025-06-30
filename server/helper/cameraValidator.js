@@ -61,11 +61,6 @@ const createCameraValidator = [
         .isIn(['entry', 'exit', 'internal', 'overview'])
         .withMessage('Vai trò camera không hợp lệ'),
     
-    body('monitoring_location_id')
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage('ID vị trí giám sát phải là số nguyên dương'),
-    
     body('resolution')
         .optional()
         .matches(/^\d+x\d+$/)
@@ -136,11 +131,6 @@ const updateCameraValidator = [
         .optional()
         .isIn(['entry', 'exit', 'internal', 'overview'])
         .withMessage('Vai trò camera không hợp lệ'),
-    
-    body('monitoring_location_id')
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage('ID vị trí giám sát phải là số nguyên dương'),
     
     body('resolution')
         .optional()
