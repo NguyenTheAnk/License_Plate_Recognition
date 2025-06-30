@@ -25,15 +25,18 @@ import {
   Lock,
   Email,
   CheckCircle,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  Phone
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { postData } from '../utils/auth.js';
 
 function Register() {
+  const [name, setName] = useState(''); // Thêm field name
   const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState(''); // Thêm field phone
+  const [password, setPassword] = useState('');
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -104,7 +107,28 @@ function Register() {
     setError('');
     setSuccess('');
     
+    // Validate required fields
+    if (!name || !username || !email || !phone || !password) {
+      setError('Vui lòng điền đầy đủ thông tin!');
+      return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError('Định dạng email không hợp lệ!');
+      return;
+    }
+
+    // Validate phone format (Vietnam phone number)
+    const phoneRegex = /^(\+84|84|0)(3[2-9]|5[6|8|9]|7[0|6-9]|8[1-6|8|9]|9[0-4|6-9])[0-9]{7}$/;
+    if (!phoneRegex.test(phone)) {
+      setError('Số điện thoại không hợp lệ!');
+      return;
+    }
+    
     if (!validatePassword(password)) {
+      setError('Mật khẩu chưa đáp ứng yêu cầu!');
       return;
     }
     
@@ -112,8 +136,10 @@ function Register() {
       setLoading(true);
       
       const requestData = { 
+        name,
         username,
         email,
+        phone,
         password
       };
       
@@ -126,13 +152,31 @@ function Register() {
       
       if (response.success) {
         setSuccess('Đăng ký thành công! Chuyển hướng đến trang đăng nhập...');
-        setTimeout(() => navigate('/login'), 2000);
+        
+        // Lưu token nếu backend trả về (auto login sau khi register)
+        if (response.data && response.data.token) {
+          localStorage.setItem('token', response.data.token);
+          if (response.data.refreshToken) {
+            localStorage.setItem('refreshToken', response.data.refreshToken);
+          }
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+          
+          // Có thể redirect về home thay vì login
+          setTimeout(() => navigate('/'), 2000);
+        } else {
+          // Nếu không auto login thì redirect về login
+          setTimeout(() => navigate('/login'), 2000);
+        }
       } else {
-        setError(response.msg || 'Đăng ký thất bại!');
+        setError(response.message || 'Đăng ký thất bại!');
       }
     } catch (err) {
       console.error('Registration error:', err);
-      setError(err.message || 'Đăng ký thất bại! Vui lòng thử lại.');
+      if (err.response && err.response.data) {
+        setError(err.response.data.message || 'Đăng ký thất bại!');
+      } else {
+        setError(err.message || 'Đăng ký thất bại! Vui lòng thử lại.');
+      }
     } finally {
       setLoading(false);
     }
@@ -239,6 +283,40 @@ function Register() {
 
             {/* Form */}
             <Box component="form" onSubmit={handleSubmit}>
+              {/* Name Field */}
+              <TextField
+                label="Họ và tên"
+                fullWidth
+                margin="normal"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                disabled={loading}
+                required
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Person color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{
+                  mb: 2,
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 3,
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                    },
+                    '&.Mui-focused': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 4px 12px rgba(255, 107, 107, 0.3)'
+                    }
+                  }
+                }}
+              />
+
+              {/* Username Field */}
               <TextField
                 label="Tên đăng nhập"
                 fullWidth
@@ -271,6 +349,7 @@ function Register() {
                 }}
               />
 
+              {/* Email Field */}
               <TextField
                 label="Email"
                 type="email"
@@ -304,6 +383,41 @@ function Register() {
                 }}
               />
 
+              {/* Phone Field */}
+              <TextField
+                label="Số điện thoại"
+                fullWidth
+                margin="normal"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                disabled={loading}
+                required
+                placeholder="0123456789"
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Phone color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{
+                  mb: 2,
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 3,
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                    },
+                    '&.Mui-focused': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 4px 12px rgba(69, 183, 209, 0.3)'
+                    }
+                  }
+                }}
+              />
+
+              {/* Password Field */}
               <TextField
                 label="Mật khẩu"
                 type={showPassword ? 'text' : 'password'}

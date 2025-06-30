@@ -5,7 +5,7 @@ const router = express.Router();
 const { createUser } = require('../controllers/User/createUser');
 const { getUserById, getAllUsers, getUserProfile } = require('../controllers/User/getUser');
 const { updateUser, changePassword, updateUserStatus } = require('../controllers/User/updateUser');
-const { deleteUser, hardDeleteUser, restoreUser } = require('../controllers/User/deleteUser');
+const { deleteUser} = require('../controllers/User/deleteUser');
 const { searchUsers, searchUsersByCriteria, getUsersByRole, getUsersByPermission } = require('../controllers/User/searchUser');
 const { getUserStatistics, getUserDetailedView, getUsersWithRolePermissionSummary, getOnlineUsers } = require('../controllers/User/viewUser');
 
@@ -13,16 +13,16 @@ const { getUserStatistics, getUserDetailedView, getUsersWithRolePermissionSummar
 const auth = require('../middlewares/authMiddleware');
 const checkPermission = require('../middlewares/checkPermission');
 const { onlyAdminAccess } = require('../middlewares/adminMiddleware');
-const { registerValidator, loginValidator, createUserValidator, updateUserValidator, deleteUserValidator } = require('../helper/validator');
+const {createUserValidator, updateUserValidator, deleteUserValidator } = require('../helper/validator');
 
 // Import auth controller for login/register
 const authController = require('../controllers/authController');
 
 // Authentication routes
-router.post('/register', registerValidator, authController.registerUser);
-router.post('/login', loginValidator, authController.loginUser);
-router.post('/refresh-token', authController.refreshToken);
-router.post('/logout', auth, authController.logoutUser);
+// router.post('/register', registerValidator, authController.registerUser);
+// router.post('/login', loginValidator, authController.loginUser);
+// router.post('/refresh-token', authController.refreshToken);
+// router.post('/logout', auth, authController.logoutUser);
 
 // User profile routes
 router.get('/profile', auth, getUserProfile);

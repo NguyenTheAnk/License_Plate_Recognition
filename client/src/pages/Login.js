@@ -27,7 +27,7 @@ import { useNavigate } from 'react-router-dom';
 import { postData } from '../utils/auth.js';
 
 function Login({ onLogin }) {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState(''); // Đổi từ username thành email
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -45,27 +45,44 @@ function Login({ onLogin }) {
     setError('');
     setLoading(true);
     
-    if (!username || !password) {
+    if (!email || !password) {
       setError('Vui lòng nhập đầy đủ thông tin đăng nhập!');
+      setLoading(false);
+      return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError('Vui lòng nhập đúng định dạng email!');
       setLoading(false);
       return;
     }
 
     try {
       console.log('=== LOGIN FRONTEND DEBUG ===');
-      console.log('Sending login data:', { username, password: '[HIDDEN]' });
+      console.log('Sending login data:', { email, password: '[HIDDEN]' });
       
       const response = await postData('api/auth/login', { 
-        username, 
+        email, 
         password 
       });
       
       console.log('Login response:', response);
       
       if (response.success && response.data) {
-        const { token, user } = response.data;
-        localStorage.setItem('token', token);
+        const { token, refreshToken, user } = response.data;
         
+        // Lưu token và refresh token
+        localStorage.setItem('token', token);
+        if (refreshToken) {
+          localStorage.setItem('refreshToken', refreshToken);
+        }
+        
+        // Lưu thông tin user
+        localStorage.setItem('user', JSON.stringify(user));
+        
+        // Kiểm tra nếu mật khẩu hết hạn (nếu có field này trong response)
         if (user.passwordExpired) {
           localStorage.setItem('passwordExpired', 'true');
           onLogin(user);
@@ -76,13 +93,13 @@ function Login({ onLogin }) {
           navigate('/');
         }
       } else {
-        setError(response.error || response.msg || 'Đăng nhập thất bại!');
+        setError(response.message || 'Đăng nhập thất bại!');
       }
       
     } catch (err) {
       console.error('Login error:', err);
       if (err.response && err.response.data) {
-        setError(err.response.data.error || err.response.data.msg || 'Sai tài khoản hoặc mật khẩu!');
+        setError(err.response.data.message || 'Email hoặc mật khẩu không chính xác!');
       } else if (err.message) {
         setError(err.message);
       } else {
@@ -184,17 +201,18 @@ function Login({ onLogin }) {
             {/* Login Form */}
             <Box component="form" onSubmit={handleSubmit}>
               <TextField
-                label="Tên đăng nhập hoặc Email"
+                label="Email"
+                type="email"
                 fullWidth
                 margin="normal"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
+                value={email}
+                onChange={e => setEmail(e.target.value)}
                 disabled={loading}
                 required
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <Person color="action" />
+                      <Email color="action" />
                     </InputAdornment>
                   ),
                 }}
