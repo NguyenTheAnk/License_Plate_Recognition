@@ -869,6 +869,7 @@ const UsersManagement = () => {
   const [userData, setUserData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [totalUsers, setTotalUsers] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
@@ -896,7 +897,7 @@ const UsersManagement = () => {
   useEffect(() => {
     checkPermissions();
     fetchUsersWithFilters();
-  }, [currentPage]);
+  }, [currentPage, pageSize]);
 
   // useEffect for search and filters with debounce
   useEffect(() => {
@@ -1050,7 +1051,7 @@ const UsersManagement = () => {
       const queryParams = new URLSearchParams();
       
       queryParams.append('page', currentPage.toString());
-      queryParams.append('limit', '10');
+      queryParams.append('limit', pageSize.toString());
       
       if (searchTerm.trim()) {
         queryParams.append('search', searchTerm.trim());
@@ -1108,6 +1109,33 @@ const UsersManagement = () => {
       default: return status;
     }
   };
+
+  // Thêm hàm tạo mảng trang với dấu ...
+  function getPaginationItems(current, total) {
+    const delta = 1;
+    const range = [];
+    const rangeWithDots = [];
+    let l;
+
+    for (let i = 1; i <= total; i++) {
+      if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
+        range.push(i);
+      }
+    }
+
+    for (let i of range) {
+      if (l) {
+        if (i - l === 2) {
+          rangeWithDots.push(l + 1);
+        } else if (i - l > 2) {
+          rangeWithDots.push('...');
+        }
+      }
+      rangeWithDots.push(i);
+      l = i;
+    }
+    return rangeWithDots;
+  }
 
   return (
     <Box sx={{ 
@@ -1439,7 +1467,7 @@ const UsersManagement = () => {
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" sx={{ fontWeight: 600, color: '#1976d2' }}>
-                          #{index + 1 + (currentPage - 1) * 10}
+                          #{index + 1 + (currentPage - 1) * pageSize}
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -1589,34 +1617,84 @@ const UsersManagement = () => {
           </TableContainer>
           
           {/* Enhanced Pagination */}
+          <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
+            Hiển thị {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, totalUsers)} của {totalUsers} người dùng
+          </Typography>
           <Box display="flex" justifyContent="space-between" alignItems="center" p={3} sx={{
             borderTop: '1px solid rgba(0, 0, 0, 0.1)',
             background: 'rgba(0, 0, 0, 0.02)',
           }}>
-            <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500 }}>
-              Hiển thị {((currentPage - 1) * 10) + 1} - {Math.min(currentPage * 10, totalUsers)} của {totalUsers} người dùng
-            </Typography>
-            <Pagination
-              count={totalPages}
-              page={currentPage}
-              onChange={(event, value) => setCurrentPage(value)}
-              color="primary"
-              showFirstButton
-              showLastButton
-              sx={{
-                '& .MuiPaginationItem-root': {
-                  borderRadius: 2,
-                  fontWeight: 600,
-                  '&.Mui-selected': {
-                    background: '#1976d2',
-                    color: 'white',
-                    '&:hover': {
-                      background: '#1565c0',
-                    },
-                  },
-                },
-              }}
-            />
+            {/* Page size selector bottom left */}
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel id="per-page-label">Bản ghi/trang</InputLabel>
+              <Select
+                labelId="per-page-label"
+                value={pageSize}
+                label="Bản ghi/trang"
+                onChange={e => {
+                  const value = Number(e.target.value);
+                  setPageSize(value);
+                  setCurrentPage(1);
+                }}
+              >
+                {[5, 10, 20, 50, 100].map(size => (
+                  <MenuItem key={size} value={size}>{size}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {/* Pagination right */}
+            <Box display="flex" alignItems="center" gap={1}>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(1)}
+                sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+              >
+                {'<<'}
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(prev => prev - 1)}
+                sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+              >
+                {'<'}
+              </Button>
+              {getPaginationItems(currentPage, totalPages).map((item, idx) =>
+                item === '...'
+                  ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
+                  : <Button
+                      key={item}
+                      variant={item === currentPage ? 'contained' : 'outlined'}
+                      color={item === currentPage ? 'primary' : 'inherit'}
+                      size="small"
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25, ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' }) }}
+                      onClick={() => setCurrentPage(item)}
+                    >
+                      {item}
+                    </Button>
+              )}
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(prev => prev + 1)}
+                sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+              >
+                {'>'}
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(totalPages)}
+                sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+              >
+                {'>>'}
+              </Button>
+            </Box>
           </Box>
         </Card>
       </Box>

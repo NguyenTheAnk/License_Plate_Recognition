@@ -20,12 +20,27 @@ const handleApiError = (error) => {
     return error;
 };
 
+// Thêm hàm buildQueryString để nối params vào URL
+function buildQueryString(params) {
+    if (!params) return '';
+    const esc = encodeURIComponent;
+    return (
+        '?' +
+        Object.keys(params)
+            .map(k => esc(k) + '=' + esc(params[k]))
+            .join('&')
+    );
+}
+
 // Hàm lấy dữ liệu từ API (GET request) - Updated version
-export const fetchDataFromAPI = async (url, token = null) => {
+export const fetchDataFromAPI = async (url, token = null, options = {}) => {
     try {
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        
-        const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, {
+        let fullUrl = `${API_BASE_URL}/${cleanUrl(url)}`;
+        if (options.params) {
+            fullUrl += buildQueryString(options.params);
+        }
+        const response = await fetch(fullUrl, {
             method: 'GET',
             headers
         });

@@ -50,7 +50,7 @@ const createPermission = async (req, res) => {
         // Check if permission code already exists
         const [existingPermissions] = await connection.execute(
             'SELECT id FROM permissions WHERE code = ?',
-            [code === undefined ? null : code]
+            [code == null || code === '' ? null : code]
         );
 
         if (existingPermissions.length > 0) {
@@ -63,7 +63,7 @@ const createPermission = async (req, res) => {
         // Check if module.action combination already exists (additional safety check)
         const [existingCombination] = await connection.execute(
             'SELECT id FROM permissions WHERE module = ? AND action = ?',
-            [module === undefined ? null : module, action === undefined ? null : action]
+            [module == null || module === '' ? null : module, action == null || action === '' ? null : action]
         );
 
         if (existingCombination.length > 0) {
@@ -77,7 +77,13 @@ const createPermission = async (req, res) => {
         const [permissionResult] = await connection.execute(
             `INSERT INTO permissions (module, action, code, description, is_active, created_at, updated_at) 
              VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-            [module === undefined ? null : module, action === undefined ? null : action, code === undefined ? null : code, description === undefined ? null : description, isActive ? 1 : 0]
+            [
+                module == null || module === '' ? null : module,
+                action == null || action === '' ? null : action,
+                code == null || code === '' ? null : code,
+                description == null ? null : description,
+                isActive ? 1 : 0
+            ]
         );
 
         const permissionId = permissionResult.insertId;
@@ -95,7 +101,7 @@ const createPermission = async (req, res) => {
                 updated_at
             FROM permissions 
             WHERE id = ?`,
-            [permissionId === undefined ? null : permissionId]
+            [permissionId == null ? null : permissionId]
         );
 
         // Log access
@@ -103,12 +109,12 @@ const createPermission = async (req, res) => {
             `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, new_values, status, ip_address, user_agent, created_at)
              VALUES (?, ?, 'CREATE', 'PERMISSION', ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
-                req.user.userId,
-                req.user.username,
-                permissionId.toString(),
+                req.user?.userId || null,
+                req.user?.username || null,
+                permissionId ? permissionId.toString() : null,
                 JSON.stringify({ module, action, code, description, isActive }),
-                req.ip,
-                req.get('User-Agent')
+                req.ip || '127.0.0.1',
+                (req.get('User-Agent') || '').substring(0, 255)
             ]
         );
 
@@ -128,11 +134,11 @@ const createPermission = async (req, res) => {
             `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
              VALUES (?, ?, 'CREATE', 'PERMISSION', 'FAILURE', ?, ?, ?, NOW())`,
             [
-                req.user?.userId,
-                req.user?.username,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
+                req.user?.userId || null,
+                req.user?.username || null,
+                (error.message || 'Unknown error').substring(0, 255),
+                req.ip || '127.0.0.1',
+                (req.get('User-Agent') || '').substring(0, 255)
             ]
         );
 

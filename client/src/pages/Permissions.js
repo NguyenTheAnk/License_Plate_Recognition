@@ -5,8 +5,6 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
   ExpandMore as ExpandMoreIcon,
-  ViewModule as ViewModuleIcon,
-  TableChart as TableChartIcon,
   Security as SecurityIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
@@ -31,18 +29,12 @@ import {
   DialogContent, 
   DialogActions,
   Card,
-  CardContent,
-  CardActions,
   Typography,
   Chip,
   Box,
   IconButton,
-  Tooltip,
-  Badge,
   Grid,
-  Divider,
   Avatar,
-  ButtonGroup,
   Fab,
   Collapse,
   Breadcrumbs,
@@ -51,164 +43,24 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow,
-  TablePagination
+  TableRow
 } from '@mui/material';
 import {
   FaSave,
   FaTimes,
   FaLock,
-  FaUnlock,
-  FaUsers,
   FaCog,
   FaShieldAlt
 } from 'react-icons/fa';
 import {
-  BiSolidTrashAlt,
-  BiRefresh
+  BiSolidTrashAlt
 } from 'react-icons/bi';
+import { fetchDataFromAPI, postData, editData, deleteData, handleErrorResponse } from '../utils/auth';
+
 // Mock localStorage for demo purposes
 if (typeof window !== 'undefined' && !localStorage.getItem('token')) {
   localStorage.setItem('token', 'mock-jwt-token-12345');
 }
-
-// Mock API functions - replace with your actual API utilities
-const fetchDataFromAPI = async (url, token, options = {}) => {
-  // Mock implementation - replace with your actual API call
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      let permissions = [
-        { id: 1, module: 'users', action: 'create', code: 'users.create', description: 'Tạo người dùng mới', is_active: true, granted_roles_count: 3 },
-        { id: 2, module: 'users', action: 'view', code: 'users.view', description: 'Xem danh sách người dùng', is_active: true, granted_roles_count: 5 },
-        { id: 3, module: 'users', action: 'update', code: 'users.update', description: 'Cập nhật thông tin người dùng', is_active: true, granted_roles_count: 2 },
-        { id: 4, module: 'users', action: 'delete', code: 'users.delete', description: 'Xóa người dùng', is_active: false, granted_roles_count: 1 },
-        { id: 5, module: 'roles', action: 'create', code: 'roles.create', description: 'Tạo vai trò mới', is_active: true, granted_roles_count: 2 },
-        { id: 6, module: 'roles', action: 'view', code: 'roles.view', description: 'Xem danh sách vai trò', is_active: true, granted_roles_count: 4 },
-        { id: 7, module: 'permissions', action: 'create', code: 'permissions.create', description: 'Tạo quyền mới', is_active: true, granted_roles_count: 1 },
-        { id: 8, module: 'permissions', action: 'view', code: 'permissions.view', description: 'Xem danh sách quyền', is_active: true, granted_roles_count: 3 },
-        { id: 9, module: 'products', action: 'create', code: 'products.create', description: 'Tạo sản phẩm mới', is_active: true, granted_roles_count: 2 },
-        { id: 10, module: 'products', action: 'view', code: 'products.view', description: 'Xem danh sách sản phẩm', is_active: false, granted_roles_count: 3 },
-        { id: 11, module: 'reports', action: 'create', code: 'reports.create', description: 'Tạo báo cáo', is_active: true, granted_roles_count: 1 },
-        { id: 12, module: 'reports', action: 'view', code: 'reports.view', description: 'Xem báo cáo', is_active: true, granted_roles_count: 4 },
-        { id: 13, module: 'settings', action: 'update', code: 'settings.update', description: 'Cập nhật cài đặt hệ thống', is_active: false, granted_roles_count: 1 },
-        { id: 14, module: 'dashboard', action: 'view', code: 'dashboard.view', description: 'Xem dashboard', is_active: true, granted_roles_count: 6 },
-      ];
-
-      // Apply filters if provided
-      const filters = options.params || {};
-      
-      if (filters.module) {
-        permissions = permissions.filter(p => p.module === filters.module);
-      }
-      
-      if (filters.action) {
-        permissions = permissions.filter(p => p.action === filters.action);
-      }
-      
-      if (filters.search) {
-        const searchLower = filters.search.toLowerCase();
-        permissions = permissions.filter(p => 
-          p.code.toLowerCase().includes(searchLower) ||
-          p.description.toLowerCase().includes(searchLower) ||
-          p.module.toLowerCase().includes(searchLower) ||
-          p.action.toLowerCase().includes(searchLower)
-        );
-      }
-      
-      if (filters.isActive && filters.isActive !== 'all') {
-        const isActive = filters.isActive === 'true';
-        permissions = permissions.filter(p => p.is_active === isActive);
-      }
-
-      // Sort permissions
-      if (filters.sortBy) {
-        permissions.sort((a, b) => {
-          const aVal = a[filters.sortBy] || '';
-          const bVal = b[filters.sortBy] || '';
-          const compareResult = aVal.toString().localeCompare(bVal.toString());
-          return filters.sortOrder === 'desc' ? -compareResult : compareResult;
-        });
-      }
-
-      // Pagination
-      const page = parseInt(filters.page) || 1;
-      const perPage = parseInt(filters.perPage) || 20;
-      const startIndex = (page - 1) * perPage;
-      const endIndex = startIndex + perPage;
-      const paginatedPermissions = permissions.slice(startIndex, endIndex);
-      
-      const totalPages = Math.ceil(permissions.length / perPage);
-
-      resolve({
-        success: true,
-        data: {
-          permissions: paginatedPermissions,
-          pagination: {
-            totalPages,
-            totalPermissions: permissions.length,
-            hasNextPage: page < totalPages,
-            hasPrevPage: page > 1,
-            currentPage: page,
-            perPage
-          },
-          filters: {
-            modules: ['users', 'roles', 'permissions', 'products', 'reports', 'settings', 'dashboard'],
-            actions: ['create', 'view', 'update', 'delete']
-          }
-        }
-      });
-    }, 800);
-  });
-};
-
-const postData = async (url, data, token) => {
-  // Mock implementation - replace with your actual API call
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        success: true,
-        message: 'Tạo thành công!',
-        data: { id: Date.now(), ...data }
-      });
-    }, 1500);
-  });
-};
-
-const editData = async (url, data, token) => {
-  // Mock implementation - replace with your actual API call
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        success: true,
-        message: 'Cập nhật thành công!',
-        data: { ...data }
-      });
-    }, 1500);
-  });
-};
-
-const deleteData = async (url, token, options = {}) => {
-  // Mock implementation - replace with your actual API call
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        success: true,
-        message: 'Xóa thành công!'
-      });
-    }, 1000);
-  });
-};
-
-const handleErrorResponse = (error) => {
-  // Mock error handler - replace with your actual error handling
-  if (error?.response?.data?.message) {
-    return error.response.data.message;
-  }
-  if (error?.message) {
-    return error.message;
-  }
-  return 'Có lỗi xảy ra, vui lòng thử lại!';
-};
 
 // Context - in real app, this would be imported from a separate context file
 const MyContext = React.createContext({
@@ -717,11 +569,37 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
   );
 };
 
+// Thêm hàm tạo mảng trang với dấu ...
+function getPaginationItems(current, total) {
+  const delta = 1;
+  const range = [];
+  const rangeWithDots = [];
+  let l;
+
+  for (let i = 1; i <= total; i++) {
+    if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
+      range.push(i);
+    }
+  }
+
+  for (let i of range) {
+    if (l) {
+      if (i - l === 2) {
+        rangeWithDots.push(l + 1);
+      } else if (i - l > 2) {
+        rangeWithDots.push('...');
+      }
+    }
+    rangeWithDots.push(i);
+    l = i;
+  }
+  return rangeWithDots;
+}
+
 // Main Permissions Component
 const Permissions = () => {
   // State management
   const [permissions, setPermissions] = useState([]);
-  const [groupedPermissions, setGroupedPermissions] = useState({});
   const [filters, setFilters] = useState({
     page: 1,
     perPage: 20,
@@ -743,43 +621,20 @@ const Permissions = () => {
   const [modal, setModal] = useState({ isOpen: false, type: '', data: null });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState('grouped'); // 'grouped' or 'table'
-  const [expandedModules, setExpandedModules] = useState({});
   const [selectedPermissions, setSelectedPermissions] = useState(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState({ open: false, permissionId: null, name: '' });
   const token = localStorage.getItem('token');
-
   const context = useContext(MyContext);
 
-  // Group permissions by module
-  const groupPermissionsByModule = useCallback((perms) => {
-    const grouped = perms.reduce((acc, permission) => {
-      const module = permission.module;
-      if (!acc[module]) {
-        acc[module] = [];
-      }
-      acc[module].push(permission);
-      return acc;
-    }, {});
-
-    // Sort actions within each module
-    Object.keys(grouped).forEach(module => {
-      grouped[module].sort((a, b) => a.action.localeCompare(b.action));
-    });
-
-    return grouped;
-  }, []);
-
-  // Fetch permissions
+  // Fetch permissions and filter options from API
   const fetchPermissions = useCallback(async () => {
     setLoading(true);
     context.setProgress(20);
     try {
-      const response = await fetchDataFromAPI('/api/permissions', token, { params: filters });
+      const response = await fetchDataFromAPI('/api/permissions', token + '', { params: filters });
       const perms = response.data?.permissions || response.permissions || [];
       setPermissions(perms);
-      setGroupedPermissions(groupPermissionsByModule(perms));
       setPagination(response.data?.pagination || response.pagination || {});
       setModules(response.data?.filters?.modules || response.filters?.modules || []);
       setActions(response.data?.filters?.actions || response.filters?.actions || []);
@@ -796,7 +651,7 @@ const Permissions = () => {
     } finally {
       setLoading(false);
     }
-  }, [filters, token, groupPermissionsByModule, context]);
+  }, [filters, token, context]);
 
   useEffect(() => {
     fetchPermissions();
@@ -811,7 +666,6 @@ const Permissions = () => {
         setFilters(prev => ({ ...prev, page: 1 }));
       }
     }, 500);
-
     return () => clearTimeout(timeoutId);
   }, [filters.search]);
 
@@ -820,16 +674,10 @@ const Permissions = () => {
     setSelectedPermissions(new Set());
   }, [filters.module, filters.action, filters.search, filters.isActive]);
 
-  // Auto-expand modules with permissions
+  // Sau useEffect cho filters.perPage
   useEffect(() => {
-    if (viewMode === 'grouped') {
-      const initialExpanded = {};
-      Object.keys(groupedPermissions).forEach(module => {
-        initialExpanded[module] = true;
-      });
-      setExpandedModules(initialExpanded);
-    }
-  }, [groupedPermissions, viewMode]);
+    fetchPermissions();
+  }, [filters.perPage]);
 
   // Handle delete permission
   const handleDelete = async (id, name) => {
@@ -925,14 +773,6 @@ const Permissions = () => {
     fetchPermissions();
   };
 
-  // Toggle module expansion
-  const toggleModule = (module) => {
-    setExpandedModules(prev => ({
-      ...prev,
-      [module]: !prev[module]
-    }));
-  };
-
   // Handle permission selection
   const togglePermissionSelection = (id) => {
     setSelectedPermissions(prev => {
@@ -946,23 +786,6 @@ const Permissions = () => {
     });
   };
 
-  // Select all permissions in module
-  const toggleModuleSelection = (module) => {
-    const modulePermissions = groupedPermissions[module] || [];
-    const moduleIds = modulePermissions.map(p => p.id);
-    const allSelected = moduleIds.every(id => selectedPermissions.has(id));
-    
-    setSelectedPermissions(prev => {
-      const newSet = new Set(prev);
-      if (allSelected) {
-        moduleIds.forEach(id => newSet.delete(id));
-      } else {
-        moduleIds.forEach(id => newSet.add(id));
-      }
-      return newSet;
-    });
-  };
-
   // Handle select all
   const handleSelectAll = () => {
     if (selectedPermissions.size === permissions.length && permissions.length > 0) {
@@ -970,27 +793,6 @@ const Permissions = () => {
     } else {
       setSelectedPermissions(new Set(permissions.map(p => p.id)));
     }
-  };
-
-  // Get module statistics
-  const getModuleStats = (module) => {
-    const modulePermissions = groupedPermissions[module] || [];
-    const activeCount = modulePermissions.filter(p => p.is_active).length;
-    const totalCount = modulePermissions.length;
-    const selectedCount = modulePermissions.filter(p => selectedPermissions.has(p.id)).length;
-    
-    return { activeCount, totalCount, selectedCount };
-  };
-
-  // Get module color based on activity
-  const getModuleColor = (module) => {
-    const stats = getModuleStats(module);
-    const activeRatio = stats.activeCount / stats.totalCount;
-    
-    if (activeRatio === 1) return '#4caf50';
-    if (activeRatio > 0.5) return '#ff9800';
-    if (activeRatio > 0) return '#f44336';
-    return '#9e9e9e';
   };
 
   return (
@@ -1018,7 +820,7 @@ const Permissions = () => {
                   Quản lý quyền truy cập
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                  Tổng cộng {pagination.totalPermissions || permissions.length} quyền trong {Object.keys(groupedPermissions).length} module
+                  Tổng cộng {pagination.totalPermissions || permissions.length} quyền trong {Object.keys(modules).length} module
                 </Typography>
               </Box>
               
@@ -1034,35 +836,6 @@ const Permissions = () => {
                     icon={<SecurityIcon fontSize="small" />}
                   />
                 </Breadcrumbs>
-                
-                <ButtonGroup variant="contained" size="small">
-                  <Button
-                    onClick={() => setViewMode('grouped')}
-                    startIcon={<ViewModuleIcon />}
-                    sx={{
-                      backgroundColor: viewMode === 'grouped' ? '#1976d2' : '#e0e0e0',
-                      color: viewMode === 'grouped' ? 'white' : '#666',
-                      '&:hover': {
-                        backgroundColor: viewMode === 'grouped' ? '#1565c0' : '#d0d0d0',
-                      }
-                    }}
-                  >
-                    Nhóm
-                  </Button>
-                  <Button
-                    onClick={() => setViewMode('table')}
-                    startIcon={<TableChartIcon />}
-                    sx={{
-                      backgroundColor: viewMode === 'table' ? '#1976d2' : '#e0e0e0',
-                      color: viewMode === 'table' ? 'white' : '#666',
-                      '&:hover': {
-                        backgroundColor: viewMode === 'table' ? '#1565c0' : '#d0d0d0',
-                      }
-                    }}
-                  >
-                    Bảng
-                  </Button>
-                </ButtonGroup>
                 
                 <Button
                   variant="contained"
@@ -1296,255 +1069,7 @@ const Permissions = () => {
               </Typography>
             </Box>
           </Card>
-        ) : viewMode === 'grouped' ? (
-          /* Grouped View */
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {Object.keys(groupedPermissions).length === 0 ? (
-              <Card sx={{ p: 6, textAlign: 'center', borderRadius: 3 }}>
-                <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
-                  <SecurityIcon sx={{ fontSize: 48, color: '#ccc' }} />
-                  <Typography variant="h6" color="text.secondary">
-                    Không có dữ liệu
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Không tìm thấy quyền nào phù hợp với bộ lọc
-                  </Typography>
-                </Box>
-              </Card>
-            ) : (
-              Object.keys(groupedPermissions).map(module => {
-                const stats = getModuleStats(module);
-                const moduleColor = getModuleColor(module);
-                const isExpanded = expandedModules[module];
-                
-                return (
-                  <Card key={module} sx={{ borderRadius: 3, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
-                    <Box 
-                      sx={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        p: 3,
-                        cursor: 'pointer',
-                        borderLeft: `4px solid ${moduleColor}`,
-                        backgroundColor: 'white',
-                        '&:hover': {
-                          backgroundColor: 'rgba(0, 0, 0, 0.02)',
-                        },
-                        transition: 'background-color 0.2s ease',
-                      }}
-                      onClick={() => toggleModule(module)}
-                    >
-                      <Box display="flex" alignItems="center" gap={2}>
-                        <Checkbox
-                          checked={stats.selectedCount === stats.totalCount && stats.totalCount > 0}
-                          indeterminate={stats.selectedCount > 0 && stats.selectedCount < stats.totalCount}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            toggleModuleSelection(module);
-                          }}
-                          sx={{
-                            '&.Mui-checked': {
-                              color: '#1976d2',
-                            },
-                          }}
-                        />
-                        <Avatar sx={{ 
-                          bgcolor: moduleColor,
-                          width: 48,
-                          height: 48,
-                          fontSize: '1.2rem',
-                          fontWeight: 600
-                        }}>
-                          <SecurityIcon />
-                        </Avatar>
-                        <Box>
-                          <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
-                            {module}
-                          </Typography>
-                          <Box display="flex" gap={1} flexWrap="wrap">
-                            <Chip 
-                              size="small" 
-                              label={`${stats.totalCount} quyền`}
-                              sx={{
-                                backgroundColor: '#e3f2fd',
-                                color: '#1976d2',
-                                fontWeight: 600,
-                                fontSize: '0.75rem',
-                              }}
-                            />
-                            <Chip 
-                              size="small" 
-                              label={`${stats.activeCount} hoạt động`}
-                              sx={{
-                                backgroundColor: stats.activeCount === stats.totalCount ? '#e8f5e8' : '#fff3e0',
-                                color: stats.activeCount === stats.totalCount ? '#2e7d32' : '#f57c00',
-                                fontWeight: 600,
-                                fontSize: '0.75rem',
-                              }}
-                            />
-                            {stats.selectedCount > 0 && (
-                              <Chip 
-                                size="small" 
-                                label={`${stats.selectedCount} đã chọn`}
-                                sx={{
-                                  backgroundColor: '#f3e5f5',
-                                  color: '#7b1fa2',
-                                  fontWeight: 600,
-                                  fontSize: '0.75rem',
-                                }}
-                              />
-                            )}
-                          </Box>
-                        </Box>
-                      </Box>
-                      <IconButton sx={{ color: '#666' }}>
-                        <ExpandMoreIcon sx={{ 
-                          transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                          transition: 'transform 0.3s ease'
-                        }} />
-                      </IconButton>
-                    </Box>
-                    
-                    <Collapse in={isExpanded}>
-                      <Box sx={{ borderTop: '1px solid #e0e0e0', backgroundColor: '#fafafa' }}>
-                        <Grid container spacing={2} sx={{ p: 3 }}>
-                          {groupedPermissions[module].map(permission => (
-                            <Grid item xs={12} md={6} lg={4} key={permission.id}>
-                              <Card 
-                                sx={{
-                                  height: '100%',
-                                  transition: 'all 0.2s ease',
-                                  borderRadius: 2,
-                                  border: selectedPermissions.has(permission.id) 
-                                    ? '2px solid #1976d2' 
-                                    : '1px solid #e0e0e0',
-                                  backgroundColor: selectedPermissions.has(permission.id) 
-                                    ? '#f3f9ff' 
-                                    : 'white',
-                                  '&:hover': {
-                                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-                                    transform: 'translateY(-2px)',
-                                  },
-                                }}
-                              >
-                                <CardContent sx={{ pb: 1 }}>
-                                  <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
-                                    <Checkbox
-                                      checked={selectedPermissions.has(permission.id)}
-                                      onChange={() => togglePermissionSelection(permission.id)}
-                                      size="small"
-                                      sx={{
-                                        '&.Mui-checked': {
-                                          color: '#1976d2',
-                                        },
-                                      }}
-                                    />
-                                    <Chip
-                                      size="small"
-                                      icon={permission.is_active ? <CheckCircleIcon /> : <CancelIcon />}
-                                      label={permission.is_active ? 'Hoạt động' : 'Không hoạt động'}
-                                      sx={{
-                                        backgroundColor: permission.is_active ? '#e8f5e8' : '#ffebee',
-                                        color: permission.is_active ? '#2e7d32' : '#c62828',
-                                        fontWeight: 600,
-                                        '& .MuiChip-icon': {
-                                          color: permission.is_active ? '#2e7d32' : '#c62828',
-                                        },
-                                      }}
-                                    />
-                                  </Box>
-                                  
-                                  <Typography variant="h6" sx={{ 
-                                    fontWeight: 600, 
-                                    fontSize: '0.95rem', 
-                                    mb: 1,
-                                    color: '#1a1a1a'
-                                  }}>
-                                    {permission.action}
-                                  </Typography>
-                                  
-                                  <Typography variant="body2" sx={{ 
-                                    color: '#666', 
-                                    mb: 2, 
-                                    fontFamily: 'monospace',
-                                    fontSize: '0.8rem',
-                                    backgroundColor: '#f5f5f5',
-                                    padding: '4px 8px',
-                                    borderRadius: 1,
-                                  }}>
-                                    {permission.code}
-                                  </Typography>
-                                  
-                                  {permission.description && (
-                                    <Typography variant="body2" sx={{ 
-                                      color: '#777', 
-                                      fontSize: '0.8rem', 
-                                      mb: 2,
-                                      lineHeight: 1.4
-                                    }}>
-                                      {permission.description}
-                                    </Typography>
-                                  )}
-                                  
-                                  <Chip
-                                    size="small"
-                                    icon={<FaUsers style={{ fontSize: '0.7rem' }} />}
-                                    label={`${permission.granted_roles_count || 0} vai trò`}
-                                    sx={{
-                                      backgroundColor: '#e1f5fe',
-                                      color: '#0277bd',
-                                      fontSize: '0.75rem',
-                                      fontWeight: 600,
-                                    }}
-                                  />
-                                </CardContent>
-                                
-                                <CardActions sx={{ pt: 0, px: 2, pb: 2 }}>
-                                  <Tooltip title="Chỉnh sửa">
-                                    <IconButton
-                                      size="small"
-                                      onClick={() => openModal('update', permission)}
-                                      sx={{
-                                        color: '#ff9800',
-                                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                                        '&:hover': {
-                                          backgroundColor: 'rgba(255, 152, 0, 0.2)',
-                                        },
-                                      }}
-                                    >
-                                      <EditIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                  <Tooltip title="Xóa">
-                                    <IconButton
-                                      size="small"
-                                      onClick={() => handleDelete(permission.id, permission.code)}
-                                      sx={{
-                                        color: '#f44336',
-                                        backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                                        '&:hover': {
-                                          backgroundColor: 'rgba(244, 67, 54, 0.2)',
-                                        },
-                                      }}
-                                    >
-                                      <DeleteIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                </CardActions>
-                              </Card>
-                            </Grid>
-                          ))}
-                        </Grid>
-                      </Box>
-                    </Collapse>
-                  </Card>
-                );
-              })
-            )}
-          </Box>
         ) : (
-          /* Table View */
           <Card sx={{ borderRadius: 3, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
             <TableContainer>
               <Table>
@@ -1730,34 +1255,87 @@ const Permissions = () => {
             </TableContainer>
             
             {/* Enhanced Pagination */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', px: 3, pt: 2, pb: 0 }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: '#1976d2', fontSize: 15 }}>
+                {pagination.totalPermissions > 0
+                  ? `Hiển thị ${((filters.page - 1) * filters.perPage) + 1} - ${Math.min(filters.page * filters.perPage, pagination.totalPermissions)} trong tổng số ${pagination.totalPermissions} quyền`
+                  : 'Không có quyền nào để hiển thị'}
+              </Typography>
+            </Box>
             <Box display="flex" justifyContent="space-between" alignItems="center" p={3} sx={{
               borderTop: '1px solid rgba(0, 0, 0, 0.1)',
               background: 'rgba(0, 0, 0, 0.02)',
             }}>
-              <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500 }}>
-                Hiển thị {((filters.page - 1) * filters.perPage) + 1} - {Math.min(filters.page * filters.perPage, pagination.totalPermissions || permissions.length)} của {pagination.totalPermissions || permissions.length} quyền
-              </Typography>
-              <Pagination
-                count={pagination.totalPages || 1}
-                page={filters.page}
-                onChange={(event, value) => setFilters(prev => ({ ...prev, page: value }))}
-                color="primary"
-                showFirstButton
-                showLastButton
-                sx={{
-                  '& .MuiPaginationItem-root': {
-                    borderRadius: 2,
-                    fontWeight: 600,
-                    '&.Mui-selected': {
-                      background: '#1976d2',
-                      color: 'white',
-                      '&:hover': {
-                        background: '#1565c0',
-                      },
-                    },
-                  },
-                }}
-              />
+              {/* Page size selector bottom left */}
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel id="per-page-label">Bản ghi/trang</InputLabel>
+                <Select
+                  labelId="per-page-label"
+                  value={filters.perPage}
+                  label="Bản ghi/trang"
+                  onChange={e => {
+                    const value = e.target.value;
+                    setFilters(prev => ({ ...prev, perPage: value, page: 1 }));
+                  }}
+                >
+                  {[5, 10, 20, 50, 100].map(size => (
+                    <MenuItem key={size} value={size}>{size}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {/* Pagination right */}
+              <Box display="flex" alignItems="center" gap={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={filters.page === 1}
+                  onClick={() => setFilters(prev => ({ ...prev, page: 1 }))}
+                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                >
+                  {'<<'}
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={filters.page === 1}
+                  onClick={() => setFilters(prev => ({ ...prev, page: prev.page - 1 }))}
+                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                >
+                  {'<'}
+                </Button>
+                {getPaginationItems(filters.page, pagination.totalPages || 1).map((item, idx) =>
+                  item === '...'
+                    ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
+                    : <Button
+                        key={item}
+                        variant={item === filters.page ? 'contained' : 'outlined'}
+                        color={item === filters.page ? 'primary' : 'inherit'}
+                        size="small"
+                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25, ...(item === filters.page && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' }) }}
+                        onClick={() => setFilters(prev => ({ ...prev, page: item }))}
+                      >
+                        {item}
+                      </Button>
+                )}
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={filters.page === (pagination.totalPages || 1)}
+                  onClick={() => setFilters(prev => ({ ...prev, page: prev.page + 1 }))}
+                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                >
+                  {'>'}
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={filters.page === (pagination.totalPages || 1)}
+                  onClick={() => setFilters(prev => ({ ...prev, page: (pagination.totalPages || 1) }))}
+                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                >
+                  {'>>'}
+                </Button>
+              </Box>
             </Box>
           </Card>
         )}
