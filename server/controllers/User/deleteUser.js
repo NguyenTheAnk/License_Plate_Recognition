@@ -64,11 +64,10 @@ const deleteUser = async (req, res) => {
         try {
             // Log the deletion before actually deleting (important for audit trail)
             await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'DELETE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
+                 VALUES (?, 'DELETE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user.userId,
-                    req.user.username,
                     userId,
                     JSON.stringify(currentUser[0]),
                     req.ip || 'unknown',
@@ -156,7 +155,6 @@ const deleteUser = async (req, res) => {
                 data: {
                     deletedUserId: userId,
                     deletedUserInfo: {
-                        username: currentUser[0].username,
                         email: currentUser[0].email,
                         name: currentUser[0].name
                     }
@@ -175,11 +173,11 @@ const deleteUser = async (req, res) => {
         // Log failed access
         try {
             await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'DELETE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?,'DELETE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
-                    req.user?.username || 'unknown',
+                    req.user?.name || 'unknown',
                     userId,
                     error.message,
                     req.ip || 'unknown',

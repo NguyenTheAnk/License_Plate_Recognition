@@ -20,6 +20,7 @@ import {
   SmartToy as AiIcon,
   Videocam as CameraIcon
 } from '@mui/icons-material';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const SIDEBAR_WIDTH = 260;
 
@@ -37,18 +38,34 @@ const menuGroups = [
         text: 'Quản lý người dùng và phân quyền',
         icon: <UserManagementIcon />,
         path: '/user-management',
+        // Loại bỏ requiredPermission để hiển thị cho tất cả user
         children: [
-          { text: 'Quản lý người dùng', icon: <UsersIcon />, path: '/user-management/users' },
-          { text: 'Quản lý quyền', icon: <PermissionIcon />, path: '/user-management/permissions' },
-          { text: 'Quản lý vai trò', icon: <RoleIcon />, path: '/user-management/roles' },
-          { text: 'Quản lý quyền người dùng', icon: <UserPermissionIcon />, path: '/user-management/user-permissions' },
+          { text: 'Quản lý người dùng', icon: <UsersIcon />, path: '/user' },
+          { text: 'Quản lý quyền', icon: <PermissionIcon />, path: '/permissions' },
+          { text: 'Quản lý vai trò', icon: <RoleIcon />, path: '/roles' },
+          { text: 'Quản lý quyền người dùng', icon: <UserPermissionIcon />, path: '/user-permissions' },
         ]
       },
     ]
   }
 ];
 
-function Sidebar({ user, onLogout, navigate, currentPath }) {
+function Sidebar({ user, onLogout }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const currentPath = location.pathname;
+
+  // Debug: Log user object
+  useEffect(() => {
+    console.log('=== SIDEBAR DEBUG ===');
+    console.log('User prop received:', user);
+    console.log('User name:', user?.name);
+    console.log('User username:', user?.username);
+    console.log('User email:', user?.email);
+    console.log('User roles:', user?.roles);
+    console.log('User permissions:', user?.permissions);
+  }, [user]);
+
   // Thời gian thực
   const [time, setTime] = useState(new Date());
   useEffect(() => {
@@ -73,6 +90,62 @@ function Sidebar({ user, onLogout, navigate, currentPath }) {
 
   // Trạng thái AI
   const [aiStatus, setAiStatus] = useState(true);
+
+  // Helper function để check permission
+  const hasPermission = (permissionCode) => {
+    if (!user || !user.permissions) return false;
+    return user.permissions.some(permission => permission.code === permissionCode);
+  };
+
+  // Helper function để check role
+  const hasRole = (roleName) => {
+    if (!user || !user.roles) return false;
+    return user.roles.some(role => role.name === roleName);
+  };
+
+  // Filter menu items based on permissions (hiện tại hiển thị tất cả)
+  const filterMenuItems = (items) => {
+    return items.filter(item => {
+      // Hiển thị tất cả menu items
+      return true;
+    });
+  };
+
+  // Lấy tên hiển thị từ user object
+  const getDisplayName = () => {
+    if (!user) return 'Đang tải...';
+    
+    // Ưu tiên: name -> username -> email
+    if (user.name && user.name.trim()) {
+      return user.name;
+    }
+    if (user.username && user.username.trim()) {
+      return user.username;
+    }
+    if (user.email && user.email.trim()) {
+      return user.email;
+    }
+    
+    return 'Người dùng';
+  };
+
+  // Lấy avatar URL hoặc tạo initials
+  const getAvatarContent = () => {
+    if (user?.avatar) {
+      return user.avatar;
+    }
+    
+    // Tạo initials từ name hoặc username
+    const name = user?.name || user?.username || user?.email || 'U';
+    const initials = name
+      .split(' ')
+      .map(word => word.charAt(0))
+      .join('')
+      .substring(0, 2)
+      .toUpperCase();
+    
+    return initials;
+  };
 
   return (
     <Box sx={{
@@ -119,7 +192,7 @@ function Sidebar({ user, onLogout, navigate, currentPath }) {
       }}>
         <Box sx={{ position: 'relative', mb: 1 }}>
           <Avatar 
-            src="/logo-user.png" 
+            src={user?.avatar ? user.avatar : undefined}
             alt="avatar" 
             sx={{ 
               width: 70, 
@@ -134,7 +207,9 @@ function Sidebar({ user, onLogout, navigate, currentPath }) {
                 boxShadow: '0 6px 12px rgba(25, 118, 210, 0.4)'
               }
             }} 
-          />
+          >
+            {!user?.avatar && getAvatarContent()}
+          </Avatar>
           <Box sx={{
             position: 'absolute',
             bottom: 2,
@@ -147,6 +222,7 @@ function Sidebar({ user, onLogout, navigate, currentPath }) {
             boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
           }} />
         </Box>
+        
         <Typography 
           variant="subtitle1" 
           fontWeight={700} 
@@ -155,17 +231,35 @@ function Sidebar({ user, onLogout, navigate, currentPath }) {
             width: '100%', 
             fontSize: 16, 
             color: '#222', 
-            mb: 0.5 
+            mb: 0.5,
+            wordBreak: 'break-word',
+            px: 1
           }}
         >
-          Người dùng: {user?.username || 'admin'}
+          {getDisplayName()}
         </Typography>
+        
+        {/* Hiển thị role nếu có */}
+        {user?.roles && user.roles.length > 0 && (
+          <Chip 
+            label={user.roles[0].name} 
+            size="small" 
+            sx={{ 
+              bgcolor: '#e8f5e9', 
+              color: '#2e7d32',
+              fontWeight: 500,
+              fontSize: 11,
+              mb: 0.5
+            }} 
+          />
+        )}
+        
         <Chip 
           label="Đang hoạt động" 
           size="small" 
           sx={{ 
-            bgcolor: '#e8f5e9', 
-            color: '#2e7d32',
+            bgcolor: '#e3f2fd', 
+            color: '#1565c0',
             fontWeight: 500,
             fontSize: 11
           }} 
@@ -338,132 +432,138 @@ function Sidebar({ user, onLogout, navigate, currentPath }) {
           }
         }
       }}>
-        {menuGroups.map((group, idx) => (
-          <List key={idx} dense sx={{ mb: 1 }}>
-            {group.label && (
-              <Typography variant="caption" sx={{ pl: 2, pt: 1 }}>{group.label}</Typography>
-            )}
-            {group.items.map(item => (
-              <React.Fragment key={item.text}>
-                <ListItem
-                  button
-                  selected={currentPath === item.path || (item.children && item.children.some(child => currentPath === child.path))}
-                  onClick={() => {
-                    if (item.children) {
-                      handleSubmenuToggle(item.text);
-                    } else {
-                      navigate(item.path);
-                    }
-                  }}
-                  sx={{ 
-                    borderRadius: 3, 
-                    mb: 0.5, 
-                    mx: 0.5, 
-                    pl: 1.5, 
-                    pr: 1,
-                    py: 1,
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    '&:hover': {
-                      bgcolor: '#e3f2fd',
-                      transform: 'translateX(4px)',
-                      boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)',
-                      '& .MuiListItemIcon-root': {
-                        transform: 'scale(1.1)',
-                        color: '#1976d2'
+        {menuGroups.map((group, idx) => {
+          const filteredItems = filterMenuItems([...group.items]);
+          
+          if (filteredItems.length === 0) return null;
+          
+          return (
+            <List key={idx} dense sx={{ mb: 1 }}>
+              {group.label && (
+                <Typography variant="caption" sx={{ pl: 2, pt: 1 }}>{group.label}</Typography>
+              )}
+              {filteredItems.map(item => (
+                <React.Fragment key={item.text}>
+                  <ListItem
+                    button
+                    selected={currentPath === item.path || (item.children && item.children.some(child => currentPath === child.path))}
+                    onClick={() => {
+                      if (item.children) {
+                        handleSubmenuToggle(item.text);
+                      } else {
+                        navigate(item.path);
                       }
-                    },
-                    '&.Mui-selected': { 
-                      bgcolor: '#e0f2f1', 
-                      color: '#00796b',
-                      boxShadow: '0 2px 8px rgba(0, 121, 107, 0.2)',
+                    }}
+                    sx={{ 
+                      borderRadius: 3, 
+                      mb: 0.5, 
+                      mx: 0.5, 
+                      pl: 1.5, 
+                      pr: 1,
+                      py: 1,
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                       '&:hover': {
-                        bgcolor: '#b2dfdb'
-                      }
-                    },
-                    fontSize: 14 
-                  }}
-                >
-                  <ListItemIcon sx={{ 
-                    minWidth: 36,
-                    transition: 'all 0.3s ease'
-                  }}>
-                    {item.icon}
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary={item.text} 
-                    primaryTypographyProps={{ 
-                      fontSize: 14,
-                      fontWeight: 500
-                    }} 
-                  />
-                  {item.children && (
-                    <Box sx={{ 
-                      transition: 'transform 0.3s ease',
-                      transform: openSubmenus[item.text] ? 'rotate(180deg)' : 'rotate(0deg)'
+                        bgcolor: '#e3f2fd',
+                        transform: 'translateX(4px)',
+                        boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)',
+                        '& .MuiListItemIcon-root': {
+                          transform: 'scale(1.1)',
+                          color: '#1976d2'
+                        }
+                      },
+                      '&.Mui-selected': { 
+                        bgcolor: '#e0f2f1', 
+                        color: '#00796b',
+                        boxShadow: '0 2px 8px rgba(0, 121, 107, 0.2)',
+                        '&:hover': {
+                          bgcolor: '#b2dfdb'
+                        }
+                      },
+                      fontSize: 14 
+                    }}
+                  >
+                    <ListItemIcon sx={{ 
+                      minWidth: 36,
+                      transition: 'all 0.3s ease'
                     }}>
-                      <ExpandMore />
-                    </Box>
-                  )}
-                </ListItem>
-                
-                {/* Submenu */}
-                {item.children && (
-                  <Collapse in={openSubmenus[item.text]} timeout="auto" unmountOnExit>
-                    <List component="div" disablePadding>
-                      {item.children.map(child => (
-                        <ListItem
-                          button
-                          key={child.text}
-                          selected={currentPath === child.path}
-                          onClick={() => navigate(child.path)}
-                          sx={{ 
-                            borderRadius: 2, 
-                            mb: 0.5, 
-                            mx: 0.5, 
-                            pl: 4, 
-                            pr: 1,
-                            py: 0.8,
-                            transition: 'all 0.3s ease',
-                            '&:hover': {
-                              bgcolor: '#f3e5f5',
-                              transform: 'translateX(6px)',
-                              '& .MuiListItemIcon-root': {
-                                transform: 'scale(1.1)',
-                                color: '#7b1fa2'
-                              }
-                            },
-                            '&.Mui-selected': { 
-                              bgcolor: '#e0f2f1', 
-                              color: '#00796b',
+                      {item.icon}
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary={item.text} 
+                      primaryTypographyProps={{ 
+                        fontSize: 14,
+                        fontWeight: 500
+                      }} 
+                    />
+                    {item.children && (
+                      <Box sx={{ 
+                        transition: 'transform 0.3s ease',
+                        transform: openSubmenus[item.text] ? 'rotate(180deg)' : 'rotate(0deg)'
+                      }}>
+                        <ExpandMore />
+                      </Box>
+                    )}
+                  </ListItem>
+                  
+                  {/* Submenu */}
+                  {item.children && (
+                    <Collapse in={openSubmenus[item.text]} timeout="auto" unmountOnExit>
+                      <List component="div" disablePadding>
+                        {item.children.map(child => (
+                          <ListItem
+                            button
+                            key={child.text}
+                            selected={currentPath === child.path}
+                            onClick={() => navigate(child.path)}
+                            sx={{ 
+                              borderRadius: 2, 
+                              mb: 0.5, 
+                              mx: 0.5, 
+                              pl: 4, 
+                              pr: 1,
+                              py: 0.8,
+                              transition: 'all 0.3s ease',
                               '&:hover': {
-                                bgcolor: '#b2dfdb'
-                              }
-                            },
-                            fontSize: 13 
-                          }}
-                        >
-                          <ListItemIcon sx={{ 
-                            minWidth: 28,
-                            transition: 'all 0.3s ease'
-                          }}>
-                            {child.icon}
-                          </ListItemIcon>
-                          <ListItemText 
-                            primary={child.text} 
-                            primaryTypographyProps={{ 
-                              fontSize: 13,
-                              fontWeight: 400
-                            }} 
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  </Collapse>
-                )}
-              </React.Fragment>
-            ))}
-          </List>
-        ))}
+                                bgcolor: '#f3e5f5',
+                                transform: 'translateX(6px)',
+                                '& .MuiListItemIcon-root': {
+                                  transform: 'scale(1.1)',
+                                  color: '#7b1fa2'
+                                }
+                              },
+                              '&.Mui-selected': { 
+                                bgcolor: '#e0f2f1', 
+                                color: '#00796b',
+                                '&:hover': {
+                                  bgcolor: '#b2dfdb'
+                                }
+                              },
+                              fontSize: 13 
+                            }}
+                          >
+                            <ListItemIcon sx={{ 
+                              minWidth: 28,
+                              transition: 'all 0.3s ease'
+                            }}>
+                              {child.icon}
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary={child.text} 
+                              primaryTypographyProps={{ 
+                                fontSize: 13,
+                                fontWeight: 400
+                              }} 
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Collapse>
+                  )}
+                </React.Fragment>
+              ))}
+            </List>
+          );
+        })}
       </Box>
 
       {/* Đăng xuất */}

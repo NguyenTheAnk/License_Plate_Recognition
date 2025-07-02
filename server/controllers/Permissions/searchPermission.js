@@ -68,9 +68,10 @@ const searchPermissions = async (req, res) => {
         const validSortOrder = allowedSortOrders.includes(sortOrder.toLowerCase()) ? sortOrder.toLowerCase() : 'asc';
 
         // Get total count
+        const safeQueryParams = queryParams.map(v => v === undefined ? null : v);
         const [countResult] = await connection.execute(
             `SELECT COUNT(*) as total FROM permissions p ${whereClause}`,
-            queryParams
+            safeQueryParams
         );
         const totalPermissions = countResult[0].total;
         const totalPages = Math.ceil(totalPermissions / parseInt(perPage));
@@ -120,9 +121,10 @@ const searchPermissions = async (req, res) => {
         }
 
         // Get permissions with search and sorting
+        const mainQueryParams = [...safeQueryParams, parseInt(perPage), offset].map(v => v === undefined ? null : v);
         const [permissions] = await connection.execute(
             selectQuery,
-            [...queryParams, parseInt(perPage), offset]
+            mainQueryParams
         );
 
         // Get available filters
@@ -144,7 +146,7 @@ const searchPermissions = async (req, res) => {
                 COUNT(DISTINCT action) as actions_found
             FROM permissions p
             ${whereClause}
-        `, queryParams.slice(0, -2)); // Remove LIMIT and OFFSET params
+        `, safeQueryParams);
 
         // Log search access
         await connection.execute(

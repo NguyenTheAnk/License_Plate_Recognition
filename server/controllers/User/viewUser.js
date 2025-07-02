@@ -97,7 +97,6 @@ const getUserDetailedView = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -136,23 +135,36 @@ const getUserDetailedView = async (req, res) => {
             WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
         `, [userId]);
 
-        // Get permissions separately
-        const [userPermissions] = await connection.execute(`
-            SELECT DISTINCT
-                p.id,
-                p.module,
-                p.action,
-                p.code,
-                p.description
-            FROM user_roles ur
-            JOIN roles r ON ur.role_id = r.id
-            JOIN role_permissions rp ON r.id = rp.role_id
-            JOIN permissions p ON rp.permission_id = p.id
-            WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1 AND rp.granted = 1 AND p.is_active = 1
-        `, [userId]);
-
-        user.roles = userRoles;
-        user.permissions = userPermissions;
+        // For each role, get granted permissions grouped by module/action
+        const roleIds = userRoles.map(r => r.id);
+        let rolesWithModules = [];
+        if (roleIds.length > 0) {
+            const placeholders = roleIds.map(() => '?').join(',');
+            const [rolePerms] = await connection.execute(`
+                SELECT
+                    rp.role_id,
+                    p.module,
+                    p.action
+                FROM role_permissions rp
+                JOIN permissions p ON rp.permission_id = p.id
+                WHERE rp.role_id IN (${placeholders})
+                  AND rp.granted = 1
+                  AND p.is_active = 1
+            `, roleIds);
+            // Group permissions by role -> module -> actions
+            rolesWithModules = userRoles.map(role => {
+                const perms = rolePerms.filter(rp => rp.role_id === role.id);
+                const modules = {};
+                perms.forEach(p => {
+                    if (!modules[p.module]) modules[p.module] = [];
+                    if (!modules[p.module].includes(p.action)) modules[p.module].push(p.action);
+                });
+                return { ...role, modules };
+            });
+        } else {
+            rolesWithModules = userRoles.map(role => ({ ...role, modules: {} }));
+        }
+        user.roles = rolesWithModules;
 
         // Get user's recent login history
         const [loginHistory] = await connection.execute(`
@@ -246,7 +258,7 @@ const getUsersWithRolePermissionSummary = async (req, res) => {
         }
 
         // Validate sort column
-        const allowedSortColumns = ['name', 'username', 'email', 'status', 'created_at', 'last_login'];
+        const allowedSortColumns = ['name', 'email', 'status', 'created_at', 'last_login'];
         const sortColumn = allowedSortColumns.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
@@ -271,7 +283,6 @@ const getUsersWithRolePermissionSummary = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -465,7 +476,6 @@ const getUserActivityReport = async (req, res) => {
                 al.response_time_ms,
                 al.created_at,
                 u.name as user_name,
-                u.username
             FROM access_logs al
             JOIN users u ON al.user_id = u.id
             ${whereClause}
@@ -535,7 +545,6 @@ const getOnlineUsers = async (req, res) => {
             SELECT DISTINCT
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.status,
                 u.last_login,

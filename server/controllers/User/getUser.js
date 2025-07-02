@@ -1,5 +1,17 @@
 const db = require('../../db');
 
+// Helper function to validate user_id exists
+const validateUserId = async (connection, userId) => {
+    if (!userId) return null;
+    
+    const [users] = await connection.execute(
+        'SELECT id FROM users WHERE id = ?',
+        [userId]
+    );
+    
+    return users.length > 0 ? userId : null;
+};
+
 // Enhanced getAllUsers with complete roles and permissions info
 const getAllUsers = async (req, res) => {
     const connection = await db.promise();
@@ -29,9 +41,9 @@ const getAllUsers = async (req, res) => {
 
         // Add search filter
         if (search && search.trim()) {
-            whereClause += ' AND (u.name LIKE ? OR u.username LIKE ? OR u.email LIKE ?)';
+            whereClause += ' AND (u.name LIKE ? OR u.email LIKE ?)';
             const searchTerm = `%${search.trim()}%`;
-            params.push(searchTerm, searchTerm, searchTerm);
+            params.push(searchTerm, searchTerm);
         }
 
         // Add status filter
@@ -47,7 +59,7 @@ const getAllUsers = async (req, res) => {
         }
 
         // Validate sort column
-        const allowedSortColumns = ['name', 'username', 'email', 'status', 'created_at', 'last_login'];
+        const allowedSortColumns = ['name', 'email', 'status', 'created_at', 'last_login'];
         const sortColumn = allowedSortColumns.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
@@ -69,7 +81,6 @@ const getAllUsers = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -173,18 +184,20 @@ const getAllUsers = async (req, res) => {
             });
         }
 
-        // Log access
+        // Log access - Fixed foreign key constraint
         try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'VIEW', 'USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user?.userId || 0,
-                    req.user?.username || 'unknown',
-                    req.ip || 'unknown',
-                    req.get('User-Agent') || 'unknown'
-                ]
-            );
+            const validUserId = await validateUserId(connection, req.user?.userId);
+            if (validUserId) {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'VIEW', 'USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        validUserId,
+                        req.ip || 'unknown',
+                        req.get('User-Agent') || 'unknown'
+                    ]
+                );
+            }
         } catch (logError) {
             console.error('Error logging access:', logError);
         }
@@ -240,7 +253,6 @@ const getUserById = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -327,18 +339,24 @@ const getUserById = async (req, res) => {
         user.permissions_count = userPermissions.length;
         user.role_names = userRoles.map(role => role.name).join(', ');
 
-        // Log access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'USER', ?, 'SUCCESS', ?, ?, NOW())`,
-            [
-                req.user?.userId || 0,
-                req.user?.username || 'unknown',
-                userId,
-                req.ip || 'unknown',
-                req.get('User-Agent') || 'unknown'
-            ]
-        );
+        // Log access - Fixed foreign key constraint
+        try {
+            const validUserId = await validateUserId(connection, req.user?.userId);
+            if (validUserId) {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'VIEW', 'USER', ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        validUserId,
+                        userId,
+                        req.ip || 'unknown',
+                        req.get('User-Agent') || 'unknown'
+                    ]
+                );
+            }
+        } catch (logError) {
+            console.error('Error logging access:', logError);
+        }
 
         res.status(200).json({
             success: true,
@@ -369,7 +387,6 @@ const getUserProfile = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,

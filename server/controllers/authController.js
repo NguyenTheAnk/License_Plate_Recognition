@@ -9,7 +9,6 @@ const registerUser = async (req, res) => {
     try {
         const {
             name,
-            username,
             email,
             phone,
             password
@@ -17,8 +16,8 @@ const registerUser = async (req, res) => {
 
         // Check if username or email already exists
         const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE username = ? OR email = ?',
-            [username, email]
+            'SELECT id FROM users WHERE OR email = ?',
+            [email]
         );
 
         if (existingUsers.length > 0) {
@@ -34,9 +33,9 @@ const registerUser = async (req, res) => {
 
         // Create user
         const [userResult] = await connection.execute(
-            `INSERT INTO users (name, username, email, phone, password, status, created_at, updated_at) 
-             VALUES (?, ?, ?, ?, ?, 'active', NOW(), NOW())`,
-            [name, username, email, phone, hashedPassword]
+            `INSERT INTO users (name, email, phone, password, status, created_at, updated_at) 
+             VALUES (?,?, ?, ?, 'active', NOW(), NOW())`,
+            [name,  email, phone, hashedPassword]
         );
 
         const userId = userResult.insertId;
@@ -58,7 +57,6 @@ const registerUser = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -102,7 +100,7 @@ const registerUser = async (req, res) => {
         const token = jwt.sign(
             {
                 userId: user.id,
-                username: user.username,
+                name: user.name,
                 email: user.email,
                 roles: user.roles.map(role => role.name),
                 permissions: user.permissions.map(permission => permission.code)
@@ -160,7 +158,6 @@ const loginUser = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.password,
@@ -298,7 +295,7 @@ const loginUser = async (req, res) => {
         const token = jwt.sign(
             {
                 userId: user.id,
-                username: user.username,
+                name: user.name,
                 email: user.email,
                 roles: user.roles.map(role => role.name),
                 permissions: user.permissions.map(permission => permission.code)
@@ -394,7 +391,6 @@ const refreshToken = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status
@@ -445,7 +441,7 @@ const refreshToken = async (req, res) => {
         const newToken = jwt.sign(
             {
                 userId: user.id,
-                username: user.username,
+                name: user.name,
                 email: user.email,
                 roles: user.roles.map(role => role.name),
                 permissions: user.permissions.map(permission => permission.code)
@@ -480,11 +476,11 @@ const logoutUser = async (req, res) => {
     try {
         // Log logout
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'LOGOUT', 'USER', 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, action_type, object_type, status, ip_address, user_agent, created_at)
+             VALUES (?, 'LOGOUT', 'USER', 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
-                req.user.username,
+                req.user.name,
                 req.ip,
                 req.get('User-Agent')
             ]

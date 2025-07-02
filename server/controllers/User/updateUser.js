@@ -1,6 +1,18 @@
 const db = require('../../db');
 const bcrypt = require('bcrypt');
 
+// Helper function to validate user_id exists
+const validateUserId = async (connection, userId) => {
+    if (!userId) return null;
+    
+    const [users] = await connection.execute(
+        'SELECT id FROM users WHERE id = ?',
+        [userId]
+    );
+    
+    return users.length > 0 ? userId : null;
+};
+
 // Update user information - FIXED VERSION
 const updateUser = async (req, res) => {
     const connection = await db.promise();
@@ -9,7 +21,6 @@ const updateUser = async (req, res) => {
         const userId = req.params.id;
         const {
             name,
-            username,
             email,
             phone,
             status,
@@ -36,17 +47,17 @@ const updateUser = async (req, res) => {
             });
         }
 
-        // Check if username or email already exists (excluding current user)
-        if (username || email) {
+        // Check if email already exists (excluding current user)
+        if (email) {
             const [existingUsers] = await connection.execute(
-                'SELECT id FROM users WHERE (username = ? OR email = ?) AND id != ?',
-                [username || currentUser[0].username, email || currentUser[0].email, userId]
+                'SELECT id FROM users WHERE email = ? AND id != ?',
+                [email, userId]
             );
 
             if (existingUsers.length > 0) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Tên đăng nhập hoặc email đã tồn tại'
+                    message: 'Email đã tồn tại'
                 });
             }
         }
@@ -58,10 +69,6 @@ const updateUser = async (req, res) => {
         if (name !== undefined) {
             updateFields.push('name = ?');
             updateValues.push(name);
-        }
-        if (username !== undefined) {
-            updateFields.push('username = ?');
-            updateValues.push(username);
         }
         if (email !== undefined) {
             updateFields.push('email = ?');
@@ -97,20 +104,21 @@ const updateUser = async (req, res) => {
 
             // Then add new roles
             if (roleIds.length > 0) {
-                const roleValues = roleIds.map(roleId => `(${userId}, ${roleId}, ${req.user.userId})`).join(', ');
+                // Validate req.user.userId exists
+                const validAssignedBy = await validateUserId(connection, req.user?.userId);
+                const roleValues = roleIds.map(roleId => `(${userId}, ${roleId}, ${validAssignedBy || 'NULL'})`).join(', ');
                 await connection.execute(
                     `INSERT INTO user_roles (user_id, role_id, assigned_by) VALUES ${roleValues}
-                     ON DUPLICATE KEY UPDATE is_active = 1, assigned_at = NOW(), assigned_by = ${req.user.userId}`
+                     ON DUPLICATE KEY UPDATE is_active = 1, assigned_at = NOW(), assigned_by = ${validAssignedBy || 'NULL'}`
                 );
             }
         }
 
-        // Get updated user basic info - FIXED VERSION
+        // Get updated user basic info
         const [updatedUser] = await connection.execute(`
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -154,21 +162,23 @@ const updateUser = async (req, res) => {
         user.roles = userRoles;
         user.permissions = userPermissions;
 
-        // Log access
+        // Log access - Fixed foreign key constraint
         try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'UPDATE', 'USER', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    userId,
-                    JSON.stringify(currentUser[0]),
-                    JSON.stringify({ name, username, email, phone, status, roleIds }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            const validUserId = await validateUserId(connection, req.user?.userId);
+            if (validUserId) {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'UPDATE', 'USER', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        validUserId,
+                        userId,
+                        JSON.stringify(currentUser[0]),
+                        JSON.stringify({ name, email, phone, status, roleIds }),
+                        req.ip,
+                        req.get('User-Agent')
+                    ]
+                );
+            }
         } catch (logError) {
             console.error('Error logging access:', logError);
         }
@@ -182,20 +192,22 @@ const updateUser = async (req, res) => {
     } catch (error) {
         console.error('Error updating user:', error);
         
-        // Log failed access
+        // Log failed access - Fixed foreign key constraint
         try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'UPDATE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
-                [
-                    req.user?.userId,
-                    req.user?.username,
-                    req.params.id,
-                    error.message,
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            const validUserId = await validateUserId(connection, req.user?.userId);
+            if (validUserId) {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                     VALUES (?, 'UPDATE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                    [
+                        validUserId,
+                        req.params.id,
+                        error.message,
+                        req.ip,
+                        req.get('User-Agent')
+                    ]
+                );
+            }
         } catch (logError) {
             console.error('Error logging failed access:', logError);
         }
@@ -263,19 +275,21 @@ const changePassword = async (req, res) => {
             [hashedNewPassword, userId]
         );
 
-        // Log access
+        // Log access - Fixed foreign key constraint
         try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'UPDATE', 'USER_PASSWORD', ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    userId,
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            const validUserId = await validateUserId(connection, req.user?.userId);
+            if (validUserId) {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'UPDATE', 'USER_PASSWORD', ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        validUserId,
+                        userId,
+                        req.ip,
+                        req.get('User-Agent')
+                    ]
+                );
+            }
         } catch (logError) {
             console.error('Error logging access:', logError);
         }
@@ -330,21 +344,23 @@ const updateUserStatus = async (req, res) => {
             [status, userId]
         );
 
-        // Log access
+        // Log access - Fixed foreign key constraint
         try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'UPDATE', 'USER_STATUS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    userId,
-                    JSON.stringify({ status: currentUser[0].status }),
-                    JSON.stringify({ status }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            const validUserId = await validateUserId(connection, req.user?.userId);
+            if (validUserId) {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'UPDATE', 'USER_STATUS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        validUserId,
+                        userId,
+                        JSON.stringify({ status: currentUser[0].status }),
+                        JSON.stringify({ status }),
+                        req.ip,
+                        req.get('User-Agent')
+                    ]
+                );
+            }
         } catch (logError) {
             console.error('Error logging access:', logError);
         }

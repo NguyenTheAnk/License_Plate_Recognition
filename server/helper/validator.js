@@ -82,14 +82,6 @@ const createUserValidator = [
         .matches(/^[a-zA-ZÀ-ỹ\s]+$/)
         .withMessage('Tên chỉ được chứa chữ cái và khoảng trắng'),
 
-    body('username')
-        .notEmpty()
-        .withMessage('Tên đăng nhập là bắt buộc')
-        .isLength({ min: 3, max: 50 })
-        .withMessage('Tên đăng nhập phải có từ 3 đến 50 ký tự')
-        .matches(/^[a-zA-Z0-9_]+$/)
-        .withMessage('Tên đăng nhập chỉ được chứa chữ cái, số và dấu gạch dưới'),
-
     body('email')
         .notEmpty()
         .withMessage('Email là bắt buộc')

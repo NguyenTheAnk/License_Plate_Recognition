@@ -24,7 +24,7 @@ const updatePermission = async (req, res) => {
         // Get current permission data
         const [currentPermission] = await connection.execute(
             'SELECT * FROM permissions WHERE id = ?',
-            [id]
+            [id === undefined ? null : id]
         );
 
         if (currentPermission.length === 0) {
@@ -75,7 +75,7 @@ const updatePermission = async (req, res) => {
             // Check if new code already exists
             const [existingPermissions] = await connection.execute(
                 'SELECT id FROM permissions WHERE code = ? AND id != ?',
-                [code, id]
+                [code === undefined ? null : code, id === undefined ? null : id]
             );
 
             if (existingPermissions.length > 0) {
@@ -90,7 +90,7 @@ const updatePermission = async (req, res) => {
         if (module !== oldValues.module || action !== oldValues.action) {
             const [existingCombination] = await connection.execute(
                 'SELECT id FROM permissions WHERE module = ? AND action = ? AND id != ?',
-                [module, action, id]
+                [module === undefined ? null : module, action === undefined ? null : action, id === undefined ? null : id]
             );
 
             if (existingCombination.length > 0) {
@@ -107,7 +107,7 @@ const updatePermission = async (req, res) => {
              FROM role_permissions rp 
              JOIN roles r ON rp.role_id = r.id 
              WHERE rp.permission_id = ? AND rp.granted = 1`,
-            [id]
+            [id === undefined ? null : id]
         );
 
         const isBeingUsed = rolePermissions[0].count > 0;
@@ -125,7 +125,7 @@ const updatePermission = async (req, res) => {
             `UPDATE permissions 
              SET module = ?, action = ?, code = ?, description = ?, is_active = ?, updated_at = NOW()
              WHERE id = ?`,
-            [module, action, code, description, isActive ? 1 : 0, id]
+            [module === undefined ? null : module, action === undefined ? null : action, code === undefined ? null : code, description === undefined ? null : description, isActive ? 1 : 0, id === undefined ? null : id]
         );
 
         // Get updated permission with additional info
@@ -145,7 +145,7 @@ const updatePermission = async (req, res) => {
             LEFT JOIN role_permissions rp ON p.id = rp.permission_id
             WHERE p.id = ?
             GROUP BY p.id`,
-            [id]
+            [id === undefined ? null : id]
         );
 
         // Log access

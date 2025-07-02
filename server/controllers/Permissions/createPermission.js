@@ -50,7 +50,7 @@ const createPermission = async (req, res) => {
         // Check if permission code already exists
         const [existingPermissions] = await connection.execute(
             'SELECT id FROM permissions WHERE code = ?',
-            [code]
+            [code === undefined ? null : code]
         );
 
         if (existingPermissions.length > 0) {
@@ -63,7 +63,7 @@ const createPermission = async (req, res) => {
         // Check if module.action combination already exists (additional safety check)
         const [existingCombination] = await connection.execute(
             'SELECT id FROM permissions WHERE module = ? AND action = ?',
-            [module, action]
+            [module === undefined ? null : module, action === undefined ? null : action]
         );
 
         if (existingCombination.length > 0) {
@@ -77,7 +77,7 @@ const createPermission = async (req, res) => {
         const [permissionResult] = await connection.execute(
             `INSERT INTO permissions (module, action, code, description, is_active, created_at, updated_at) 
              VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-            [module, action, code, description, isActive ? 1 : 0]
+            [module === undefined ? null : module, action === undefined ? null : action, code === undefined ? null : code, description === undefined ? null : description, isActive ? 1 : 0]
         );
 
         const permissionId = permissionResult.insertId;
@@ -95,7 +95,7 @@ const createPermission = async (req, res) => {
                 updated_at
             FROM permissions 
             WHERE id = ?`,
-            [permissionId]
+            [permissionId === undefined ? null : permissionId]
         );
 
         // Log access

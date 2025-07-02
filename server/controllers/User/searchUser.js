@@ -26,7 +26,7 @@ const searchUsers = async (req, res) => {
 
         // Add text search filter
         if (query) {
-            whereClause += ' AND (u.name LIKE ? OR u.username LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)';
+            whereClause += ' AND (u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)';
             const searchTerm = `%${query}%`;
             params.push(searchTerm, searchTerm, searchTerm, searchTerm);
         }
@@ -76,7 +76,7 @@ const searchUsers = async (req, res) => {
         }
 
         // Validate sort column
-        const allowedSortColumns = ['name', 'username', 'email', 'status', 'created_at', 'last_login', 'updated_at'];
+        const allowedSortColumns = ['name', 'email', 'status', 'created_at', 'last_login', 'updated_at'];
         const sortColumn = allowedSortColumns.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
@@ -95,7 +95,6 @@ const searchUsers = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -147,11 +146,11 @@ const searchUsers = async (req, res) => {
 
         // Log search access
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'SEARCH', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
+             VALUES (?, 'SEARCH', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
-                req.user.username,
+                req.user.name,
                 JSON.stringify({ query, status, role, permission, dateFrom, dateTo, lastLoginFrom, lastLoginTo }),
                 req.ip,
                 req.get('User-Agent')
@@ -211,7 +210,7 @@ const searchUsersByCriteria = async (req, res) => {
             });
         }
 
-        const allowedCriteria = ['username', 'email', 'phone', 'name'];
+        const allowedCriteria = ['email', 'phone', 'name'];
         if (!allowedCriteria.includes(criteria)) {
             return res.status(400).json({
                 success: false,
@@ -227,7 +226,6 @@ const searchUsersByCriteria = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -329,7 +327,6 @@ const getUsersByRole = async (req, res) => {
             SELECT DISTINCT
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
@@ -470,7 +467,6 @@ const getUsersByPermission = async (req, res) => {
             SELECT DISTINCT
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.phone,
                 u.status,
