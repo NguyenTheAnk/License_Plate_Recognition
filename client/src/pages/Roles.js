@@ -40,7 +40,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  FormGroup
+  FormGroup,
+  Breadcrumbs
 } from '@mui/material';
 
 import {
@@ -66,7 +67,9 @@ import {
   DirectionsCar as DirectionsCarIcon,
   LocationOn as LocationOnIcon,
   Notifications as NotificationsIcon,
-  VpnKey as VpnKeyIcon
+  VpnKey as VpnKeyIcon,
+  Home as HomeIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 
 import { 
@@ -89,42 +92,67 @@ import {
 } from '../utils/auth';
 
 // Modern Header Component
-const RoleHeader = ({ onAdd, onBulkDelete, selectedCount }) => (
-  <Paper elevation={0} sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
-    <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+const RoleHeader = ({ onAdd }) => (
+  <StyledHeaderCard
+    icon={<FaUserShield size={44} color="#1976d2" />}
+    title="Quản lý Vai trò"
+    subtitle="Quản lý vai trò và quyền hạn trong hệ thống"
+  >
+    <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" justifyContent="space-between">
+      {/* Breadcrumbs for consistency with User.js */}
+      <Breadcrumbs sx={{ '& .MuiBreadcrumbs-ol': { flexWrap: 'nowrap', overflow: 'hidden' } }}>
+        <Chip
+          label="Trang chủ"
+          icon={<HomeIcon fontSize="small" />}
+          onClick={() => window.location.href = '/'}
+          sx={{ backgroundColor: 'grey.100', height: 24, color: 'text.primary', fontWeight: 'fontWeightRegular', cursor: 'pointer' }}
+        />
+        <Chip
+          label="Quản lý vai trò"
+          icon={<ExpandMoreIcon fontSize="small" />}
+          sx={{ backgroundColor: 'grey.100', height: 24, color: 'text.primary', fontWeight: 'fontWeightRegular' }}
+        />
+      </Breadcrumbs>
+      <Button
+        variant="contained"
+        size="large"
+        startIcon={<AddIcon />}
+        onClick={onAdd}
+        sx={{ fontWeight: 'bold', fontSize: '1rem', bgcolor: 'primary.main', color: 'white', '&:hover': { bgcolor: 'primary.dark' } }}
+      >
+        Thêm vai trò
+      </Button>
+    </Box>
+  </StyledHeaderCard>
+);
+
+// Styled Header Card giống User.js
+const StyledHeaderCard = ({ icon, title, subtitle, children }) => (
+  <Card sx={{
+    background: 'white',
+    borderRadius: 3,
+    boxShadow: '0 4px 24px rgba(25, 118, 210, 0.08)',
+    mb: 4,
+    px: 4,
+    py: 3,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 3,
+    flexWrap: 'wrap',
+  }}>
+    <Box display="flex" alignItems="center" gap={2}>
+      {icon}
       <Box>
-        <Typography variant="h3" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <FaUserShield size={40} />
-          Quản lý Vai trò
+        <Typography variant="h4" fontWeight={700} color="primary.main" gutterBottom>
+          {title}
         </Typography>
-        <Typography variant="h6" sx={{ opacity: 0.9 }}>
-          Quản lý vai trò và quyền hạn trong hệ thống
+        <Typography variant="subtitle1" color="text.secondary">
+          {subtitle}
         </Typography>
-      </Box>
-      <Box display="flex" gap={2}>
-        {selectedCount > 0 && (
-          <Button
-            variant="outlined"
-            color="error"
-            startIcon={<DeleteIcon />}
-            onClick={onBulkDelete}
-            sx={{ fontWeight: 'bold', bgcolor: 'rgba(255,255,255,0.15)', color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.25)' } }}
-          >
-            Xóa các vai trò đã chọn ({selectedCount})
-          </Button>
-        )}
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<AddIcon />}
-          onClick={onAdd}
-          sx={{ fontWeight: 'bold', fontSize: '1rem', bgcolor: 'rgba(255,255,255,0.2)', color: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.3)' } }}
-        >
-          Thêm vai trò
-        </Button>
       </Box>
     </Box>
-  </Paper>
+    {children && <Box flex={1}>{children}</Box>}
+  </Card>
 );
 
 const RoleManagement = () => {
@@ -580,78 +608,117 @@ const RoleManagement = () => {
     }
   };
 
+  // Hàm tạo mảng trang với dấu ... giống User.js
+  function getPaginationItems(current, total) {
+    const delta = 1;
+    const range = [];
+    const rangeWithDots = [];
+    let l;
+    for (let i = 1; i <= total; i++) {
+      if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
+        range.push(i);
+      }
+    }
+    for (let i of range) {
+      if (l) {
+        if (i - l === 2) {
+          rangeWithDots.push(l + 1);
+        } else if (i - l > 2) {
+          rangeWithDots.push('...');
+        }
+      }
+      rangeWithDots.push(i);
+      l = i;
+    }
+    return rangeWithDots;
+  }
+
   // Custom Pagination
   const renderPagination = () => {
     const totalPages = Math.ceil(totalRoles / rowsPerPage);
-    const pages = [];
-    const maxDisplay = 5;
-    const startPage = Math.max(0, currentPage - 1);
-    const endPage = Math.min(totalPages - 1, currentPage + 1);
-
-    // Always show first page
-    pages.push(0);
-    if (startPage > 1) pages.push('start-ellipsis');
-    for (let i = startPage; i <= endPage; i++) {
-      if (i !== 0 && i !== totalPages - 1) pages.push(i);
-    }
-    if (endPage < totalPages - 2) pages.push('end-ellipsis');
-    if (totalPages > 1) pages.push(totalPages - 1);
-
     const from = totalRoles === 0 ? 0 : currentPage * rowsPerPage + 1;
     const to = Math.min((currentPage + 1) * rowsPerPage, totalRoles);
 
     return (
-      <Box sx={{ width: '100%' }}>
-        {/* Info tổng số ở trên */}
-        <Box display="flex" justifyContent="flex-start" sx={{ mb: 1 }}>
-          <Typography variant="body2" color="primary">Hiển thị {from} - {to} / {totalRoles} vai trò</Typography>
-        </Box>
-        {/* Selector và phân trang ở dưới */}
-        <Box display="flex" alignItems="center" justifyContent="flex-end" sx={{ gap: 2, flexWrap: 'wrap' }}>
-          {/* Selector số hàng/trang */}
-          <Box display="flex" alignItems="center" gap={1}>
-            <Typography variant="body2">Hiển thị</Typography>
+      <>
+        <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
+          Hiển thị {from} - {to} / {totalRoles} vai trò
+        </Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="center" p={3} sx={{
+          borderTop: '1px solid rgba(0, 0, 0, 0.1)',
+          background: 'rgba(0, 0, 0, 0.02)',
+        }}>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel id="per-page-label">Bản ghi/trang</InputLabel>
             <Select
-              size="small"
+              labelId="per-page-label"
               value={rowsPerPage}
+              label="Bản ghi/trang"
               onChange={e => {
-                setRowsPerPage(parseInt(e.target.value, 10));
+                setRowsPerPage(Number(e.target.value));
                 setCurrentPage(0);
               }}
-              sx={{ minWidth: 70 }}
             >
-              {[5, 10, 20, 50, 100].map(opt => (
-                <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+              {[5, 10, 20, 50, 100].map(size => (
+                <MenuItem key={size} value={size}>{size}</MenuItem>
               ))}
             </Select>
-            <Typography variant="body2">hàng</Typography>
-          </Box>
-          {/* Nút phân trang */}
+          </FormControl>
+          {/* Pagination right */}
           <Box display="flex" alignItems="center" gap={1}>
-            <Button size="small" onClick={() => setCurrentPage(0)} disabled={currentPage === 0}>{'<<'}</Button>
-            <Button size="small" onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))} disabled={currentPage === 0}>{'<'}</Button>
-            {pages.map((page, idx) =>
-              page === 'start-ellipsis' || page === 'end-ellipsis' ? (
-                <Box key={page + idx} sx={{ px: 1, color: 'text.secondary' }}>...</Box>
-              ) : (
-                <Button
-                  key={page}
-                  variant={page === currentPage ? 'contained' : 'outlined'}
-                  color={page === currentPage ? 'primary' : 'inherit'}
-                  size="small"
-                  sx={{ minWidth: 36 }}
-                  onClick={() => setCurrentPage(page)}
-                  disabled={page === currentPage}
-                >
-                  {page + 1}
-                </Button>
-              )
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={currentPage === 0}
+              onClick={() => setCurrentPage(0)}
+              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+            >
+              {'<<'}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={currentPage === 0}
+              onClick={() => setCurrentPage(prev => prev - 1)}
+              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+            >
+              {'<'}
+            </Button>
+            {getPaginationItems(currentPage + 1, totalPages).map((item, idx) =>
+              item === '...'
+                ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
+                : <Button
+                    key={item}
+                    variant={item === currentPage + 1 ? 'contained' : 'outlined'}
+                    color={item === currentPage + 1 ? 'primary' : 'inherit'}
+                    size="small"
+                    sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25, ...(item === currentPage + 1 && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' }) }}
+                    onClick={() => setCurrentPage(item - 1)}
+                  >
+                    {item}
+                  </Button>
             )}
-            <Button size="small" onClick={() => setCurrentPage(prev => Math.min(totalPages - 1, prev + 1))} disabled={currentPage === totalPages - 1}>{'>'}</Button>
-            <Button size="small" onClick={() => setCurrentPage(totalPages - 1)} disabled={currentPage === totalPages - 1}>{'>>'}</Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={currentPage === totalPages - 1 || totalPages === 0}
+              onClick={() => setCurrentPage(prev => prev + 1)}
+              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+            >
+              {'>'}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={currentPage === totalPages - 1 || totalPages === 0}
+              onClick={() => setCurrentPage(totalPages - 1)}
+              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+            >
+              {'>>'}
+            </Button>
           </Box>
         </Box>
-      </Box>
+      </>
     );
   };
 
@@ -691,7 +758,7 @@ const RoleManagement = () => {
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      <RoleHeader onAdd={() => openDialog('create')} onBulkDelete={handleBulkDelete} selectedCount={selectedRoles.length} />
+      <RoleHeader onAdd={() => openDialog('create')} />
 
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -779,13 +846,21 @@ const RoleManagement = () => {
       {/* Search and Filters */}
       <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
         <Grid container spacing={3} alignItems="center">
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} sm={6} md={3}>
             <TextField
               fullWidth
-              variant="outlined"
-              placeholder="Tìm kiếm vai trò..."
+              label="Tìm kiếm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Tên vai trò..."
+              size="small"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
+                  '&:hover fieldset': { borderColor: '#1976d2' },
+                  '&.Mui-focused fieldset': { borderColor: '#1976d2' },
+                },
+              }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -795,14 +870,18 @@ const RoleManagement = () => {
               }}
             />
           </Grid>
-          
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth>
+          <Grid item xs={12} sm={6} md={2}>
+            <FormControl fullWidth size="small">
               <InputLabel>Trạng thái</InputLabel>
               <Select
                 value={filterActive}
-                label="Trạng thái"
                 onChange={(e) => setFilterActive(e.target.value)}
+                label="Trạng thái"
+                sx={{
+                  borderRadius: 2,
+                  '& .MuiOutlinedInput-notchedOutline': { '&:hover': { borderColor: '#1976d2' } },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#1976d2' },
+                }}
               >
                 <MenuItem value="all">Tất cả</MenuItem>
                 <MenuItem value="active">Hoạt động</MenuItem>
@@ -810,9 +889,8 @@ const RoleManagement = () => {
               </Select>
             </FormControl>
           </Grid>
-
-          <Grid item xs={12} md={3}>
-            <FormControl fullWidth>
+          <Grid item xs={12} sm={6} md={2}>
+            <FormControl fullWidth size="small">
               <InputLabel>Sắp xếp</InputLabel>
               <Select
                 value={`${sortBy}_${sortOrder}`}
@@ -821,6 +899,11 @@ const RoleManagement = () => {
                   const [field, order] = e.target.value.split('_');
                   setSortBy(field);
                   setSortOrder(order);
+                }}
+                sx={{
+                  borderRadius: 2,
+                  '& .MuiOutlinedInput-notchedOutline': { '&:hover': { borderColor: '#1976d2' } },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#1976d2' },
                 }}
               >
                 <MenuItem value="created_at_desc">Mới nhất</MenuItem>
@@ -831,6 +914,45 @@ const RoleManagement = () => {
                 <MenuItem value="level_desc">Level cao đến thấp</MenuItem>
               </Select>
             </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={2}>
+            <Button
+              fullWidth
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={() => { setSearchTerm(''); setFilterActive('all'); setSortBy('created_at'); setSortOrder('desc'); fetchRoles(); setSelectedRoles([]); }}
+              sx={{
+                borderRadius: 2,
+                py: 1.5,
+                textTransform: 'none',
+                fontWeight: 600,
+                borderColor: '#1976d2',
+                color: '#1976d2',
+                '&:hover': { borderColor: '#1565c0', backgroundColor: 'rgba(25, 118, 210, 0.04)' },
+              }}
+            >
+              Làm mới
+            </Button>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            {selectedRoles.length > 0 && (
+              <Button
+                fullWidth
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                onClick={handleBulkDelete}
+                sx={{
+                  borderRadius: 2,
+                  py: 1.5,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.04)' },
+                }}
+              >
+                Xóa đã chọn ({selectedRoles.length})
+              </Button>
+            )}
           </Grid>
         </Grid>
       </Paper>
@@ -965,7 +1087,7 @@ const RoleManagement = () => {
         {/* Custom Pagination */}
         {renderPagination()}
         {/* Nút Thêm vai trò ở dưới bảng */}
-        <Box display="flex" justifyContent="flex-end" sx={{ p: 2 }}>
+        {/* <Box display="flex" justifyContent="flex-end" sx={{ p: 2 }}>
           <Button
             variant="contained"
             size="large"
@@ -975,21 +1097,7 @@ const RoleManagement = () => {
           >
             Thêm vai trò
           </Button>
-        </Box>
-        {/* Bulk delete button */}
-        {selectedRoles.length > 0 && (
-          <Box display="flex" alignItems="center" gap={2} sx={{ p: 2, pb: 0 }}>
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={handleBulkDelete}
-              sx={{ fontWeight: 'bold' }}
-            >
-              Xóa các vai trò đã chọn ({selectedRoles.length})
-            </Button>
-          </Box>
-        )}
+        </Box> */}
       </Paper>
 
       {/* Dialog */}
