@@ -98,7 +98,7 @@ const RoleHeader = ({ onAdd }) => (
     title="Quản lý Vai trò"
     subtitle="Quản lý vai trò và quyền hạn trong hệ thống"
   >
-    <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" justifyContent="space-between">
+    <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" justifyContent="flex-end">
       {/* Breadcrumbs for consistency with User.js */}
       <Breadcrumbs sx={{ '& .MuiBreadcrumbs-ol': { flexWrap: 'nowrap', overflow: 'hidden' } }}>
         <Chip
