@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { 
   TextField, 
   Button, 
-  Paper, 
   Typography, 
   Box, 
   Alert, 
@@ -24,7 +23,6 @@ import {
   Person,
   Lock,
   Email,
-  CheckCircle,
   Error as ErrorIcon,
   Phone
 } from '@mui/icons-material';
@@ -32,10 +30,10 @@ import { useNavigate } from 'react-router-dom';
 import { postData } from '../utils/auth.js';
 
 function Register() {
-  const [name, setName] = useState(''); // Thêm field name
+  const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState(''); // Thêm field phone
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');

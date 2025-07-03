@@ -98,17 +98,16 @@ const deleteRole = async (req, res) => {
 
             await connection.commit();
 
-            // Log access
+            // Log access - Fix: Handle undefined values
             await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'DELETE', 'ROLE', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
+                 VALUES (?, 'DELETE', 'ROLE', ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
-                    req.user.userId,
-                    req.user.username,
+                    req.user?.userId || null,
                     id,
                     JSON.stringify(roleData),
-                    req.ip,
-                    req.get('User-Agent')
+                    req.ip || null,
+                    req.get('User-Agent') || null
                 ]
             );
 
@@ -132,19 +131,22 @@ const deleteRole = async (req, res) => {
     } catch (error) {
         console.error('Error deleting role:', error);
         
-        // Log failed access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'DELETE', 'ROLE', ?, 'FAILURE', ?, ?, ?, NOW())`,
-            [
-                req.user?.userId,
-                req.user?.username,
-                req.params.id,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        // Log failed access - Fix: Handle undefined values
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, 'DELETE', 'ROLE', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                [
+                    req.user?.userId || null,
+                    req.params.id || null,
+                    error.message || null,
+                    req.ip || null,
+                    req.get('User-Agent') || null
+                ]
+            );
+        } catch (logError) {
+            console.error('Error logging failed access:', logError);
+        }
 
         res.status(500).json({
             success: false,

@@ -275,7 +275,6 @@ const getRoleById = async (req, res) => {
             SELECT 
                 u.id,
                 u.name,
-                u.username,
                 u.email,
                 u.status,
                 ur.assigned_at,

@@ -43,7 +43,6 @@ const menuGroups = [
           { text: 'Quản lý người dùng', icon: <UsersIcon />, path: '/user' },
           { text: 'Quản lý quyền', icon: <PermissionIcon />, path: '/permissions' },
           { text: 'Quản lý vai trò', icon: <RoleIcon />, path: '/roles' },
-          { text: 'Quản lý quyền người dùng', icon: <UserPermissionIcon />, path: '/user-permissions' },
         ]
       },
     ]

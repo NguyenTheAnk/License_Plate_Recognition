@@ -300,17 +300,25 @@ const getAllPermissions = async (req, res) => {
         let whereConditions = [];
         let queryParams = [];
         
-        if (module) {
+        // Sửa lỗi: Kiểm tra và chỉ thêm điều kiện khi có giá trị hợp lệ
+        if (module && module.trim() !== '') {
             whereConditions.push('p.module = ?');
             queryParams.push(module);
         }
         
-        if (is_active !== null) {
+        if (is_active && is_active.trim() !== '') {
             whereConditions.push('p.is_active = ?');
             queryParams.push(is_active === 'true' ? 1 : 0);
         }
 
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+        // Debug: Log query parameters
+        console.log('Query Parameters:', queryParams);
+        console.log('Parameters types:', queryParams.map(p => typeof p));
+        
+        // Đảm bảo không có undefined trong queryParams
+        const safeQueryParams = queryParams.map(param => param === undefined ? null : param);
 
         // Get all permissions
         const [permissions] = await connection.execute(`
@@ -329,7 +337,7 @@ const getAllPermissions = async (req, res) => {
             ${whereClause}
             GROUP BY p.id, p.module, p.action, p.code, p.description, p.is_active, p.created_at, p.updated_at
             ORDER BY p.module, p.action
-        `, queryParams);
+        `, safeQueryParams);
 
         // Group permissions based on request
         let groupedData = {};
@@ -344,7 +352,7 @@ const getAllPermissions = async (req, res) => {
             groupedData = { all: permissions };
         }
 
-        // Get module statistics
+        // Get module statistics - Sử dụng cùng điều kiện và tham số
         const [moduleStats] = await connection.execute(`
             SELECT 
                 p.module,
@@ -356,17 +364,21 @@ const getAllPermissions = async (req, res) => {
             ${whereClause}
             GROUP BY p.module
             ORDER BY p.module
-        `, queryParams);
+        `, safeQueryParams);
+
+        // Chuẩn bị tham số an toàn cho logging
+        const safeUserId = req.user?.userId || null;
+        const safeIpAddress = req.ip || req.connection?.remoteAddress || null;
+        const safeUserAgent = req.get ? (req.get('User-Agent') || null) : null;
 
         // Log access
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'PERMISSIONS', 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, action_type, object_type, status, ip_address, user_agent, created_at)
+             VALUES (?, 'VIEW', 'PERMISSIONS', 'SUCCESS', ?, ?, NOW())`,
             [
-                req.user.userId,
-                req.user.username,
-                req.ip,
-                req.get('User-Agent')
+                safeUserId,
+                safeIpAddress,
+                safeUserAgent
             ]
         );
 
@@ -384,16 +396,21 @@ const getAllPermissions = async (req, res) => {
     } catch (error) {
         console.error('Error getting permissions:', error);
         
+        // Chuẩn bị tham số an toàn cho error logging
+        const safeUserId = req.user?.userId || null;
+        const safeIpAddress = req.ip || req.connection?.remoteAddress || null;
+        const safeUserAgent = req.get ? (req.get('User-Agent') || null) : null;
+        const safeErrorMessage = error?.message || 'Unknown error';
+        
         // Log failed access
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'PERMISSIONS', 'FAILURE', ?, ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
+             VALUES (?, 'VIEW', 'PERMISSIONS', 'FAILURE', ?, ?, ?, NOW())`,
             [
-                req.user?.userId,
-                req.user?.username,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
+                safeUserId,
+                safeErrorMessage,
+                safeIpAddress,
+                safeUserAgent
             ]
         );
 

@@ -1,6 +1,5 @@
-import React, { useState, useEffect, createContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import React, { useContext, useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import CssBaseline from '@mui/material/CssBaseline';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -15,83 +14,90 @@ import Roles from './pages/Roles';
 import Permissions from './pages/Permissions';
 import axios from 'axios';
 
-// Tạo Context để chia sẻ data giữa các components
-export const MyContext = createContext();
+export const MyContext = React.createContext();
 
-const lightTheme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#f50057',
-    },
-    background: {
-      default: '#f4f6fa',
-      paper: '#fff',
-    },
-  },
-});
-
-function App() {
+// Context Provider Component
+function MyContextProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(null);
+  const [loading, setLoading] = useState(true);
 
+  // Khởi tạo dữ liệu từ localStorage khi app load
   useEffect(() => {
-    // Khởi tạo user từ localStorage
-    const initUser = () => {
-      const storedToken = localStorage.getItem('token');
-      const userData = localStorage.getItem('user');
-      
-      if (storedToken && userData) {
-        try {
-          const parsedUser = JSON.parse(userData);
-          console.log('=== APP.JS DEBUG ===');
-          console.log('Parsed user from localStorage:', parsedUser);
-          setUser(parsedUser);
+    const initializeAuth = () => {
+      try {
+        const storedToken = localStorage.getItem('token');
+        const storedUser = localStorage.getItem('user');
+        
+        if (storedToken && storedUser) {
+          const parsedUser = JSON.parse(storedUser);
           setToken(storedToken);
-        } catch (error) {
-          console.error('Error parsing user data:', error);
-          // Clear corrupted data
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          localStorage.removeItem('refreshToken');
-          setUser(null);
-          setToken(null);
+          setUser(parsedUser);
+          console.log('Auth initialized from localStorage:', { user: parsedUser, token: storedToken });
         }
-      } else {
-        setUser(null);
-        setToken(null);
+      } catch (error) {
+        console.error('Error initializing auth from localStorage:', error);
+        // Clear corrupted data
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
-    initUser();
+    initializeAuth();
   }, []);
 
-  const handleLogin = (userData, userToken) => {
-    console.log('=== HANDLE LOGIN ===');
-    console.log('User data received:', userData);
-    console.log('Token received:', userToken);
-    setUser(userData);
-    setToken(userToken);
+  // Update localStorage when state changes
+  useEffect(() => {
+    if (token && user) {
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+    }
+  }, [token, user]);
+
+  const contextValue = {
+    user,
+    setUser,
+    token,
+    setToken,
+    loading
   };
 
-  const handleLogout = async () => {
+  return (
+    <MyContext.Provider value={contextValue}>
+      {children}
+    </MyContext.Provider>
+  );
+}
+
+function AppContent() {
+  const { user, setUser, token, setToken, loading } = useContext(MyContext);
+  const navigate = useNavigate();
+
+  const handleLogin = (userData, userToken) => {
+    console.log('Login successful:', { userData, userToken });
+    setUser(userData);
+    setToken(userToken);
+    // localStorage sẽ được update tự động thông qua useEffect
+  };
+
+  const handleLogout = async (skipApiCall = false) => {
     const currentToken = localStorage.getItem('token');
-    if (currentToken) {
+    
+    // Chỉ gọi API logout nếu không skip và có token
+    if (!skipApiCall && currentToken) {
       try {
         await axios.post('http://localhost:5000/api/auth/logout', {}, {
           headers: { Authorization: `Bearer ${currentToken}` }
         });
-      } catch (e) {
-        console.error('Logout API error:', e);
-        // Có thể bỏ qua lỗi logout API
+        console.log('Logout API call successful');
+      } catch (error) {
+        console.warn('Logout API call failed:', error);
+        // Không throw error ở đây để vẫn có thể logout local
       }
     }
-    
+
     // Clear all auth data
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
@@ -100,19 +106,12 @@ function App() {
     
     setUser(null);
     setToken(null);
+    
+    console.log('Logout completed, redirecting to login');
+    navigate('/login');
   };
 
-  // Context value để chia sẻ với các components con
-  const contextValue = {
-    user,
-    setUser,
-    token,
-    setToken,
-    handleLogout,
-    isLoggedIn: !!user && !!token
-  };
-
-  // Loading state
+  // Show loading spinner while initializing
   if (loading) {
     return (
       <div style={{
@@ -147,75 +146,62 @@ function App() {
   }
 
   return (
-    <MyContext.Provider value={contextValue}>
+    <>
+      <CssBaseline />
+      <Routes>
+        <Route 
+          path="/login" 
+          element={
+            user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />
+          } 
+        />
+        <Route 
+          path="/register" 
+          element={
+            user ? <Navigate to="/" replace /> : <Register />
+          } 
+        />
+        <Route
+          path="/*"
+          element={
+            <PrivateRoute>
+              <Layout handleLogout={handleLogout} user={user}>
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/user" element={<User />} />
+                  <Route path="/user/:id/detailed" element={<UserDetail />} />
+                  <Route path="/roles" element={<Roles />} />
+                  <Route path="/permissions" element={<Permissions />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Layout>
+            </PrivateRoute>
+          }
+        />
+      </Routes>
+      <ToastContainer
+        position="top-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="light"
+      />
+    </>
+  );
+}
+
+function App() {
+  return (
+    <MyContextProvider>
       <BrowserRouter>
-        <ThemeProvider theme={lightTheme}>
-          <CssBaseline />
-          <Routes>
-            <Route 
-              path="/login" 
-              element={
-                user ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />
-              } 
-            />
-            <Route 
-              path="/register" 
-              element={
-                user ? <Navigate to="/" replace /> : <Register />
-              } 
-            />
-            <Route
-              path="/*"
-              element={
-                <PrivateRoute>
-                  <Layout handleLogout={handleLogout} user={user}>
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/user" element={<User />} />
-                      <Route path="/user/:id/detailed" element={<UserDetail />} />
-                      <Route path="/roles" element={<Roles />} />
-                      <Route path="/permissions" element={<Permissions />} />
-                      {/* <Route path="/live" element={<LiveView />} />
-                      <Route path="/history" element={<History />} />
-                      <Route path="/settings" element={<CameraSettings />} />
-                      <Route path="/cameras" element={<Cameras />} />
-                      <Route path="/videos" element={<Videos />} />
-                      <Route path="/calendar" element={<Calendar />} />
-                      <Route path="/logs" element={<Logs />} />
-                      <Route path="/onvif" element={<Onvif />} />
-                      <Route path="/storage" element={<Storage />} />
-                      <Route path="/timelapse" element={<Timelapse />} />
-                      <Route path="/explore" element={<Explore />} />
-                      <Route path="/account-settings" element={<AccountSettings />} />
-                      <Route path="/sub-accounts" element={<SubAccountManager />} />
-                      <Route path="/unit-types" element={<UnitTypes />} />
-                      <Route path="/units" element={<Units />} /> */}
-                      
-                      {/* Catch all route */}
-                      <Route path="*" element={<Navigate to="/" replace />} />
-                    </Routes>
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-          </Routes>
-          
-          {/* Toast Container để hiển thị notifications */}
-          <ToastContainer
-            position="top-right"
-            autoClose={5000}
-            hideProgressBar={false}
-            newestOnTop={false}
-            closeOnClick
-            rtl={false}
-            pauseOnFocusLoss
-            draggable
-            pauseOnHover
-            theme="light"
-          />
-        </ThemeProvider>
+        <AppContent />
       </BrowserRouter>
-    </MyContext.Provider>
+    </MyContextProvider>
   );
 }
 

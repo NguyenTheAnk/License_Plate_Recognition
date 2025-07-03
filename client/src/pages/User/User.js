@@ -1615,16 +1615,14 @@ const UsersManagement = () => {
               </TableBody>
             </Table>
           </TableContainer>
-          
-          {/* Enhanced Pagination */}
+
           <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
-            Hiển thị {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, totalUsers)} của {totalUsers} người dùng
+            Hiển thị {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, totalUsers)} / {totalUsers} người dùng
           </Typography>
           <Box display="flex" justifyContent="space-between" alignItems="center" p={3} sx={{
             borderTop: '1px solid rgba(0, 0, 0, 0.1)',
             background: 'rgba(0, 0, 0, 0.02)',
           }}>
-            {/* Page size selector bottom left */}
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel id="per-page-label">Bản ghi/trang</InputLabel>
               <Select

@@ -22,7 +22,6 @@ import {
   InputLabel, 
   FormControlLabel, 
   Paper, 
-  Pagination, 
   Alert, 
   Dialog, 
   DialogTitle, 
@@ -1258,7 +1257,7 @@ const Permissions = () => {
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', px: 3, pt: 2, pb: 0 }}>
               <Typography variant="body2" sx={{ fontWeight: 500, color: '#1976d2', fontSize: 15 }}>
                 {pagination.totalPermissions > 0
-                  ? `Hiển thị ${((filters.page - 1) * filters.perPage) + 1} - ${Math.min(filters.page * filters.perPage, pagination.totalPermissions)} trong tổng số ${pagination.totalPermissions} quyền`
+                  ? `Hiển thị ${((filters.page - 1) * filters.perPage) + 1} - ${Math.min(filters.page * filters.perPage, pagination.totalPermissions)} / ${pagination.totalPermissions} quyền`
                   : 'Không có quyền nào để hiển thị'}
               </Typography>
             </Box>
