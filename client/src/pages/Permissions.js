@@ -101,7 +101,7 @@ const StyledBreadcrumb = ({ component, href, label, icon, onClick, ...props }) =
 );
 
 // Create Permission Dialog Component
-const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated }) => {
+const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated, setAlertBox }) => {
   const [formData, setFormData] = useState({
     module: '',
     action: '',
@@ -111,7 +111,6 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated }) => {
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const context = useContext(MyContext);
 
   useEffect(() => {
     if (open) {
@@ -176,7 +175,7 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated }) => {
       const token = localStorage.getItem('token');
       const response = await postData('/api/permissions', formData, token);
       
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: false,
         msg: 'Tạo quyền thành công!'
@@ -185,7 +184,7 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated }) => {
       handleClose();
       resetForm();
     } catch (err) {
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: true,
         msg: handleErrorResponse(err)
@@ -214,7 +213,10 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated }) => {
         background: '#1976d2',
         color: 'white',
         borderRadius: '12px 12px 0 0',
-        borderBottom: '1px solid #e0e0e0'
+        borderBottom: '1px solid #e0e0e0',
+        pt: 3,
+        pb: 2,
+        px: 3
       }}>
         <Box display="flex" alignItems="center">
           <FaShieldAlt style={{ marginRight: 12, fontSize: '1.5rem' }} />
@@ -346,7 +348,7 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated }) => {
 };
 
 // Update Permission Dialog Component  
-const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpdated }) => {
+const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpdated, setAlertBox }) => {
   const [formData, setFormData] = useState({
     module: '',
     action: '',
@@ -356,7 +358,6 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const context = useContext(MyContext);
 
   useEffect(() => {
     if (open && permission) {
@@ -410,13 +411,29 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
-    
+    // Extra check for required fields before sending
+    if (!formData.module || !formData.action || !formData.code) {
+      setAlertBox({
+        open: true,
+        error: true,
+        msg: 'Module, hành động và mã quyền là bắt buộc.'
+      });
+      return;
+    }
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await editData(`/api/permissions/${permission.id}`, formData, token);
-      
-      context.setAlertBox({
+      // Ensure all fields are never undefined/null for backend
+      const payload = {
+        module: formData.module || '',
+        action: formData.action || '',
+        code: formData.code || '',
+        description: formData.description || '',
+        isActive: !!formData.isActive
+      };
+      console.log('Update permission payload:', payload);
+      const response = await editData(`/api/permissions/${permission.id}`, payload, token);
+      setAlertBox({
         open: true,
         error: false,
         msg: 'Cập nhật quyền thành công!'
@@ -424,7 +441,7 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
       onPermissionUpdated();
       handleClose();
     } catch (err) {
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: true,
         msg: handleErrorResponse(err)
@@ -574,76 +591,6 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
   );
 };
 
-// Add Role Assignment Dialog
-const RoleAssignmentDialog = ({ open, handleClose, permission, onRolesUpdated }) => {
-  const [roles, setRoles] = useState([]);
-  const [assignedRoles, setAssignedRoles] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const context = useContext(MyContext);
-
-  useEffect(() => {
-    if (open && permission) {
-      // Fetch all roles and assigned roles for this permission
-      (async () => {
-        setLoading(true);
-        try {
-          const token = localStorage.getItem('token');
-          const allRoles = await fetchDataFromAPI('/api/roles', token);
-          const assigned = await fetchDataFromAPI(`/api/permissions/${permission.id}/roles`, token);
-          setRoles(allRoles.data?.roles || []);
-          setAssignedRoles(assigned.data?.roles?.map(r => r.id) || []);
-        } catch (err) {
-          context.setAlertBox({ open: true, error: true, msg: handleErrorResponse(err) });
-        } finally {
-          setLoading(false);
-        }
-      })();
-    }
-  }, [open, permission]);
-
-  const handleToggleRole = (roleId) => {
-    setAssignedRoles(prev => prev.includes(roleId) ? prev.filter(id => id !== roleId) : [...prev, roleId]);
-  };
-
-  const handleSave = async () => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-      await postData(`/api/permissions/${permission.id}/roles`, { roleIds: assignedRoles }, token);
-      context.setAlertBox({ open: true, error: false, msg: 'Cập nhật vai trò thành công!' });
-      onRolesUpdated();
-      handleClose();
-    } catch (err) {
-      context.setAlertBox({ open: true, error: true, msg: handleErrorResponse(err) });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Phân vai trò cho quyền "{permission?.code}"</DialogTitle>
-      <DialogContent>
-        {loading ? <Typography>Đang tải...</Typography> : (
-          <Box>
-            {roles.map(role => (
-              <FormControlLabel
-                key={role.id}
-                control={<Checkbox checked={assignedRoles.includes(role.id)} onChange={() => handleToggleRole(role.id)} />}
-                label={role.name}
-              />
-            ))}
-          </Box>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={handleClose}>Hủy</Button>
-        <Button onClick={handleSave} variant="contained" disabled={loading}>Lưu</Button>
-      </DialogActions>
-    </Dialog>
-  );
-};
-
 // Thêm hàm tạo mảng trang với dấu ...
 function getPaginationItems(current, total) {
   const delta = 1;
@@ -677,7 +624,7 @@ const Permissions = () => {
   const [permissions, setPermissions] = useState([]);
   const [filters, setFilters] = useState({
     page: 1,
-    perPage: 20,
+    perPage: 10,
     module: '',
     action: '',
     search: '',
@@ -705,20 +652,18 @@ const Permissions = () => {
     action: true,
     code: true,
     description: true,
-    is_active: true,
-    granted_roles_count: true
+    is_active: true
   });
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [historyDialog, setHistoryDialog] = useState({ open: false, permission: null });
   const [historyData, setHistoryData] = useState([]);
+  const [alertBox, setAlertBox] = useState({ open: false, error: false, msg: '' });
   const token = localStorage.getItem('token');
-  const context = useContext(MyContext);
 
   // Fetch permissions and filter options from API
   const fetchPermissions = useCallback(async () => {
     setLoading(true);
-    context.setProgress(20);
     try {
       const response = await fetchDataFromAPI('/api/permissions', token + '', { params: filters });
       const perms = response.data?.permissions || response.permissions || [];
@@ -727,19 +672,12 @@ const Permissions = () => {
       setModules(response.data?.filters?.modules || response.filters?.modules || []);
       setActions(response.data?.filters?.actions || response.filters?.actions || []);
       setError(null);
-      context.setProgress(100);
     } catch (err) {
       setError(handleErrorResponse(err));
-      context.setAlertBox({
-        open: true,
-        error: true,
-        msg: handleErrorResponse(err)
-      });
-      context.setProgress(100);
     } finally {
       setLoading(false);
     }
-  }, [filters, token, context]);
+  }, [filters, token]);
 
   useEffect(() => {
     fetchPermissions();
@@ -776,7 +714,7 @@ const Permissions = () => {
     const { permissionId } = deleteDialog;
     try {
       const response = await deleteData(`/api/permissions/${permissionId}`, token);
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: false,
         msg: 'Xóa quyền thành công!'
@@ -788,7 +726,7 @@ const Permissions = () => {
       });
       fetchPermissions();
     } catch (err) {
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: true,
         msg: handleErrorResponse(err)
@@ -801,7 +739,7 @@ const Permissions = () => {
   // Handle bulk delete
   const handleBulkDelete = async () => {
     if (selectedPermissions.size === 0) {
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: true,
         msg: 'Vui lòng chọn ít nhất một quyền để xóa'
@@ -814,7 +752,7 @@ const Permissions = () => {
       await deleteData('/api/permissions/bulk/delete', token, { 
         data: { ids: Array.from(selectedPermissions) } 
       });
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: false,
         msg: `Xóa thành công ${selectedPermissions.size} quyền!`
@@ -822,7 +760,7 @@ const Permissions = () => {
       setSelectedPermissions(new Set());
       fetchPermissions();
     } catch (err) {
-      context.setAlertBox({
+      setAlertBox({
         open: true,
         error: true,
         msg: handleErrorResponse(err)
@@ -845,11 +783,11 @@ const Permissions = () => {
     }));
   };
 
-  // Handle refresh
+  // Update handleRefresh to only reset filters and selectedPermissions
   const handleRefresh = () => {
     setFilters({
       page: 1,
-      perPage: 20,
+      perPage: 10,
       module: '',
       action: '',
       search: '',
@@ -858,7 +796,6 @@ const Permissions = () => {
       sortOrder: 'asc'
     });
     setSelectedPermissions(new Set());
-    fetchPermissions();
   };
 
   // Handle permission selection
@@ -890,8 +827,7 @@ const Permissions = () => {
       Action: p.action,
       Code: p.code,
       Description: p.description,
-      Status: p.is_active ? 'Active' : 'Inactive',
-      Roles: p.granted_roles_count || 0
+      Status: p.is_active ? 'Active' : 'Inactive'
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -911,7 +847,7 @@ const Permissions = () => {
       const imported = XLSX.utils.sheet_to_json(sheet);
       // Optionally: send imported data to backend
       // For now, just show a success alert
-      context.setAlertBox({ open: true, error: false, msg: `Đã nhập ${imported.length} quyền (chưa lưu vào hệ thống)` });
+      setAlertBox({ open: true, error: false, msg: `Đã nhập ${imported.length} quyền (chưa lưu vào hệ thống)` });
       setImportDialogOpen(false);
     };
     reader.readAsArrayBuffer(file);
@@ -1029,10 +965,42 @@ const Permissions = () => {
               </Grid>
               <Grid item xs={12} sm={6} md={2}>
                 <FormControl fullWidth size="small">
+                  <InputLabel>Module</InputLabel>
+                  <Select
+                    value={filters.module || ''}
+                    onChange={e => setFilters(prev => ({ ...prev, module: e.target.value, page: 1 }))}
+                    label="Module"
+                    sx={{ borderRadius: 2 }}
+                  >
+                    <MenuItem value="">Tất cả</MenuItem>
+                    {modules.map((m) => (
+                      <MenuItem key={m} value={m}>{m}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6} md={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Hành động</InputLabel>
+                  <Select
+                    value={filters.action || ''}
+                    onChange={e => setFilters(prev => ({ ...prev, action: e.target.value, page: 1 }))}
+                    label="Hành động"
+                    sx={{ borderRadius: 2 }}
+                  >
+                    <MenuItem value="">Tất cả</MenuItem>
+                    {actions.map((a) => (
+                      <MenuItem key={a} value={a}>{a}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6} md={2}>
+                <FormControl fullWidth size="small">
                   <InputLabel>Trạng thái</InputLabel>
                   <Select
-                    value={filters.status || ''}
-                    onChange={e => setFilters(prev => ({ ...prev, status: e.target.value, page: 1 }))}
+                    value={filters.isActive || 'all'}
+                    onChange={e => setFilters(prev => ({ ...prev, isActive: e.target.value, page: 1 }))}
                     label="Trạng thái"
                     sx={{
                       borderRadius: 2,
@@ -1046,9 +1014,9 @@ const Permissions = () => {
                       },
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="active">Hoạt động</MenuItem>
-                    <MenuItem value="inactive">Không hoạt động</MenuItem>
+                    <MenuItem value="all">Tất cả</MenuItem>
+                    <MenuItem value="true">Hoạt động</MenuItem>
+                    <MenuItem value="false">Không hoạt động</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
@@ -1171,7 +1139,6 @@ const Permissions = () => {
                     {visibleColumns.code && <TableCell>Mã quyền</TableCell>}
                     {visibleColumns.description && <TableCell>Mô tả</TableCell>}
                     {visibleColumns.is_active && <TableCell>Trạng thái</TableCell>}
-                    {visibleColumns.granted_roles_count && <TableCell>Vai trò được cấp</TableCell>}
                     <TableCell align="center">Thao tác</TableCell>
                   </TableRow>
                 </TableHead>
@@ -1281,19 +1248,11 @@ const Permissions = () => {
                             />
                           </TableCell>
                         )}
-                        {visibleColumns.granted_roles_count && <TableCell>
-                          <Chip
-                            size="small"
-                            label={`${permission.granted_roles_count || 0} vai trò`}
-                            onClick={() => setRoleDialog({ open: true, permission })}
-                            icon={<GroupIcon />}
-                            sx={{ cursor: 'pointer', backgroundColor: '#e1f5fe', color: '#0277bd', fontWeight: 600 }}
-                          />
-                        </TableCell>}
                         <TableCell align="center">
                           <Box display="flex" justifyContent="center" gap={1}>
                             <IconButton
                               size="small"
+                              title="Chỉnh sửa quyền"
                               onClick={() => openModal('update', permission)}
                               sx={{ color: '#ff9800', backgroundColor: 'rgba(255, 152, 0, 0.1)', '&:hover': { backgroundColor: 'rgba(255, 152, 0, 0.2)' } }}
                             >
@@ -1301,33 +1260,11 @@ const Permissions = () => {
                             </IconButton>
                             <IconButton
                               size="small"
+                              title="Xóa quyền"
                               onClick={() => handleDelete(permission.id, permission.code)}
                               sx={{ color: '#f44336', backgroundColor: 'rgba(244, 67, 54, 0.1)', '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.2)' } }}
                             >
                               <DeleteIcon fontSize="small" />
-                            </IconButton>
-                            {/* New: Duplicate permission */}
-                            <IconButton
-                              size="small"
-                              onClick={async () => {
-                                const token = localStorage.getItem('token');
-                                const newPerm = { ...permission, code: permission.code + '_copy', description: permission.description + ' (bản sao)' };
-                                delete newPerm.id;
-                                await postData('/api/permissions', newPerm, token);
-                                fetchPermissions();
-                                context.setAlertBox({ open: true, error: false, msg: 'Đã sao chép quyền!' });
-                              }}
-                              sx={{ color: '#1976d2', backgroundColor: 'rgba(25, 118, 210, 0.1)', '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.2)' } }}
-                            >
-                              <FaSave fontSize="small" />
-                            </IconButton>
-                            {/* New: View history */}
-                            <IconButton
-                              size="small"
-                              onClick={() => setHistoryDialog({ open: true, permission })}
-                              sx={{ color: '#43a047', backgroundColor: 'rgba(67, 160, 71, 0.1)', '&:hover': { backgroundColor: 'rgba(67, 160, 71, 0.2)' } }}
-                            >
-                              <FaEye fontSize="small" />
                             </IconButton>
                           </Box>
                         </TableCell>
@@ -1457,6 +1394,7 @@ const Permissions = () => {
         open={modal.isOpen && modal.type === 'create'}
         handleClose={() => setModal({ isOpen: false, type: '', data: null })}
         onPermissionCreated={fetchPermissions}
+        setAlertBox={setAlertBox}
       />
       
       {/* Update Permission Dialog */}
@@ -1465,14 +1403,7 @@ const Permissions = () => {
         handleClose={() => setModal({ isOpen: false, type: '', data: null })}
         permission={modal.data}
         onPermissionUpdated={fetchPermissions}
-      />
-
-      {/* Role Assignment Dialog */}
-      <RoleAssignmentDialog
-        open={roleDialog.open}
-        handleClose={() => setRoleDialog({ open: false, permission: null })}
-        permission={roleDialog.permission}
-        onRolesUpdated={fetchPermissions}
+        setAlertBox={setAlertBox}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -1620,25 +1551,16 @@ const Permissions = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Permission History Dialog */}
-      <Dialog open={historyDialog.open} onClose={() => setHistoryDialog({ open: false, permission: null })} maxWidth="md" fullWidth>
-        <DialogTitle>Lịch sử thay đổi quyền "{historyDialog.permission?.code}"</DialogTitle>
-        <DialogContent>
-          {historyData.length === 0 ? <Typography>Không có lịch sử</Typography> : (
-            <Box>
-              {historyData.map((h, idx) => (
-                <Box key={idx} mb={2}>
-                  <Typography variant="body2">{h.timestamp}: {h.action} bởi {h.user}</Typography>
-                  <Typography variant="caption" color="text.secondary">{h.details}</Typography>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setHistoryDialog({ open: false, permission: null })}>Đóng</Button>
-        </DialogActions>
-      </Dialog>
+      {/* Alert/Snackbar at the root of Permissions */}
+      {alertBox.open && (
+        <Alert
+          severity={alertBox.error ? 'error' : 'success'}
+          onClose={() => setAlertBox({ ...alertBox, open: false })}
+          sx={{ position: 'fixed', top: 24, right: 24, zIndex: 9999, minWidth: 300 }}
+        >
+          {alertBox.msg}
+        </Alert>
+      )}
     </Box>
   );
 };

@@ -65,9 +65,9 @@ const deleteUser = async (req, res) => {
             // Log the deletion before actually deleting (important for audit trail)
             await connection.execute(
                 `INSERT INTO access_logs (
-                    log_uuid, user_id, username, action_type, object_type, 
+                    user_id, username, action_type, object_type, 
                     object_id, old_values, status, ip_address, user_agent, created_at
-                ) VALUES (UUID(), ?, ?, 'DELETE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                ) VALUES (?, ?, 'DELETE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.name || 'system',
@@ -198,9 +198,9 @@ const deleteUser = async (req, res) => {
         try {
             await connection.execute(
                 `INSERT INTO access_logs (
-                    log_uuid, user_id, username, action_type, object_type, 
+                    user_id, username, action_type, object_type, 
                     object_id, status, failure_reason, ip_address, user_agent, created_at
-                ) VALUES (UUID(), ?, ?, 'DELETE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                ) VALUES (?, ?, 'DELETE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.name || 'system',
@@ -310,9 +310,9 @@ const deactivateUser = async (req, res) => {
         // Log the deactivation
         await connection.execute(
             `INSERT INTO access_logs (
-                log_uuid, user_id, username, action_type, object_type, 
+                user_id, username, action_type, object_type, 
                 object_id, old_values, new_values, status, ip_address, user_agent, created_at
-            ) VALUES (UUID(), ?, ?, 'UPDATE', 'USER_DEACTIVATE', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+            ) VALUES (?, ?, 'UPDATE', 'USER_DEACTIVATE', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user?.userId || null,
                 req.user?.name || 'system',
@@ -421,9 +421,9 @@ const reactivateUser = async (req, res) => {
         // Log the reactivation
         await connection.execute(
             `INSERT INTO access_logs (
-                log_uuid, user_id, username, action_type, object_type, 
+                user_id, username, action_type, object_type, 
                 object_id, old_values, new_values, status, ip_address, user_agent, created_at
-            ) VALUES (UUID(), ?, ?, 'UPDATE', 'USER_REACTIVATE', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+            ) VALUES (?, ?, 'UPDATE', 'USER_REACTIVATE', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user?.userId || null,
                 req.user?.name || 'system',
@@ -515,9 +515,9 @@ const getDeletedUsers = async (req, res) => {
         try {
             await connection.execute(
                 `INSERT INTO access_logs (
-                    log_uuid, user_id, username, action_type, object_type, 
+                    user_id, username, action_type, object_type, 
                     status, ip_address, user_agent, created_at
-                ) VALUES (UUID(), ?, ?, 'VIEW', 'DELETED_USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
+                ) VALUES (?, ?, 'VIEW', 'DELETED_USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.name || 'system',
@@ -620,9 +620,9 @@ const permanentlyDeleteUser = async (req, res) => {
             // Log the permanent deletion
             await connection.execute(
                 `INSERT INTO access_logs (
-                    log_uuid, user_id, username, action_type, object_type, 
+                    user_id, username, action_type, object_type, 
                     object_id, old_values, status, ip_address, user_agent, created_at
-                ) VALUES (UUID(), ?, ?, 'DELETE', 'USER_PERMANENT', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                ) VALUES (?, ?, 'DELETE', 'USER_PERMANENT', ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.name || 'system',

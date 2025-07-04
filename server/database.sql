@@ -485,7 +485,6 @@ CREATE TABLE IF NOT EXISTS journey_checkpoints (
 
 CREATE TABLE IF NOT EXISTS vehicle_entry_exit_logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    log_uuid VARCHAR(36) NOT NULL UNIQUE COMMENT 'UUID duy nhất cho log',
     plate_number VARCHAR(20) NOT NULL COMMENT 'Biển số xe',
     location_id INT UNSIGNED NOT NULL COMMENT 'Vị trí giám sát',
     vehicle_id INT UNSIGNED COMMENT 'ID phương tiện',
@@ -659,7 +658,6 @@ CREATE TABLE IF NOT EXISTS notification_settings (
 
 CREATE TABLE IF NOT EXISTS access_logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    log_uuid VARCHAR(36) NOT NULL UNIQUE COMMENT 'UUID duy nhất cho log',
     user_id INT UNSIGNED COMMENT 'ID người dùng',
     username VARCHAR(50) COMMENT 'Tên đăng nhập',
     
@@ -1226,11 +1224,11 @@ BEGIN
         -- Nếu là vào và chưa có log hoặc đã có exit trước đó
         IF existing_log_id IS NULL THEN
             INSERT INTO vehicle_entry_exit_logs (
-                log_uuid, plate_number, location_id, vehicle_id,
+                plate_number, location_id, vehicle_id,
                 entry_detection_id, entry_time, entry_camera_id, 
                 entry_location_id, entry_confidence, status
             ) VALUES (
-                UUID(), NEW.plate_number, NEW.location_id, NEW.vehicle_id,
+                NEW.plate_number, NEW.location_id, NEW.vehicle_id,
                 NEW.id, NEW.detected_at, NEW.camera_id,
                 NEW.location_id, NEW.confidence_score, 'entered'
             );

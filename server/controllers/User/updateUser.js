@@ -207,9 +207,9 @@ const updateUser = async (req, res) => {
             if (validUserId) {
                 await connection.execute(
                     `INSERT INTO access_logs (
-                        log_uuid, user_id, username, action_type, object_type, 
+                        user_id, username, action_type, object_type, 
                         object_id, old_values, new_values, status, ip_address, user_agent, created_at
-                    ) VALUES (UUID(), ?, ?, 'UPDATE', 'USER', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                    ) VALUES (?, ?, 'UPDATE', 'USER', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
                         req.user?.name || 'unknown',
@@ -240,9 +240,9 @@ const updateUser = async (req, res) => {
             if (validUserId) {
                 await connection.execute(
                     `INSERT INTO access_logs (
-                        log_uuid, user_id, username, action_type, object_type, 
+                        user_id, username, action_type, object_type, 
                         object_id, status, failure_reason, ip_address, user_agent, created_at
-                    ) VALUES (UUID(), ?, ?, 'UPDATE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                    ) VALUES (?, ?, 'UPDATE', 'USER', ?, 'FAILURE', ?, ?, ?, NOW())`,
                     [
                         validUserId,
                         req.user?.name || 'unknown',
@@ -338,9 +338,9 @@ const changePassword = async (req, res) => {
             if (validUserId) {
                 await connection.execute(
                     `INSERT INTO access_logs (
-                        log_uuid, user_id, username, action_type, object_type, 
+                        user_id, username, action_type, object_type, 
                         object_id, status, ip_address, user_agent, created_at
-                    ) VALUES (UUID(), ?, ?, 'UPDATE', 'USER_PASSWORD', ?, 'SUCCESS', ?, ?, NOW())`,
+                    ) VALUES (?, ?, 'UPDATE', 'USER_PASSWORD', ?, 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
                         req.user?.name || 'unknown',
@@ -439,9 +439,9 @@ const updateUserStatus = async (req, res) => {
             if (validUserId) {
                 await connection.execute(
                     `INSERT INTO access_logs (
-                        log_uuid, user_id, username, action_type, object_type, 
+                        user_id, username, action_type, object_type, 
                         object_id, old_values, new_values, status, ip_address, user_agent, created_at
-                    ) VALUES (UUID(), ?, ?, 'UPDATE', 'USER_STATUS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                    ) VALUES (?, ?, 'UPDATE', 'USER_STATUS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
                         req.user?.name || 'unknown',
@@ -537,9 +537,9 @@ const resetUserPassword = async (req, res) => {
             if (validUserId) {
                 await connection.execute(
                     `INSERT INTO access_logs (
-                        log_uuid, user_id, username, action_type, object_type, 
+                        user_id, username, action_type, object_type, 
                         object_id, new_values, status, ip_address, user_agent, created_at
-                    ) VALUES (UUID(), ?, ?, 'UPDATE', 'PASSWORD_RESET', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                    ) VALUES (?, ?, 'UPDATE', 'PASSWORD_RESET', ?, ?, 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
                         req.user?.name || 'unknown',

@@ -200,9 +200,9 @@ const getAllUsers = async (req, res) => {
             if (validUserId) {
                 await connection.execute(
                     `INSERT INTO access_logs (
-                        log_uuid, user_id, username, action_type, object_type, 
+                        user_id, username, action_type, object_type, 
                         status, ip_address, user_agent, created_at
-                    ) VALUES (UUID(), ?, ?, 'VIEW', 'USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
+                    ) VALUES (?, ?, 'VIEW', 'USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
                         req.user?.name || 'unknown',
@@ -368,9 +368,9 @@ const getUserById = async (req, res) => {
             if (validUserId) {
                 await connection.execute(
                     `INSERT INTO access_logs (
-                        log_uuid, user_id, username, action_type, object_type, 
+                        user_id, username, action_type, object_type, 
                         object_id, status, ip_address, user_agent, created_at
-                    ) VALUES (UUID(), ?, ?, 'VIEW', 'USER', ?, 'SUCCESS', ?, ?, NOW())`,
+                    ) VALUES (?, ?, 'VIEW', 'USER', ?, 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
                         req.user?.name || 'unknown',

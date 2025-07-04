@@ -21,10 +21,15 @@ const updatePermission = async (req, res) => {
             });
         }
 
+        // Helper function to convert undefined to null
+        const sanitizeParam = (value) => {
+            return value === undefined ? null : value;
+        };
+
         // Get current permission data
         const [currentPermission] = await connection.execute(
             'SELECT * FROM permissions WHERE id = ?',
-            [id === undefined ? null : id]
+            [sanitizeParam(id)]
         );
 
         if (currentPermission.length === 0) {
@@ -75,7 +80,7 @@ const updatePermission = async (req, res) => {
             // Check if new code already exists
             const [existingPermissions] = await connection.execute(
                 'SELECT id FROM permissions WHERE code = ? AND id != ?',
-                [code === undefined ? null : code, id === undefined ? null : id]
+                [sanitizeParam(code), sanitizeParam(id)]
             );
 
             if (existingPermissions.length > 0) {
@@ -90,7 +95,7 @@ const updatePermission = async (req, res) => {
         if (module !== oldValues.module || action !== oldValues.action) {
             const [existingCombination] = await connection.execute(
                 'SELECT id FROM permissions WHERE module = ? AND action = ? AND id != ?',
-                [module === undefined ? null : module, action === undefined ? null : action, id === undefined ? null : id]
+                [sanitizeParam(module), sanitizeParam(action), sanitizeParam(id)]
             );
 
             if (existingCombination.length > 0) {
@@ -107,7 +112,7 @@ const updatePermission = async (req, res) => {
              FROM role_permissions rp 
              JOIN roles r ON rp.role_id = r.id 
              WHERE rp.permission_id = ? AND rp.granted = 1`,
-            [id === undefined ? null : id]
+            [sanitizeParam(id)]
         );
 
         const isBeingUsed = rolePermissions[0].count > 0;
@@ -120,12 +125,22 @@ const updatePermission = async (req, res) => {
             });
         }
 
+        // Sanitize all parameters before update
+        const sanitizedParams = [
+            sanitizeParam(module),
+            sanitizeParam(action), 
+            sanitizeParam(code),
+            sanitizeParam(description),
+            isActive ? 1 : 0,
+            sanitizeParam(id)
+        ];
+
         // Update permission
         await connection.execute(
             `UPDATE permissions 
              SET module = ?, action = ?, code = ?, description = ?, is_active = ?, updated_at = NOW()
              WHERE id = ?`,
-            [module === undefined ? null : module, action === undefined ? null : action, code === undefined ? null : code, description === undefined ? null : description, isActive ? 1 : 0, id === undefined ? null : id]
+            sanitizedParams
         );
 
         // Get updated permission with additional info
@@ -145,22 +160,24 @@ const updatePermission = async (req, res) => {
             LEFT JOIN role_permissions rp ON p.id = rp.permission_id
             WHERE p.id = ?
             GROUP BY p.id`,
-            [id === undefined ? null : id]
+            [sanitizeParam(id)]
         );
 
-        // Log access
+        // Log access with sanitized parameters
+        const logParams = [
+            sanitizeParam(req.user?.userId),
+            sanitizeParam(req.user?.username),
+            sanitizeParam(id),
+            JSON.stringify(oldValues),
+            JSON.stringify({ module, action, code, description, isActive }),
+            sanitizeParam(req.ip || '127.0.0.1'),
+            sanitizeParam((req.get('User-Agent') || '').substring(0, 255))
+        ];
+
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
              VALUES (?, ?, 'UPDATE', 'PERMISSION', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
-            [
-                req.user.userId,
-                req.user.username,
-                id,
-                JSON.stringify(oldValues),
-                JSON.stringify({ module, action, code, description, isActive }),
-                req.ip,
-                req.get('User-Agent')
-            ]
+            logParams
         );
 
         res.status(200).json({
@@ -181,19 +198,25 @@ const updatePermission = async (req, res) => {
     } catch (error) {
         console.error('Error updating permission:', error);
         
-        // Log failed access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'UPDATE', 'PERMISSION', ?, 'FAILURE', ?, ?, ?, NOW())`,
-            [
-                req.user?.userId,
-                req.user?.username,
-                req.params.id,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        // Log failed access with sanitized parameters
+        const errorLogParams = [
+            sanitizeParam(req.user?.userId),
+            sanitizeParam(req.user?.username),
+            sanitizeParam(req.params.id),
+            sanitizeParam((error.message || 'Unknown error').substring(0, 255)),
+            sanitizeParam(req.ip || '127.0.0.1'),
+            sanitizeParam((req.get('User-Agent') || '').substring(0, 255))
+        ];
+
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'UPDATE', 'PERMISSION', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                errorLogParams
+            );
+        } catch (logError) {
+            console.warn('Failed to log error:', logError.message);
+        }
 
         res.status(500).json({
             success: false,

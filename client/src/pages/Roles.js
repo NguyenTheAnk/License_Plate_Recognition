@@ -220,31 +220,28 @@ const RoleManagement = () => {
   const fetchPermissions = useCallback(async () => {
     try {
       const token = getToken();
-      // Sử dụng endpoint trả về tất cả quyền
-      const response = await fetchDataFromAPI('api/roles/permissions/all', token);
-      if (response.success) {
-        // Nếu API trả về dạng { permissions: { module: [quyền] } }
-        let permissionsData = [];
+      const response = await fetchDataFromAPI('/api/roles/permissions/all', token, { params: { group_by: 'module', is_active: '' } });
+      console.log('API /api/roles/permissions/all response:', response);
+      let permissionsData = [];
+      let grouped = {};
+      if (response?.data?.permissions) {
         if (Array.isArray(response.data.permissions)) {
           permissionsData = response.data.permissions;
+          grouped = { other: permissionsData };
         } else if (typeof response.data.permissions === 'object') {
-          // Nếu trả về dạng group by module
+          grouped = response.data.permissions;
           permissionsData = Object.values(response.data.permissions).flat();
         }
-        setPermissions(permissionsData);
-        // Group permissions by module
-        const grouped = permissionsData.reduce((acc, permission) => {
-          const module = permission.module || 'other';
-          if (!acc[module]) {
-            acc[module] = [];
-          }
-          acc[module].push(permission);
-          return acc;
-        }, {});
-        setPermissionsByModule(grouped);
+      }
+      setPermissions(permissionsData);
+      setPermissionsByModule(grouped);
+      if (!permissionsData.length) {
+        console.warn('Không có quyền nào được trả về từ API. Hãy kiểm tra lại dữ liệu bảng permissions trong database!');
       }
     } catch (error) {
-      console.error('Error fetching permissions:', error);
+      setPermissions([]);
+      setPermissionsByModule({});
+      console.error('Lỗi khi lấy danh sách quyền:', error);
     }
   }, []);
 
@@ -1057,27 +1054,80 @@ const RoleManagement = () => {
                         size="small"
                       />
                     </TableCell>
-                    <TableCell align="center">
-                      <Box display="flex" justifyContent="center" gap={1}>
-                        <Tooltip title="Xem chi tiết">
-                          <IconButton onClick={() => openDialog('view', role)} size="small">
-                            <VisibilityIcon />
+                  <TableCell align="center">
+                    <Box display="flex" justifyContent="center" gap={1}>
+                      <Tooltip 
+                        title="Xem chi tiết vai trò" 
+                        arrow 
+                        placement="top"
+                        enterDelay={300}
+                        leaveDelay={200}
+                      >
+                        <IconButton 
+                          onClick={() => openDialog('view', role)} 
+                          size="small"
+                          sx={{
+                            color: 'info.main',
+                            '&:hover': {
+                              bgcolor: 'info.50',
+                              transform: 'scale(1.1)',
+                            },
+                            transition: 'all 0.2s ease-in-out'
+                          }}
+                        >
+                          <VisibilityIcon />
+                        </IconButton>
+                      </Tooltip>
+                      
+                      <Tooltip 
+                        title="Chỉnh sửa vai trò" 
+                        arrow 
+                        placement="top"
+                        enterDelay={300}
+                        leaveDelay={200}
+                      >
+                        <IconButton 
+                          onClick={() => openDialog('edit', role)} 
+                          size="small"
+                          sx={{
+                            color: 'warning.main',
+                            '&:hover': {
+                              bgcolor: 'warning.50',
+                              transform: 'scale(1.1)',
+                            },
+                            transition: 'all 0.2s ease-in-out'
+                          }}
+                        >
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                      
+                      {!role.is_default_role && (
+                        <Tooltip 
+                          title="Xóa vai trò" 
+                          arrow 
+                          placement="top"
+                          enterDelay={300}
+                          leaveDelay={200}
+                        >
+                          <IconButton 
+                            onClick={() => openDialog('delete', role)} 
+                            size="small"
+                            sx={{
+                              color: 'error.main',
+                              '&:hover': {
+                                bgcolor: 'error.50',
+                                transform: 'scale(1.1)',
+                              },
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                          >
+                            <DeleteIcon />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="Chỉnh sửa">
-                          <IconButton onClick={() => openDialog('edit', role)} size="small">
-                            <EditIcon />
-                          </IconButton>
-                        </Tooltip>
-                        {!role.is_default_role && (
-                          <Tooltip title="Xóa">
-                            <IconButton onClick={() => openDialog('delete', role)} size="small">
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
-                        )}
-                      </Box>
-                    </TableCell>
+                      )}
+                    </Box>
+                  </TableCell>
                   </TableRow>
                 ))
               )}
@@ -1488,19 +1538,27 @@ const RoleManagement = () => {
         </DialogContent>
 
         <DialogActions sx={{ p: 3 }}>
-          <Button onClick={closeDialog} color="inherit" size="large">
-            Hủy
-          </Button>
+          <Tooltip title="Đóng" arrow>
+            <span>
+              <Button onClick={closeDialog} color="inherit" size="large">
+                Hủy
+              </Button>
+            </span>
+          </Tooltip>
           {dialogType === 'delete' && (
-            <Button
-              onClick={handleDelete}
-              color="error"
-              variant="contained"
-              startIcon={<DeleteIcon />}
-              size="large"
-            >
-              Xóa vai trò
-            </Button>
+            <Tooltip title="Xác nhận xóa vai trò này" arrow>
+              <span>
+                <Button
+                  onClick={handleDelete}
+                  color="error"
+                  variant="contained"
+                  startIcon={<DeleteIcon />}
+                  size="large"
+                >
+                  Xóa vai trò
+                </Button>
+              </span>
+            </Tooltip>
           )}
         </DialogActions>
       </Dialog>

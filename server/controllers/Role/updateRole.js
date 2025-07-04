@@ -262,8 +262,8 @@ const updateRole = async (req, res) => {
         // Log access
         try {
             await connection.execute(
-                `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (UUID(), ?, ?, 'UPDATE', 'ROLE', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'UPDATE', 'ROLE', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.username || 'unknown',
@@ -293,8 +293,8 @@ const updateRole = async (req, res) => {
         // Log failed access
         try {
             await connection.execute(
-                `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-                 VALUES (UUID(), ?, ?, 'UPDATE', 'ROLE', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'UPDATE', 'ROLE', ?, 'FAILURE', ?, ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.username || 'unknown',
@@ -418,8 +418,8 @@ const updateRolePermissions = async (req, res) => {
 
             // Log access
             await connection.execute(
-                `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (UUID(), ?, ?, 'UPDATE', 'ROLE_PERMISSIONS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'UPDATE', 'ROLE_PERMISSIONS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user.userId,
                     req.user.username,
@@ -449,8 +449,8 @@ const updateRolePermissions = async (req, res) => {
         
         // Log failed access
         await connection.execute(
-            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (UUID(), ?, ?, 'UPDATE', 'ROLE_PERMISSIONS', ?, 'FAILURE', ?, ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'UPDATE', 'ROLE_PERMISSIONS', ?, 'FAILURE', ?, ?, ?, NOW())`,
             [
                 req.user?.userId,
                 req.user?.username,

@@ -155,8 +155,8 @@ const getRoles = async (req, res) => {
         // Log access
         try {
             await connection.execute(
-                `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
-                 VALUES (UUID(), ?, ?, 'VIEW', 'ROLE', 'SUCCESS', ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'VIEW', 'ROLE', 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.username || 'anonymous',
@@ -191,8 +191,8 @@ const getRoles = async (req, res) => {
         // Log failed access
         try {
             await connection.execute(
-                `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
-                 VALUES (UUID(), ?, ?, 'VIEW', 'ROLE', 'FAILURE', ?, ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'VIEW', 'ROLE', 'FAILURE', ?, ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.username || 'anonymous',
@@ -308,8 +308,8 @@ const getRoleById = async (req, res) => {
         // Log access
         try {
             await connection.execute(
-                `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
-                 VALUES (UUID(), ?, ?, 'VIEW', 'ROLE', ?, 'SUCCESS', ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'VIEW', 'ROLE', ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.username || 'anonymous',
@@ -336,8 +336,8 @@ const getRoleById = async (req, res) => {
         // Log failed access
         try {
             await connection.execute(
-                `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-                 VALUES (UUID(), ?, ?, 'VIEW', 'ROLE', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'VIEW', 'ROLE', ?, 'FAILURE', ?, ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.username || 'anonymous',

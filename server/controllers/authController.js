@@ -182,8 +182,8 @@ const toggle2FA = async (req, res) => {
 
         // Log 2FA toggle action
         await connection.execute(
-            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
-             VALUES (UUID(), ?, ?, 'UPDATE', '2FA', ?, 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'UPDATE', '2FA', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 userId, 
                 req.user.name, 
@@ -403,8 +403,8 @@ const updateUserProfile = async (req, res) => {
 
         // Log profile update
         await connection.execute(
-            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, old_values, new_values, status, ip_address, user_agent, created_at)
-             VALUES (UUID(), ?, ?, 'UPDATE', 'PROFILE', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, old_values, new_values, status, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'UPDATE', 'PROFILE', ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 userId, 
                 name, // Use new name
@@ -441,8 +441,8 @@ const revokeSession = async (req, res) => {
 
         // Log session revocation
         await connection.execute(
-            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
-             VALUES (UUID(), ?, ?, 'DELETE', 'SESSION', ?, 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'DELETE', 'SESSION', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 userId, 
                 req.user.name,
@@ -501,7 +501,6 @@ const getUserActivityLogs = async (req, res) => {
         const [logs] = await connection.execute(`
             SELECT 
                 al.id,
-                al.log_uuid,
                 al.action_type,
                 al.object_type,
                 al.object_id,
@@ -772,8 +771,8 @@ const loginUser = async (req, res) => {
 
         // Log access event
         await connection.execute(
-            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, ip_address, user_agent, session_id, created_at)
-             VALUES (UUID(), ?, ?, 'LOGIN', 'USER', 'SUCCESS', ?, ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, session_id, created_at)
+             VALUES (?, ?, 'LOGIN', 'USER', 'SUCCESS', ?, ?, ?, NOW())`,
             [user.id, user.name, req.ip || 'unknown', req.get('User-Agent') || 'unknown', sessionId]
         );
 
@@ -949,8 +948,8 @@ const logoutUser = async (req, res) => {
 
         // Log logout in access_logs
         await connection.execute(
-            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, ip_address, user_agent, session_id, created_at)
-             VALUES (UUID(), ?, ?, 'LOGOUT', 'USER', 'SUCCESS', ?, ?, ?, NOW())`,
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, session_id, created_at)
+             VALUES (?, ?, 'LOGOUT', 'USER', 'SUCCESS', ?, ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.name,

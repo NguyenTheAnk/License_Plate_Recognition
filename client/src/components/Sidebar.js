@@ -460,30 +460,35 @@ function Sidebar({ user, onLogout }) {
                       pl: 1.5, 
                       pr: 1,
                       py: 1,
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      transition: 'background 0.2s, color 0.2s, border 0.2s',
+                      borderLeft: currentPath === item.path || (item.children && item.children.some(child => currentPath === child.path))
+                        ? '4px solid #1976d2'
+                        : '4px solid transparent',
+                      backgroundColor: currentPath === item.path || (item.children && item.children.some(child => currentPath === child.path))
+                        ? '#e0f2f1'
+                        : 'transparent',
+                      color: currentPath === item.path || (item.children && item.children.some(child => currentPath === child.path))
+                        ? '#00796b'
+                        : 'inherit',
+                      boxShadow: currentPath === item.path || (item.children && item.children.some(child => currentPath === child.path))
+                        ? '0 2px 8px rgba(0, 121, 107, 0.2)'
+                        : 'none',
                       '&:hover': {
-                        bgcolor: '#e3f2fd',
-                        transform: 'translateX(4px)',
-                        boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)',
-                        '& .MuiListItemIcon-root': {
-                          transform: 'scale(1.1)',
-                          color: '#1976d2'
-                        }
-                      },
-                      '&.Mui-selected': { 
-                        bgcolor: '#e0f2f1', 
-                        color: '#00796b',
-                        boxShadow: '0 2px 8px rgba(0, 121, 107, 0.2)',
-                        '&:hover': {
-                          bgcolor: '#b2dfdb'
-                        }
+                        backgroundColor: '#e3f2fd',
+                        color: '#1976d2',
+                        borderLeft: '4px solid #1976d2',
+                        // Không dùng transform, scale, padding/margin thay đổi ở đây
+                        boxShadow: '0 2px 8px rgba(25, 118, 210, 0.10)'
                       },
                       fontSize: 14 
                     }}
                   >
                     <ListItemIcon sx={{ 
                       minWidth: 36,
-                      transition: 'all 0.3s ease'
+                      color: currentPath === item.path || (item.children && item.children.some(child => currentPath === child.path))
+                        ? '#1976d2'
+                        : 'inherit',
+                      transition: 'color 0.2s'
                     }}>
                       {item.icon}
                     </ListItemIcon>
@@ -521,28 +526,31 @@ function Sidebar({ user, onLogout }) {
                               pl: 4, 
                               pr: 1,
                               py: 0.8,
-                              transition: 'all 0.3s ease',
+                              transition: 'background 0.2s, color 0.2s, border 0.2s',
+                              borderLeft: currentPath === child.path
+                                ? '4px solid #1976d2'
+                                : '4px solid transparent',
+                              backgroundColor: currentPath === child.path
+                                ? '#e0f2f1'
+                                : 'transparent',
+                              color: currentPath === child.path
+                                ? '#00796b'
+                                : 'inherit',
                               '&:hover': {
-                                bgcolor: '#f3e5f5',
-                                transform: 'translateX(6px)',
-                                '& .MuiListItemIcon-root': {
-                                  transform: 'scale(1.1)',
-                                  color: '#7b1fa2'
-                                }
-                              },
-                              '&.Mui-selected': { 
-                                bgcolor: '#e0f2f1', 
-                                color: '#00796b',
-                                '&:hover': {
-                                  bgcolor: '#b2dfdb'
-                                }
+                                backgroundColor: '#f3e5f5',
+                                color: '#7b1fa2',
+                                borderLeft: '4px solid #7b1fa2',
+                                // Không dùng transform, scale, padding/margin thay đổi ở đây
                               },
                               fontSize: 13 
                             }}
                           >
                             <ListItemIcon sx={{ 
                               minWidth: 28,
-                              transition: 'all 0.3s ease'
+                              color: currentPath === child.path
+                                ? '#7b1fa2'
+                                : 'inherit',
+                              transition: 'color 0.2s'
                             }}>
                               {child.icon}
                             </ListItemIcon>

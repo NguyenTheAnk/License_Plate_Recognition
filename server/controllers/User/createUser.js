@@ -176,9 +176,9 @@ const createUser = async (req, res) => {
         // Log access with proper UUID
         await connection.execute(
             `INSERT INTO access_logs (
-                log_uuid, user_id, username, action_type, object_type, 
+                user_id, username, action_type, object_type, 
                 object_id, new_values, status, ip_address, user_agent, created_at
-            ) VALUES (UUID(), ?, ?, 'CREATE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+            ) VALUES (?, ?, 'CREATE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user?.userId || null,
                 req.user?.name || 'system',
@@ -202,9 +202,9 @@ const createUser = async (req, res) => {
         try {
             await connection.execute(
                 `INSERT INTO access_logs (
-                    log_uuid, user_id, username, action_type, object_type, 
+                    user_id, username, action_type, object_type, 
                     status, failure_reason, ip_address, user_agent, created_at
-                ) VALUES (UUID(), ?, ?, 'CREATE', 'USER', 'FAILURE', ?, ?, ?, NOW())`,
+                ) VALUES (?, ?, 'CREATE', 'USER', 'FAILURE', ?, ?, ?, NOW())`,
                 [
                     req.user?.userId || null,
                     req.user?.name || 'system',

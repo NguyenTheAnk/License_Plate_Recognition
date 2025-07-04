@@ -6,6 +6,11 @@ const deletePermission = async (req, res) => {
     try {
         const { id } = req.params;
 
+        // Helper function to convert undefined to null
+        const sanitizeParam = (value) => {
+            return value === undefined ? null : value;
+        };
+
         // Validate ID
         if (!id || isNaN(parseInt(id))) {
             return res.status(400).json({
@@ -17,7 +22,7 @@ const deletePermission = async (req, res) => {
         // Get current permission data
         const [currentPermission] = await connection.execute(
             'SELECT * FROM permissions WHERE id = ?',
-            [id]
+            [sanitizeParam(id)]
         );
 
         if (currentPermission.length === 0) {
@@ -39,7 +44,7 @@ const deletePermission = async (req, res) => {
              FROM role_permissions rp 
              JOIN roles r ON rp.role_id = r.id 
              WHERE rp.permission_id = ?`,
-            [id]
+            [sanitizeParam(id)]
         );
 
         if (rolePermissions[0].count > 0) {
@@ -47,7 +52,7 @@ const deletePermission = async (req, res) => {
                 success: false,
                 message: `Không thể xóa quyền đang được sử dụng bởi ${rolePermissions[0].count} vai trò: ${rolePermissions[0].role_names}. Vui lòng xóa khỏi các vai trò trước.`,
                 data: {
-                    usedByRoles: rolePermissions[0].role_names.split(','),
+                    usedByRoles: rolePermissions[0].role_names ? rolePermissions[0].role_names.split(',') : [],
                     grantedCount: rolePermissions[0].granted_count,
                     deniedCount: rolePermissions[0].denied_count
                 }
@@ -75,13 +80,13 @@ const deletePermission = async (req, res) => {
             // Delete any role_permissions entries (should be 0 based on check above, but for safety)
             await connection.execute(
                 'DELETE FROM role_permissions WHERE permission_id = ?',
-                [id]
+                [sanitizeParam(id)]
             );
 
             // Delete the permission
             const [deleteResult] = await connection.execute(
                 'DELETE FROM permissions WHERE id = ?',
-                [id]
+                [sanitizeParam(id)]
             );
 
             if (deleteResult.affectedRows === 0) {
@@ -95,18 +100,20 @@ const deletePermission = async (req, res) => {
             // Commit transaction
             await connection.commit();
 
-            // Log access
+            // Log access with sanitized parameters
+            const logParams = [
+                sanitizeParam(req.user?.userId),
+                sanitizeParam(req.user?.username),
+                sanitizeParam(id),
+                JSON.stringify(oldValues),
+                sanitizeParam(req.ip || '127.0.0.1'),
+                sanitizeParam((req.get('User-Agent') || '').substring(0, 255))
+            ];
+
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
                  VALUES (?, ?, 'DELETE', 'PERMISSION', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    id,
-                    JSON.stringify(oldValues),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
+                logParams
             );
 
             res.status(200).json({
@@ -131,19 +138,25 @@ const deletePermission = async (req, res) => {
     } catch (error) {
         console.error('Error deleting permission:', error);
         
-        // Log failed access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'DELETE', 'PERMISSION', ?, 'FAILURE', ?, ?, ?, NOW())`,
-            [
-                req.user?.userId,
-                req.user?.username,
-                req.params.id,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        // Log failed access with sanitized parameters
+        const errorLogParams = [
+            sanitizeParam(req.user?.userId),
+            sanitizeParam(req.user?.username),
+            sanitizeParam(req.params.id),
+            sanitizeParam((error.message || 'Unknown error').substring(0, 255)),
+            sanitizeParam(req.ip || '127.0.0.1'),
+            sanitizeParam((req.get('User-Agent') || '').substring(0, 255))
+        ];
+
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'DELETE', 'PERMISSION', ?, 'FAILURE', ?, ?, ?, NOW())`,
+                errorLogParams
+            );
+        } catch (logError) {
+            console.warn('Failed to log error:', logError.message);
+        }
 
         res.status(500).json({
             success: false,
@@ -159,6 +172,11 @@ const bulkDeletePermissions = async (req, res) => {
     
     try {
         const { ids } = req.body;
+
+        // Helper function to convert undefined to null
+        const sanitizeParam = (value) => {
+            return value === undefined ? null : value;
+        };
 
         // Validate input
         if (!Array.isArray(ids) || ids.length === 0) {
@@ -179,9 +197,11 @@ const bulkDeletePermissions = async (req, res) => {
 
         // Get permissions data
         const placeholders = ids.map(() => '?').join(',');
+        const sanitizedIds = ids.map(id => sanitizeParam(id));
+        
         const [permissions] = await connection.execute(
             `SELECT * FROM permissions WHERE id IN (${placeholders})`,
-            ids
+            sanitizedIds
         );
 
         if (permissions.length === 0) {
@@ -218,7 +238,7 @@ const bulkDeletePermissions = async (req, res) => {
              JOIN roles r ON rp.role_id = r.id 
              WHERE rp.permission_id IN (${placeholders})
              GROUP BY rp.permission_id, p.code`,
-            ids
+            sanitizedIds
         );
 
         if (usageCheck.length > 0) {
@@ -226,7 +246,7 @@ const bulkDeletePermissions = async (req, res) => {
                 id: usage.permission_id,
                 code: usage.code,
                 usageCount: usage.usage_count,
-                roleNames: usage.role_names.split(',')
+                roleNames: usage.role_names ? usage.role_names.split(',') : []
             }));
 
             return res.status(400).json({
@@ -251,13 +271,13 @@ const bulkDeletePermissions = async (req, res) => {
                     // Delete role_permissions first (should be none based on check above)
                     await connection.execute(
                         'DELETE FROM role_permissions WHERE permission_id = ?',
-                        [permission.id]
+                        [sanitizeParam(permission.id)]
                     );
 
                     // Delete the permission
                     const [deleteResult] = await connection.execute(
                         'DELETE FROM permissions WHERE id = ?',
-                        [permission.id]
+                        [sanitizeParam(permission.id)]
                     );
 
                     if (deleteResult.affectedRows > 0) {
@@ -290,18 +310,20 @@ const bulkDeletePermissions = async (req, res) => {
             // Commit transaction
             await connection.commit();
 
-            // Log bulk delete access
+            // Log bulk delete access with sanitized parameters
+            const logParams = [
+                sanitizeParam(req.user?.userId),
+                sanitizeParam(req.user?.username),
+                sanitizeParam(ids.join(',')),
+                JSON.stringify({ deletedCount: successCount, failedCount, deletedPermissions }),
+                sanitizeParam(req.ip || '127.0.0.1'),
+                sanitizeParam((req.get('User-Agent') || '').substring(0, 255))
+            ];
+
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
                  VALUES (?, ?, 'DELETE', 'PERMISSION_BULK', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    ids.join(','),
-                    JSON.stringify({ deletedCount: successCount, failedCount, deletedPermissions }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
+                logParams
             );
 
             res.status(200).json({
@@ -322,18 +344,24 @@ const bulkDeletePermissions = async (req, res) => {
     } catch (error) {
         console.error('Error bulk deleting permissions:', error);
         
-        // Log failed access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'DELETE', 'PERMISSION_BULK', 'FAILURE', ?, ?, ?, NOW())`,
-            [
-                req.user?.userId,
-                req.user?.username,
-                error.message,
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+        // Log failed access with sanitized parameters
+        const errorLogParams = [
+            sanitizeParam(req.user?.userId),
+            sanitizeParam(req.user?.username),
+            sanitizeParam((error.message || 'Unknown error').substring(0, 255)),
+            sanitizeParam(req.ip || '127.0.0.1'),
+            sanitizeParam((req.get('User-Agent') || '').substring(0, 255))
+        ];
+
+        try {
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
+                 VALUES (?, ?, 'DELETE', 'PERMISSION_BULK', 'FAILURE', ?, ?, ?, NOW())`,
+                errorLogParams
+            );
+        } catch (logError) {
+            console.warn('Failed to log error:', logError.message);
+        }
 
         res.status(500).json({
             success: false,
