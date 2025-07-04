@@ -12,8 +12,8 @@ const getUserStatistics = async (req, res) => {
                 COUNT(CASE WHEN status = 'active' THEN 1 END) as active_users,
                 COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive_users,
                 COUNT(CASE WHEN status = 'suspended' THEN 1 END) as suspended_users,
-                COUNT(CASE WHEN account_locked = 1 THEN 1 END) as locked_users,
-                COUNT(CASE WHEN last_login >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as active_last_30_days,
+                COUNT(CASE WHEN is_account_locked = 1 THEN 1 END) as locked_users,
+                COUNT(CASE WHEN last_login_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as active_last_30_days,
                 COUNT(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as new_users_last_30_days
             FROM users
         `);
@@ -100,11 +100,11 @@ const getUserDetailedView = async (req, res) => {
                 u.email,
                 u.phone,
                 u.status,
-                u.last_login,
-                u.last_password_change,
+                u.last_login_at,
+                u.last_password_changed_at,
                 u.failed_login_attempts,
-                u.account_locked,
-                u.lock_until,
+                u.is_account_locked,
+                u.locked_until,
                 u.created_at,
                 u.updated_at
             FROM users u
@@ -173,10 +173,10 @@ const getUserDetailedView = async (req, res) => {
                 ip_address,
                 user_agent,
                 failure_reason,
-                created_at
+                login_at as created_at
             FROM login_logs
             WHERE user_id = ?
-            ORDER BY created_at DESC
+            ORDER BY login_at DESC
             LIMIT 10
         `, [userId]);
 
@@ -258,7 +258,7 @@ const getUsersWithRolePermissionSummary = async (req, res) => {
         }
 
         // Validate sort column
-        const allowedSortColumns = ['name', 'email', 'status', 'created_at', 'last_login'];
+        const allowedSortColumns = ['name', 'email', 'status', 'created_at', 'last_login_at'];
         const sortColumn = allowedSortColumns.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
@@ -286,8 +286,8 @@ const getUsersWithRolePermissionSummary = async (req, res) => {
                 u.email,
                 u.phone,
                 u.status,
-                u.last_login,
-                u.account_locked,
+                u.last_login_at,
+                u.is_account_locked,
                 u.created_at,
                 u.updated_at
             FROM users u
@@ -547,7 +547,7 @@ const getOnlineUsers = async (req, res) => {
                 u.name,
                 u.email,
                 u.status,
-                u.last_login,
+                u.last_login_at,
                 MAX(al.created_at) as last_activity,
                 COUNT(al.id) as recent_actions
             FROM users u

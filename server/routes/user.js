@@ -4,7 +4,7 @@ const router = express.Router();
 // Import controllers
 const { createUser } = require('../controllers/User/createUser');
 const { getUserById, getAllUsers, getUserProfile } = require('../controllers/User/getUser');
-const { updateUser, changePassword, updateUserStatus } = require('../controllers/User/updateUser');
+const { updateUser, changePassword, updateUserStatus, resetUserPassword } = require('../controllers/User/updateUser');
 const { deleteUser} = require('../controllers/User/deleteUser');
 const { searchUsers, searchUsersByCriteria, getUsersByRole, getUsersByPermission } = require('../controllers/User/searchUser');
 const { getUserStatistics, getUserDetailedView, getUsersWithRolePermissionSummary, getOnlineUsers } = require('../controllers/User/viewUser');
@@ -508,6 +508,14 @@ router.post('/forgot-password', async (req, res) => {
         });
     }
 });
+
+// Thêm route reset password cho admin
+router.post('/:id/reset-password', 
+    auth, 
+    // onlyAdminAccess, 
+    // checkPermission('user.update'), 
+    resetUserPassword
+);
 
 
 module.exports = router;

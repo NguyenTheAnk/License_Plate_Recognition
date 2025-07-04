@@ -531,7 +531,7 @@ const UserDetail = () => {
                         Đăng nhập cuối
                       </Typography>
                       <Typography variant="body1" sx={{ mt: 1 }}>
-                        {formatDateTime(user.last_login)}
+                        {formatDateTime(user.last_login_at)}
                       </Typography>
                     </Box>
                   </Grid>
@@ -541,7 +541,7 @@ const UserDetail = () => {
                         Đổi mật khẩu cuối
                       </Typography>
                       <Typography variant="body1" sx={{ mt: 1 }}>
-                        {formatDateTime(user.last_password_change)}
+                        {formatDateTime(user.last_password_changed_at)}
                       </Typography>
                     </Box>
                   </Grid>
@@ -581,18 +581,18 @@ const UserDetail = () => {
                         Tài khoản bị khóa
                       </Typography>
                       <Box sx={{ mt: 1 }}>
-                        <Chip label={user.account_locked ? 'Có' : 'Không'} color={user.account_locked ? 'error' : 'success'} size="small" />
+                        <Chip label={user.is_account_locked ? 'Có' : 'Không'} color={user.is_account_locked ? 'error' : 'success'} size="small" />
                       </Box>
                     </Box>
                   </Grid>
-                  {user.lock_until && (
+                  {user.locked_until && (
                     <Grid item xs={12} sm={6}>
                       <Box sx={{ mb: 2 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>
                           Khóa đến
                         </Typography>
                         <Typography variant="body1" color="error" sx={{ mt: 1 }}>
-                          {formatDateTime(user.lock_until)}
+                          {formatDateTime(user.locked_until)}
                         </Typography>
                       </Box>
                     </Grid>

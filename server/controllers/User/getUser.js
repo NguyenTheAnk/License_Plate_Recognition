@@ -59,7 +59,7 @@ const getAllUsers = async (req, res) => {
         }
 
         // Validate sort column
-        const allowedSortColumns = ['name', 'email', 'status', 'created_at', 'last_login'];
+        const allowedSortColumns = ['name', 'email', 'status', 'created_at', 'last_login_at'];
         const sortColumn = allowedSortColumns.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
@@ -76,7 +76,7 @@ const getAllUsers = async (req, res) => {
 
         console.log('Total users:', totalUsers);
 
-        // Get users basic info with direct SQL interpolation for LIMIT/OFFSET
+        // Get users basic info with proper column names from schema
         const userQuery = `
             SELECT 
                 u.id,
@@ -84,9 +84,10 @@ const getAllUsers = async (req, res) => {
                 u.email,
                 u.phone,
                 u.status,
-                u.last_login,
+                u.last_login_at,
                 u.failed_login_attempts,
-                u.account_locked,
+                u.is_account_locked,
+                u.locked_until,
                 u.created_at,
                 u.updated_at
             FROM users u
@@ -117,13 +118,15 @@ const getAllUsers = async (req, res) => {
                     r.level as role_level,
                     ur.assigned_at,
                     ur.assigned_by,
-                    ab.name as assigned_by_name
+                    ab.name as assigned_by_name,
+                    ur.expires_at
                 FROM user_roles ur
                 JOIN roles r ON ur.role_id = r.id
                 LEFT JOIN users ab ON ur.assigned_by = ab.id
                 WHERE ur.user_id IN (${placeholders}) 
                 AND ur.is_active = 1 
                 AND r.is_active = 1
+                AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
                 ORDER BY ur.user_id, r.level DESC
             `, userIds);
 
@@ -146,6 +149,7 @@ const getAllUsers = async (req, res) => {
                 AND r.is_active = 1 
                 AND rp.granted = 1 
                 AND p.is_active = 1
+                AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
                 ORDER BY ur.user_id, p.module, p.action
             `, userIds);
 
@@ -161,7 +165,8 @@ const getAllUsers = async (req, res) => {
                         level: role.role_level,
                         assigned_at: role.assigned_at,
                         assigned_by: role.assigned_by,
-                        assigned_by_name: role.assigned_by_name
+                        assigned_by_name: role.assigned_by_name,
+                        expires_at: role.expires_at
                     }));
 
                 // Get permissions for this user
@@ -181,18 +186,26 @@ const getAllUsers = async (req, res) => {
                 user.permissions_count = user.permissions.length;
                 user.role_names = user.roles.map(role => role.name).join(', ');
                 user.highest_role_level = user.roles.length > 0 ? Math.max(...user.roles.map(role => role.level)) : 0;
+                
+                // Security info
+                user.account_status = user.is_account_locked ? 
+                    (user.locked_until && new Date(user.locked_until) > new Date() ? 'locked' : 'unlocked') : 
+                    'normal';
             });
         }
 
-        // Log access - Fixed foreign key constraint
+        // Log access with proper UUID
         try {
             const validUserId = await validateUserId(connection, req.user?.userId);
             if (validUserId) {
                 await connection.execute(
-                    `INSERT INTO access_logs (user_id, action_type, object_type, status, ip_address, user_agent, created_at)
-                     VALUES (?, 'VIEW', 'USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
+                    `INSERT INTO access_logs (
+                        log_uuid, user_id, username, action_type, object_type, 
+                        status, ip_address, user_agent, created_at
+                    ) VALUES (UUID(), ?, ?, 'VIEW', 'USERS_LIST', 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
+                        req.user?.name || 'unknown',
                         req.ip || 'unknown',
                         req.get('User-Agent') || 'unknown'
                     ]
@@ -248,7 +261,7 @@ const getUserById = async (req, res) => {
             });
         }
 
-        // Get user basic info
+        // Get user basic info with proper column names
         const [users] = await connection.execute(`
             SELECT 
                 u.id,
@@ -256,11 +269,12 @@ const getUserById = async (req, res) => {
                 u.email,
                 u.phone,
                 u.status,
-                u.last_login,
-                u.last_password_change,
+                u.last_login_at,
+                u.last_password_changed_at,
+                u.password_expires_at,
                 u.failed_login_attempts,
-                u.account_locked,
-                u.lock_until,
+                u.is_account_locked,
+                u.locked_until,
                 u.created_at,
                 u.updated_at
             FROM users u
@@ -286,11 +300,13 @@ const getUserById = async (req, res) => {
                 r.parent_role_id,
                 ur.assigned_at,
                 ur.assigned_by,
+                ur.expires_at,
                 ab.name as assigned_by_name
             FROM user_roles ur
             JOIN roles r ON ur.role_id = r.id
             LEFT JOIN users ab ON ur.assigned_by = ab.id
             WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
             ORDER BY r.level DESC
         `, [userId]);
 
@@ -313,6 +329,7 @@ const getUserById = async (req, res) => {
             AND r.is_active = 1 
             AND rp.granted = 1 
             AND p.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
             ORDER BY p.module, p.action
         `, [userId]);
 
@@ -339,15 +356,24 @@ const getUserById = async (req, res) => {
         user.permissions_count = userPermissions.length;
         user.role_names = userRoles.map(role => role.name).join(', ');
 
-        // Log access - Fixed foreign key constraint
+        // Add security status info
+        user.account_status = user.is_account_locked ? 
+            (user.locked_until && new Date(user.locked_until) > new Date() ? 'locked' : 'unlocked') : 
+            'normal';
+        user.password_expired = user.password_expires_at && new Date(user.password_expires_at) < new Date();
+
+        // Log access with proper UUID
         try {
             const validUserId = await validateUserId(connection, req.user?.userId);
             if (validUserId) {
                 await connection.execute(
-                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
-                     VALUES (?, 'VIEW', 'USER', ?, 'SUCCESS', ?, ?, NOW())`,
+                    `INSERT INTO access_logs (
+                        log_uuid, user_id, username, action_type, object_type, 
+                        object_id, status, ip_address, user_agent, created_at
+                    ) VALUES (UUID(), ?, ?, 'VIEW', 'USER', ?, 'SUCCESS', ?, ?, NOW())`,
                     [
                         validUserId,
+                        req.user?.name || 'unknown',
                         userId,
                         req.ip || 'unknown',
                         req.get('User-Agent') || 'unknown'
@@ -382,7 +408,7 @@ const getUserProfile = async (req, res) => {
     try {
         const userId = req.user.userId;
 
-        // Get user basic info
+        // Get user basic info with proper column names
         const [users] = await connection.execute(`
             SELECT 
                 u.id,
@@ -390,8 +416,9 @@ const getUserProfile = async (req, res) => {
                 u.email,
                 u.phone,
                 u.status,
-                u.last_login,
-                u.last_password_change,
+                u.last_login_at,
+                u.last_password_changed_at,
+                u.password_expires_at,
                 u.created_at
             FROM users u
             WHERE u.id = ?
@@ -413,10 +440,12 @@ const getUserProfile = async (req, res) => {
                 r.name,
                 r.description,
                 r.level,
-                ur.assigned_at
+                ur.assigned_at,
+                ur.expires_at
             FROM user_roles ur
             JOIN roles r ON ur.role_id = r.id
             WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
             ORDER BY r.level DESC
         `, [userId]);
 
@@ -438,12 +467,14 @@ const getUserProfile = async (req, res) => {
             AND r.is_active = 1 
             AND rp.granted = 1 
             AND p.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
             ORDER BY p.module, p.action
         `, [userId]);
 
         user.roles = userRoles;
         user.permissions = userPermissions;
         user.can_access = userPermissions.map(p => p.code); // Array of permission codes for easy checking
+        user.password_expired = user.password_expires_at && new Date(user.password_expires_at) < new Date();
 
         res.status(200).json({
             success: true,

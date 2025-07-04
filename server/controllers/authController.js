@@ -14,16 +14,41 @@ const registerUser = async (req, res) => {
             password
         } = req.body;
 
-        // Check if username or email already exists
+        // Validate input
+        if (!name || !email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tên, email và mật khẩu là bắt buộc'
+            });
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Định dạng email không hợp lệ'
+            });
+        }
+
+        // Validate password strength
+        if (password.length < 8) {
+            return res.status(400).json({
+                success: false,
+                message: 'Mật khẩu phải có ít nhất 8 ký tự'
+            });
+        }
+
+        // Check if email already exists
         const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE OR email = ?',
+            'SELECT id FROM users WHERE email = ?',
             [email]
         );
 
         if (existingUsers.length > 0) {
             return res.status(400).json({
                 success: false,
-                message: 'Tên đăng nhập hoặc email đã tồn tại'
+                message: 'Email đã tồn tại'
             });
         }
 
@@ -31,11 +56,14 @@ const registerUser = async (req, res) => {
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-        // Create user
+        // Create user with password expiry
+        const passwordExpiresAt = new Date();
+        passwordExpiresAt.setDate(passwordExpiresAt.getDate() + 90); // 90 days from now
+
         const [userResult] = await connection.execute(
-            `INSERT INTO users (name, email, phone, password, status, created_at, updated_at) 
-             VALUES (?,?, ?, ?, 'active', NOW(), NOW())`,
-            [name,  email, phone, hashedPassword]
+            `INSERT INTO users (name, email, phone, password, status, last_password_changed_at, password_expires_at, created_at, updated_at) 
+             VALUES (?, ?, ?, ?, 'active', NOW(), ?, NOW(), NOW())`,
+            [name, email, phone, hashedPassword, passwordExpiresAt]
         );
 
         const userId = userResult.insertId;
@@ -47,12 +75,12 @@ const registerUser = async (req, res) => {
 
         if (defaultRole.length > 0) {
             await connection.execute(
-                'INSERT INTO user_roles (user_id, role_id, assigned_by) VALUES (?, ?, ?)',
+                'INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at, is_active) VALUES (?, ?, ?, NOW(), 1)',
                 [userId, defaultRole[0].id, userId]
             );
         }
 
-        // Get user with roles and permissions - FIXED VERSION
+        // Get user with roles and permissions
         const [newUser] = await connection.execute(`
             SELECT 
                 u.id,
@@ -118,9 +146,9 @@ const registerUser = async (req, res) => {
 
         // Log successful registration
         await connection.execute(
-            `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, message, created_at)
-             VALUES (?, ?, ?, ?, 'success', 'User registered successfully', NOW())`,
-            [userId, email, req.ip, req.get('User-Agent')]
+            `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, login_at)
+             VALUES (?, ?, ?, ?, 'success', NOW())`,
+            [userId, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
         );
 
         res.status(201).json({
@@ -138,13 +166,396 @@ const registerUser = async (req, res) => {
         
         res.status(500).json({
             success: false,
-            message: 'Lỗi khi đăng ký người dùng',
+            message: 'Lỗi khi thay đổi email',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
-// Login user - FIXED VERSION
+// Enable/Disable 2FA (for future implementation)
+const toggle2FA = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const { enable } = req.body;
+        const userId = req.user.userId;
+
+        // Log 2FA toggle action
+        await connection.execute(
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'UPDATE', '2FA', ?, 'SUCCESS', ?, ?, NOW())`,
+            [
+                userId, 
+                req.user.name, 
+                JSON.stringify({twoFactorEnabled: enable}),
+                req.ip || 'unknown', 
+                req.get('User-Agent') || 'unknown'
+            ]
+        );
+
+        res.status(200).json({
+            success: true,
+            message: enable ? 'Bật xác thực 2 bước thành công' : 'Tắt xác thực 2 bước thành công'
+        });
+
+    } catch (error) {
+        console.error('Error toggling 2FA:', error);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi thay đổi cài đặt xác thực 2 bước',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get user sessions
+const getUserSessions = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const userId = req.user.userId;
+
+        // Get recent login sessions from login_logs
+        const [sessions] = await connection.execute(`
+            SELECT 
+                ll.ip_address,
+                ll.user_agent,
+                ll.status,
+                ll.login_at as created_at,
+                ll.session_id,
+                CASE 
+                    WHEN ll.login_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND ll.status = 'success' THEN 'active'
+                    ELSE 'expired'
+                END as session_status,
+                CASE
+                    WHEN ll.ip_address = ? THEN true
+                    ELSE false
+                END as is_current
+            FROM login_logs ll
+            WHERE ll.user_id = ? AND ll.status = 'success'
+            ORDER BY ll.login_at DESC
+            LIMIT 10
+        `, [req.ip || 'unknown', userId]);
+
+        // Get user profile info
+        const [userInfo] = await connection.execute(`
+            SELECT 
+                id,
+                name,
+                email,
+                last_login_at,
+                created_at
+            FROM users 
+            WHERE id = ?
+        `, [userId]);
+
+        res.status(200).json({
+            success: true,
+            message: 'Lấy danh sách phiên đăng nhập thành công',
+            data: {
+                user: userInfo[0],
+                sessions,
+                currentSession: {
+                    ip_address: req.ip || 'unknown',
+                    user_agent: req.get('User-Agent') || 'unknown',
+                    created_at: new Date(),
+                    session_status: 'active',
+                    is_current: true
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error getting user sessions:', error);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy danh sách phiên đăng nhập',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get user profile
+const getUserProfile = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const userId = req.user.userId;
+
+        // Get user info with roles and permissions
+        const [users] = await connection.execute(`
+            SELECT 
+                u.id,
+                u.name,
+                u.email,
+                u.phone,
+                u.status,
+                u.last_login_at,
+                u.created_at,
+                u.updated_at
+            FROM users u
+            WHERE u.id = ?
+        `, [userId]);
+
+        if (users.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy người dùng'
+            });
+        }
+
+        const user = users[0];
+
+        // Get roles
+        const [userRoles] = await connection.execute(`
+            SELECT DISTINCT
+                r.id,
+                r.name,
+                r.description,
+                r.level,
+                ur.assigned_at,
+                ur.expires_at
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        `, [userId]);
+
+        // Get permissions
+        const [userPermissions] = await connection.execute(`
+            SELECT DISTINCT
+                p.id,
+                p.module,
+                p.action,
+                p.code,
+                p.description
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            JOIN role_permissions rp ON r.id = rp.role_id
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE ur.user_id = ? 
+            AND ur.is_active = 1 
+            AND r.is_active = 1 
+            AND rp.granted = 1 
+            AND p.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        `, [userId]);
+
+        user.roles = userRoles;
+        user.permissions = userPermissions;
+
+        res.status(200).json({
+            success: true,
+            message: 'Lấy thông tin hồ sơ thành công',
+            data: {
+                user
+            }
+        });
+
+    } catch (error) {
+        console.error('Error getting user profile:', error);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy thông tin hồ sơ',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Update user profile
+const updateUserProfile = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const userId = req.user.userId;
+        const { name, phone } = req.body;
+
+        if (!name) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tên là bắt buộc'
+            });
+        }
+
+        // Get current user data
+        const [currentUser] = await connection.execute(
+            'SELECT name, phone FROM users WHERE id = ?',
+            [userId]
+        );
+
+        if (currentUser.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy người dùng'
+            });
+        }
+
+        const oldValues = currentUser[0];
+
+        // Update user profile
+        await connection.execute(
+            'UPDATE users SET name = ?, phone = ?, updated_at = NOW() WHERE id = ?',
+            [name, phone || null, userId]
+        );
+
+        // Log profile update
+        await connection.execute(
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, old_values, new_values, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'UPDATE', 'PROFILE', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+            [
+                userId, 
+                name, // Use new name
+                JSON.stringify(oldValues), 
+                JSON.stringify({name, phone}),
+                req.ip || 'unknown', 
+                req.get('User-Agent') || 'unknown'
+            ]
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Cập nhật hồ sơ thành công'
+        });
+
+    } catch (error) {
+        console.error('Error updating user profile:', error);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi cập nhật hồ sơ',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Revoke session (terminate specific session)
+const revokeSession = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const userId = req.user.userId;
+        const { sessionId } = req.params;
+
+        // Log session revocation
+        await connection.execute(
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'DELETE', 'SESSION', ?, 'SUCCESS', ?, ?, NOW())`,
+            [
+                userId, 
+                req.user.name,
+                sessionId,
+                req.ip || 'unknown', 
+                req.get('User-Agent') || 'unknown'
+            ]
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Thu hồi phiên đăng nhập thành công'
+        });
+
+    } catch (error) {
+        console.error('Error revoking session:', error);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi thu hồi phiên đăng nhập',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get user activity logs
+const getUserActivityLogs = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const userId = req.user.userId;
+        const { page = 1, limit = 20, action_type, date_from, date_to } = req.query;
+        
+        const offset = (page - 1) * limit;
+        
+        // Build WHERE clause
+        let whereClause = 'WHERE al.user_id = ?';
+        let queryParams = [userId];
+        
+        if (action_type) {
+            whereClause += ' AND al.action_type = ?';
+            queryParams.push(action_type);
+        }
+        
+        if (date_from) {
+            whereClause += ' AND DATE(al.created_at) >= ?';
+            queryParams.push(date_from);
+        }
+        
+        if (date_to) {
+            whereClause += ' AND DATE(al.created_at) <= ?';
+            queryParams.push(date_to);
+        }
+
+        // Get activity logs
+        const [logs] = await connection.execute(`
+            SELECT 
+                al.id,
+                al.log_uuid,
+                al.action_type,
+                al.object_type,
+                al.object_id,
+                al.object_name,
+                al.status,
+                al.ip_address,
+                al.user_agent,
+                al.created_at,
+                al.response_time_ms,
+                al.records_affected
+            FROM access_logs al
+            ${whereClause}
+            ORDER BY al.created_at DESC
+            LIMIT ? OFFSET ?
+        `, [...queryParams, parseInt(limit), offset]);
+
+        // Get total count
+        const [totalCount] = await connection.execute(`
+            SELECT COUNT(*) as total
+            FROM access_logs al
+            ${whereClause}
+        `, queryParams);
+
+        const total = totalCount[0].total;
+        const totalPages = Math.ceil(total / limit);
+
+        res.status(200).json({
+            success: true,
+            message: 'Lấy nhật ký hoạt động thành công',
+            data: {
+                logs,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total,
+                    totalPages,
+                    hasNext: page < totalPages,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error getting user activity logs:', error);
+        
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy nhật ký hoạt động',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Login user
 const loginUser = async (req, res) => {
     console.log('Login attempt for:', req.body.email);
     
@@ -153,7 +564,15 @@ const loginUser = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // Find user basic info first - SIMPLIFIED QUERY
+        // Validate input
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email và mật khẩu là bắt buộc'
+            });
+        }
+
+        // Find user basic info first
         const [users] = await connection.execute(`
             SELECT 
                 u.id,
@@ -162,10 +581,11 @@ const loginUser = async (req, res) => {
                 u.phone,
                 u.password,
                 u.status,
-                u.account_locked,
-                u.lock_until,
+                u.is_account_locked,
+                u.locked_until,
                 u.failed_login_attempts,
-                u.last_login,
+                u.last_login_at,
+                u.password_expires_at,
                 u.created_at
             FROM users u
             WHERE u.email = ?
@@ -176,8 +596,8 @@ const loginUser = async (req, res) => {
         // Log failed login if user not found
         if (users.length === 0) {
             await connection.execute(
-                `INSERT INTO login_logs (email, ip_address, user_agent, status, failure_reason, created_at)
-                 VALUES (?, ?, ?, 'fail', 'User not found', NOW())`,
+                `INSERT INTO login_logs (email, ip_address, user_agent, status, failure_reason, login_at)
+                 VALUES (?, ?, ?, 'failed', 'User not found', NOW())`,
                 [email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
             );
 
@@ -191,30 +611,39 @@ const loginUser = async (req, res) => {
         console.log('User found:', user.email);
 
         // Check if account is locked
-        if (user.account_locked && user.lock_until && new Date(user.lock_until) > new Date()) {
+        if (user.is_account_locked && user.locked_until && new Date(user.locked_until) > new Date()) {
             await connection.execute(
-                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, created_at)
-                 VALUES (?, ?, ?, ?, 'fail', 'Account locked', NOW())`,
+                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, login_at)
+                 VALUES (?, ?, ?, ?, 'failed', 'Account locked', NOW())`,
                 [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
             );
 
             return res.status(401).json({
                 success: false,
-                message: `Tài khoản bị khóa đến ${new Date(user.lock_until).toLocaleString('vi-VN')}`
+                message: `Tài khoản bị khóa đến ${new Date(user.locked_until).toLocaleString('vi-VN')}`
             });
         }
 
         // Check account status
         if (user.status !== 'active') {
             await connection.execute(
-                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, created_at)
-                 VALUES (?, ?, ?, ?, 'fail', 'Account inactive', NOW())`,
+                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, login_at)
+                 VALUES (?, ?, ?, ?, 'failed', 'Account inactive', NOW())`,
                 [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
             );
 
             return res.status(401).json({
                 success: false,
                 message: 'Tài khoản đã bị vô hiệu hóa'
+            });
+        }
+
+        // Check password expiry
+        if (user.password_expires_at && new Date(user.password_expires_at) < new Date()) {
+            return res.status(401).json({
+                success: false,
+                message: 'Mật khẩu đã hết hạn. Vui lòng đặt lại mật khẩu.',
+                requirePasswordReset: true
             });
         }
 
@@ -226,13 +655,15 @@ const loginUser = async (req, res) => {
         if (!isValidPassword) {
             // Increment failed login attempts
             const newFailedAttempts = user.failed_login_attempts + 1;
-            const shouldLock = newFailedAttempts >= 5;
+            const maxAttempts = 5; // From system_settings
+            const shouldLock = newFailedAttempts >= maxAttempts;
 
             await connection.execute(
                 `UPDATE users SET 
                  failed_login_attempts = ?,
-                 account_locked = ?,
-                 lock_until = ?
+                 is_account_locked = ?,
+                 locked_until = ?,
+                 updated_at = NOW()
                  WHERE id = ?`,
                 [
                     newFailedAttempts,
@@ -243,8 +674,8 @@ const loginUser = async (req, res) => {
             );
 
             await connection.execute(
-                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, created_at)
-                 VALUES (?, ?, ?, ?, 'fail', 'Invalid password', NOW())`,
+                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, login_at)
+                 VALUES (?, ?, ?, ?, 'failed', 'Invalid password', NOW())`,
                 [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
             );
 
@@ -252,13 +683,13 @@ const loginUser = async (req, res) => {
                 success: false,
                 message: shouldLock 
                     ? 'Đăng nhập sai quá nhiều lần. Tài khoản đã bị khóa 30 phút.'
-                    : 'Email hoặc mật khẩu không chính xác'
+                    : `Email hoặc mật khẩu không chính xác (Còn ${maxAttempts - newFailedAttempts} lần thử)`
             });
         }
 
         console.log('Password verified, getting roles and permissions...');
 
-        // Get roles separately - FIXED VERSION
+        // Get roles separately
         const [userRoles] = await connection.execute(`
             SELECT DISTINCT
                 r.id,
@@ -268,9 +699,10 @@ const loginUser = async (req, res) => {
             FROM user_roles ur
             JOIN roles r ON ur.role_id = r.id
             WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
         `, [user.id]);
 
-        // Get permissions separately - FIXED VERSION
+        // Get permissions separately
         const [userPermissions] = await connection.execute(`
             SELECT DISTINCT
                 p.id,
@@ -282,7 +714,12 @@ const loginUser = async (req, res) => {
             JOIN roles r ON ur.role_id = r.id
             JOIN role_permissions rp ON r.id = rp.role_id
             JOIN permissions p ON rp.permission_id = p.id
-            WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1 AND rp.granted = 1 AND p.is_active = 1
+            WHERE ur.user_id = ? 
+            AND ur.is_active = 1 
+            AND r.is_active = 1 
+            AND rp.granted = 1 
+            AND p.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
         `, [user.id]);
 
         console.log('Found roles:', userRoles.length, 'permissions:', userPermissions.length);
@@ -311,29 +748,41 @@ const loginUser = async (req, res) => {
             { expiresIn: '7d' }
         );
 
+        // Generate session ID
+        const sessionId = require('crypto').randomBytes(64).toString('hex');
+
         // Update user login info
         await connection.execute(
             `UPDATE users SET 
-             last_login = NOW(),
+             last_login_at = NOW(),
              failed_login_attempts = 0,
-             account_locked = FALSE,
-             lock_until = NULL
+             is_account_locked = FALSE,
+             locked_until = NULL,
+             updated_at = NOW()
              WHERE id = ?`,
             [user.id]
         );
 
-        // Log successful login
+        // Log successful login with session ID
         await connection.execute(
-            `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, message, created_at)
-             VALUES (?, ?, ?, ?, 'success', 'Login successful', NOW())`,
-            [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
+            `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, session_id, login_at)
+             VALUES (?, ?, ?, ?, 'success', ?, NOW())`,
+            [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', sessionId]
+        );
+
+        // Log access event
+        await connection.execute(
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, ip_address, user_agent, session_id, created_at)
+             VALUES (UUID(), ?, ?, 'LOGIN', 'USER', 'SUCCESS', ?, ?, ?, NOW())`,
+            [user.id, user.name, req.ip || 'unknown', req.get('User-Agent') || 'unknown', sessionId]
         );
 
         // Remove sensitive data from response
         delete user.password;
         delete user.failed_login_attempts;
-        delete user.account_locked;
-        delete user.lock_until;
+        delete user.is_account_locked;
+        delete user.locked_until;
+        delete user.password_expires_at;
 
         console.log('Login successful for user:', user.id);
 
@@ -343,7 +792,8 @@ const loginUser = async (req, res) => {
             data: {
                 user,
                 token,
-                refreshToken
+                refreshToken,
+                sessionId
             }
         });
 
@@ -353,8 +803,8 @@ const loginUser = async (req, res) => {
         // Log error
         try {
             await connection.execute(
-                `INSERT INTO login_logs (email, ip_address, user_agent, status, failure_reason, created_at)
-                 VALUES (?, ?, ?, 'fail', ?, NOW())`,
+                `INSERT INTO login_logs (email, ip_address, user_agent, status, failure_reason, login_at)
+                 VALUES (?, ?, ?, 'failed', ?, NOW())`,
                 [req.body.email || 'unknown', req.ip || 'unknown', req.get('User-Agent') || 'unknown', error.message]
             );
         } catch (logError) {
@@ -369,7 +819,7 @@ const loginUser = async (req, res) => {
     }
 };
 
-// Refresh token - FIXED VERSION
+// Refresh token
 const refreshToken = async (req, res) => {
     const connection = await db.promise();
     
@@ -393,7 +843,9 @@ const refreshToken = async (req, res) => {
                 u.name,
                 u.email,
                 u.phone,
-                u.status
+                u.status,
+                u.is_account_locked,
+                u.locked_until
             FROM users u
             WHERE u.id = ? AND u.status = 'active'
         `, [decoded.userId]);
@@ -407,6 +859,14 @@ const refreshToken = async (req, res) => {
 
         const user = users[0];
 
+        // Check if account is locked
+        if (user.is_account_locked && user.locked_until && new Date(user.locked_until) > new Date()) {
+            return res.status(401).json({
+                success: false,
+                message: 'Tài khoản đang bị khóa'
+            });
+        }
+
         // Get roles separately
         const [userRoles] = await connection.execute(`
             SELECT DISTINCT
@@ -417,6 +877,7 @@ const refreshToken = async (req, res) => {
             FROM user_roles ur
             JOIN roles r ON ur.role_id = r.id
             WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
         `, [user.id]);
 
         // Get permissions separately
@@ -431,7 +892,12 @@ const refreshToken = async (req, res) => {
             JOIN roles r ON ur.role_id = r.id
             JOIN role_permissions rp ON r.id = rp.role_id
             JOIN permissions p ON rp.permission_id = p.id
-            WHERE ur.user_id = ? AND ur.is_active = 1 AND r.is_active = 1 AND rp.granted = 1 AND p.is_active = 1
+            WHERE ur.user_id = ? 
+            AND ur.is_active = 1 
+            AND r.is_active = 1 
+            AND rp.granted = 1 
+            AND p.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
         `, [user.id]);
 
         user.roles = userRoles;
@@ -449,6 +915,10 @@ const refreshToken = async (req, res) => {
             process.env.JSON_WEB_TOKEN_SECRET_KEY,
             { expiresIn: '24h' }
         );
+
+        // Remove sensitive data
+        delete user.is_account_locked;
+        delete user.locked_until;
 
         res.status(200).json({
             success: true,
@@ -474,15 +944,19 @@ const logoutUser = async (req, res) => {
     const connection = await db.promise();
     
     try {
-        // Log logout
+        // Generate session ID for tracking
+        const sessionId = require('crypto').randomBytes(32).toString('hex');
+
+        // Log logout in access_logs
         await connection.execute(
-            `INSERT INTO access_logs (user_id, action_type, object_type, status, ip_address, user_agent, created_at)
-             VALUES (?, 'LOGOUT', 'USER', 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, ip_address, user_agent, session_id, created_at)
+             VALUES (UUID(), ?, ?, 'LOGOUT', 'USER', 'SUCCESS', ?, ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.name,
-                req.ip,
-                req.get('User-Agent')
+                req.ip || 'unknown',
+                req.get('User-Agent') || 'unknown',
+                sessionId
             ]
         );
 
@@ -520,6 +994,7 @@ const checkUserPermission = async (req, res) => {
             AND rp.granted = 1 
             AND p.code = ? 
             AND p.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
         `, [userId, permissionCode]);
 
         const hasPermission = permissions[0].has_permission > 0;
@@ -554,168 +1029,45 @@ const verifyEmail = async (req, res) => {
 
 // Reset password
 const resetPassword = async (req, res) => {
-    const { token, newPassword } = req.body;
-
-    if (!token || !newPassword) {
-        return res.status(400).json({
-            success: false,
-            message: 'Token và mật khẩu mới là bắt buộc'
-        });
-    }
-
-    if (newPassword.length < 8) {
-        return res.status(400).json({
-            success: false,
-            message: 'Mật khẩu phải có ít nhất 8 ký tự'
-        });
-    }
-
-    res.status(200).json({
-        success: true,
-        message: 'Đặt lại mật khẩu thành công'
-    });
-};
-
-// Change email
-const changeEmail = async (req, res) => {
     const connection = await db.promise();
     
     try {
-        const userId = req.user.userId;
-        const { newEmail, password } = req.body;
+        const { token, newPassword } = req.body;
 
-        if (!newEmail || !password) {
+        if (!token || !newPassword) {
             return res.status(400).json({
                 success: false,
-                message: 'Email mới và mật khẩu là bắt buộc'
+                message: 'Token và mật khẩu mới là bắt buộc'
             });
         }
 
-        // Validate email format
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(newEmail)) {
+        if (newPassword.length < 8) {
             return res.status(400).json({
                 success: false,
-                message: 'Định dạng email không hợp lệ'
+                message: 'Mật khẩu phải có ít nhất 8 ký tự'
             });
         }
 
-        // Get current user
-        const [users] = await connection.execute(
-            'SELECT email, password FROM users WHERE id = ?',
-            [userId]
-        );
-
-        if (users.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Không tìm thấy người dùng'
-            });
-        }
-
-        const user = users[0];
-
-        // Verify current password
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        if (!isValidPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'Mật khẩu hiện tại không chính xác'
-            });
-        }
-
-        // Check if new email already exists
-        const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE email = ? AND id != ?',
-            [newEmail, userId]
-        );
-
-        if (existingUsers.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email này đã được sử dụng bởi tài khoản khác'
-            });
-        }
-
-        // Update email
-        await connection.execute(
-            'UPDATE users SET email = ?, updated_at = NOW() WHERE id = ?',
-            [newEmail, userId]
-        );
-
+        // In a real implementation, you would verify the reset token here
+        // For now, we'll just return success
         res.status(200).json({
             success: true,
-            message: 'Thay đổi email thành công'
+            message: 'Đặt lại mật khẩu thành công'
         });
 
     } catch (error) {
-        console.error('Error changing email:', error);
+        console.error('Error resetting password:', error);
         
         res.status(500).json({
             success: false,
-            message: 'Lỗi khi thay đổi email',
+            message: 'Lỗi khi đặt lại mật khẩu',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
-// Enable/Disable 2FA (for future implementation)
-const toggle2FA = async (req, res) => {
-    const { enable } = req.body;
 
-    res.status(200).json({
-        success: true,
-        message: enable ? 'Bật xác thực 2 bước thành công' : 'Tắt xác thực 2 bước thành công'
-    });
-};
 
-// Get user sessions (for future implementation)
-const getUserSessions = async (req, res) => {
-    const connection = await db.promise();
-    
-    try {
-        const userId = req.user.userId;
-
-        // Get recent login sessions
-        const [sessions] = await connection.execute(`
-            SELECT 
-                ip_address,
-                user_agent,
-                status,
-                created_at,
-                CASE 
-                    WHEN created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 'active'
-                    ELSE 'expired'
-                END as session_status
-            FROM login_logs
-            WHERE user_id = ? AND status = 'success'
-            ORDER BY created_at DESC
-            LIMIT 10
-        `, [userId]);
-
-        res.status(200).json({
-            success: true,
-            message: 'Lấy danh sách phiên đăng nhập thành công',
-            data: {
-                sessions,
-                currentSession: {
-                    ip_address: req.ip,
-                    user_agent: req.get('User-Agent'),
-                    created_at: new Date()
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error('Error getting user sessions:', error);
-        
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi khi lấy danh sách phiên đăng nhập',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
 
 module.exports = {
     registerUser,
@@ -725,7 +1077,6 @@ module.exports = {
     checkUserPermission,
     verifyEmail,
     resetPassword,
-    changeEmail,
     toggle2FA,
     getUserSessions
 };

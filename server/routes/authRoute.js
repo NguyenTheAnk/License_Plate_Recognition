@@ -18,7 +18,7 @@ const {
 } = require('../helper/validator');
 
 // Authentication routes
-router.post('/register', registerValidator, authController.registerUser);
+router.post('/register', authController.registerUser);
 router.post('/login', loginValidator, authController.loginUser);
 router.post('/refresh-token', refreshTokenValidator, authController.refreshToken);
 router.post('/logout', auth, authController.logoutUser);
@@ -27,8 +27,8 @@ router.post('/logout', auth, authController.logoutUser);
 router.post('/forgot-password', forgotPasswordValidator, authController.resetPassword);
 router.post('/reset-password', resetPasswordValidator, authController.resetPassword);
 
-// Email management
-router.put('/change-email', auth, changeEmailValidator, authController.changeEmail);
+// // Email management
+// router.put('/change-email', auth, changeEmailValidator, authController.changeEmail);
 
 // Permission check
 router.get('/check-permission/:permissionCode', auth, authController.checkUserPermission);

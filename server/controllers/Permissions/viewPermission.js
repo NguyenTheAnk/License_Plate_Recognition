@@ -137,8 +137,8 @@ const getPermissionUsageAnalytics = async (req, res) => {
 
         // Log access
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'PERMISSION_ANALYTICS', 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'VIEW', 'PERMISSION_ANALYTICS', 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username,
@@ -296,8 +296,8 @@ const exportPermissions = async (req, res) => {
 
         // Log export access
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'EXPORT', 'PERMISSION', ?, 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'EXPORT', 'PERMISSION', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username,
@@ -371,8 +371,8 @@ const exportPermissions = async (req, res) => {
         
         // Log failed export
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'EXPORT', 'PERMISSION', 'FAILURE', ?, ?, ?, NOW())`,
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, failure_reason, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'EXPORT', 'PERMISSION', 'FAILURE', ?, ?, ?, NOW())`,
             [
                 req.user?.userId,
                 req.user?.username,
@@ -565,8 +565,8 @@ const compareRolePermissions = async (req, res) => {
 
         // Log comparison access
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'PERMISSION_COMPARISON', ?, 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'VIEW', 'PERMISSION_COMPARISON', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username,
@@ -1133,8 +1133,8 @@ const generatePermissionReport = async (req, res) => {
 
         // Log report generation
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'PERMISSION_REPORT', ?, 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'VIEW', 'PERMISSION_REPORT', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username,
@@ -1364,8 +1364,8 @@ const validatePermissionStructure = async (req, res) => {
 
         // Log validation
         await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'VIEW', 'PERMISSION_VALIDATION', 'SUCCESS', ?, ?, NOW())`,
+            `INSERT INTO access_logs (log_uuid, user_id, username, action_type, object_type, status, ip_address, user_agent, created_at)
+             VALUES (UUID(), ?, ?, 'VIEW', 'PERMISSION_VALIDATION', 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username,

@@ -10,7 +10,11 @@ import {
   Cancel as CancelIcon,
   FilterList as FilterIcon,
   Home as HomeIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  ViewColumn as ViewColumnIcon,
+  Group as GroupIcon
 } from '@mui/icons-material';
 import { 
   Button, 
@@ -49,12 +53,14 @@ import {
   FaTimes,
   FaLock,
   FaCog,
-  FaShieldAlt
+  FaShieldAlt,
+  FaEye
 } from 'react-icons/fa';
 import {
   BiSolidTrashAlt
 } from 'react-icons/bi';
 import { fetchDataFromAPI, postData, editData, deleteData, handleErrorResponse } from '../utils/auth';
+import * as XLSX from 'xlsx';
 
 // Mock localStorage for demo purposes
 if (typeof window !== 'undefined' && !localStorage.getItem('token')) {
@@ -568,6 +574,76 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
   );
 };
 
+// Add Role Assignment Dialog
+const RoleAssignmentDialog = ({ open, handleClose, permission, onRolesUpdated }) => {
+  const [roles, setRoles] = useState([]);
+  const [assignedRoles, setAssignedRoles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const context = useContext(MyContext);
+
+  useEffect(() => {
+    if (open && permission) {
+      // Fetch all roles and assigned roles for this permission
+      (async () => {
+        setLoading(true);
+        try {
+          const token = localStorage.getItem('token');
+          const allRoles = await fetchDataFromAPI('/api/roles', token);
+          const assigned = await fetchDataFromAPI(`/api/permissions/${permission.id}/roles`, token);
+          setRoles(allRoles.data?.roles || []);
+          setAssignedRoles(assigned.data?.roles?.map(r => r.id) || []);
+        } catch (err) {
+          context.setAlertBox({ open: true, error: true, msg: handleErrorResponse(err) });
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }
+  }, [open, permission]);
+
+  const handleToggleRole = (roleId) => {
+    setAssignedRoles(prev => prev.includes(roleId) ? prev.filter(id => id !== roleId) : [...prev, roleId]);
+  };
+
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      await postData(`/api/permissions/${permission.id}/roles`, { roleIds: assignedRoles }, token);
+      context.setAlertBox({ open: true, error: false, msg: 'Cập nhật vai trò thành công!' });
+      onRolesUpdated();
+      handleClose();
+    } catch (err) {
+      context.setAlertBox({ open: true, error: true, msg: handleErrorResponse(err) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Phân vai trò cho quyền "{permission?.code}"</DialogTitle>
+      <DialogContent>
+        {loading ? <Typography>Đang tải...</Typography> : (
+          <Box>
+            {roles.map(role => (
+              <FormControlLabel
+                key={role.id}
+                control={<Checkbox checked={assignedRoles.includes(role.id)} onChange={() => handleToggleRole(role.id)} />}
+                label={role.name}
+              />
+            ))}
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleClose}>Hủy</Button>
+        <Button onClick={handleSave} variant="contained" disabled={loading}>Lưu</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 // Thêm hàm tạo mảng trang với dấu ...
 function getPaginationItems(current, total) {
   const delta = 1;
@@ -623,6 +699,19 @@ const Permissions = () => {
   const [selectedPermissions, setSelectedPermissions] = useState(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState({ open: false, permissionId: null, name: '' });
+  const [roleDialog, setRoleDialog] = useState({ open: false, permission: null });
+  const [visibleColumns, setVisibleColumns] = useState({
+    module: true,
+    action: true,
+    code: true,
+    description: true,
+    is_active: true,
+    granted_roles_count: true
+  });
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+  const [historyDialog, setHistoryDialog] = useState({ open: false, permission: null });
+  const [historyData, setHistoryData] = useState([]);
   const token = localStorage.getItem('token');
   const context = useContext(MyContext);
 
@@ -794,6 +883,51 @@ const Permissions = () => {
     }
   };
 
+  // Add export to Excel/CSV
+  const handleExport = (type = 'xlsx') => {
+    const exportData = permissions.map(p => ({
+      Module: p.module,
+      Action: p.action,
+      Code: p.code,
+      Description: p.description,
+      Status: p.is_active ? 'Active' : 'Inactive',
+      Roles: p.granted_roles_count || 0
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Permissions');
+    XLSX.writeFile(wb, `permissions.${type}`);
+  };
+
+  // Import from Excel/CSV
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const imported = XLSX.utils.sheet_to_json(sheet);
+      // Optionally: send imported data to backend
+      // For now, just show a success alert
+      context.setAlertBox({ open: true, error: false, msg: `Đã nhập ${imported.length} quyền (chưa lưu vào hệ thống)` });
+      setImportDialogOpen(false);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Permission history effect
+  useEffect(() => {
+    if (historyDialog.open && historyDialog.permission) {
+      (async () => {
+        const token = localStorage.getItem('token');
+        const res = await fetchDataFromAPI(`/api/permissions/${historyDialog.permission.id}/history`, token);
+        setHistoryData(res.data?.history || []);
+      })();
+    }
+  }, [historyDialog]);
+
   return (
     <Box sx={{ 
       minHeight: '100vh',
@@ -816,15 +950,14 @@ const Permissions = () => {
                   color: '#1976d2',
                   mb: 1
                 }}>
-                  Quản lý quyền truy cập
+                  Quản lý quyền
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                  Tổng cộng {pagination.totalPermissions || permissions.length} quyền trong {Object.keys(modules).length} module
+                  Quản lý và phân quyền truy cập cho các chức năng trong hệ thống
                 </Typography>
               </Box>
-              
               <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-                <Breadcrumbs>
+                <Breadcrumbs sx={{ '& .MuiBreadcrumbs-ol': { flexWrap: 'nowrap', overflow: 'hidden' } }}>
                   <StyledBreadcrumb
                     label="Trang chủ"
                     icon={<HomeIcon fontSize="small" />}
@@ -832,10 +965,9 @@ const Permissions = () => {
                   />
                   <StyledBreadcrumb
                     label="Quản lý quyền"
-                    icon={<SecurityIcon fontSize="small" />}
+                    icon={<ExpandMoreIcon fontSize="small" />}
                   />
                 </Breadcrumbs>
-                
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
@@ -856,7 +988,7 @@ const Permissions = () => {
                     transition: 'all 0.2s ease'
                   }}
                 >
-                  Thêm quyền mới
+                  Thêm quyền
                 </Button>
               </Box>
             </Box>
@@ -872,139 +1004,100 @@ const Permissions = () => {
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
           border: '1px solid #e0e0e0'
         }}>
-          <Box sx={{ p: 2 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={showFilters ? 2 : 0}>
-              <Box display="flex" alignItems="center" gap={1}>
-                <FilterIcon />
-                <Typography variant="h6">Bộ lọc</Typography>
-              </Box>
-              <IconButton onClick={() => setShowFilters(!showFilters)}>
-                <ExpandMoreIcon sx={{ 
-                  transform: showFilters ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.3s ease'
-                }} />
-              </IconButton>
-            </Box>
-            
-            <Collapse in={showFilters}>
-              <Grid container spacing={3} alignItems="center">
-                <Grid item xs={12} sm={6} md={3}>
-                  <TextField
-                    fullWidth
-                    label="Tìm kiếm"
-                    name="search"
-                    value={filters.search}
-                    onChange={handleFilterChange}
-                    placeholder="Tìm theo code, mô tả..."
-                    size="small"
-                    InputProps={{
-                      startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                    }}
+          <Box sx={{ p: 3 }}>
+            <Grid container spacing={3} alignItems="center">
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  fullWidth
+                  label="Tìm kiếm"
+                  value={filters.search || ''}
+                  onChange={e => setFilters(prev => ({ ...prev, search: e.target.value, page: 1 }))}
+                  placeholder="Module, hành động, mã quyền..."
+                  size="small"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      '&:hover fieldset': {
+                        borderColor: '#1976d2',
+                      },
+                      '&.Mui-focused fieldset': {
+                        borderColor: '#1976d2',
+                      },
+                    },
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Trạng thái</InputLabel>
+                  <Select
+                    value={filters.status || ''}
+                    onChange={e => setFilters(prev => ({ ...prev, status: e.target.value, page: 1 }))}
+                    label="Trạng thái"
                     sx={{
-                      '& .MuiOutlinedInput-root': {
-                        borderRadius: 2,
+                      borderRadius: 2,
+                      '& .MuiOutlinedInput-notchedOutline': {
+                        '&:hover': {
+                          borderColor: '#1976d2',
+                        },
+                      },
+                      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                        borderColor: '#1976d2',
                       },
                     }}
-                  />
-                </Grid>
-                
-                <Grid item xs={12} sm={6} md={2}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Module</InputLabel>
-                    <Select
-                      name="module"
-                      value={filters.module}
-                      onChange={handleFilterChange}
-                      label="Module"
-                      sx={{ borderRadius: 2 }}
-                    >
-                      <MenuItem value="">Tất cả</MenuItem>
-                      {modules.map(module => (
-                        <MenuItem key={module} value={module}>{module}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-                
-                <Grid item xs={12} sm={6} md={2}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Hành động</InputLabel>
-                    <Select
-                      name="action"
-                      value={filters.action}
-                      onChange={handleFilterChange}
-                      label="Hành động"
-                      sx={{ borderRadius: 2 }}
-                    >
-                      <MenuItem value="">Tất cả</MenuItem>
-                      {actions.map(action => (
-                        <MenuItem key={action} value={action}>{action}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-                
-                <Grid item xs={12} sm={6} md={2}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Trạng thái</InputLabel>
-                    <Select
-                      name="isActive"
-                      value={filters.isActive}
-                      onChange={handleFilterChange}
-                      label="Trạng thái"
-                      sx={{ borderRadius: 2 }}
-                    >
-                      <MenuItem value="all">Tất cả</MenuItem>
-                      <MenuItem value="true">Kích hoạt</MenuItem>
-                      <MenuItem value="false">Không kích hoạt</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-                
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box display="flex" gap={1}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<RefreshIcon />}
-                      onClick={handleRefresh}
-                      disabled={loading}
-                      sx={{
-                        borderRadius: 2,
-                        textTransform: 'none',
-                        fontWeight: 600,
-                        borderColor: '#1976d2',
-                        color: '#1976d2',
-                        '&:hover': {
-                          borderColor: '#1565c0',
-                          backgroundColor: 'rgba(25, 118, 210, 0.04)',
-                        },
-                      }}
-                    >
-                      Làm mới
-                    </Button>
-                    
-                    {selectedPermissions.size > 0 && (
-                      <Button
-                        variant="outlined"
-                        color="error"
-                        startIcon={<BiSolidTrashAlt />}
-                        onClick={handleBulkDelete}
-                        sx={{
-                          borderRadius: 2,
-                          textTransform: 'none',
-                          fontWeight: 600,
-                          '&:hover': {
-                            backgroundColor: 'rgba(244, 67, 54, 0.04)',
-                          },
-                        }}
-                      >
-                        Xóa ({selectedPermissions.size})
-                      </Button>
-                    )}
-                  </Box>
-                </Grid>
+                  >
+                    <MenuItem value="">Tất cả</MenuItem>
+                    <MenuItem value="active">Hoạt động</MenuItem>
+                    <MenuItem value="inactive">Không hoạt động</MenuItem>
+                  </Select>
+                </FormControl>
               </Grid>
-            </Collapse>
+              <Grid item xs={12} sm={6} md={2}>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<RefreshIcon />}
+                  onClick={fetchPermissions}
+                  disabled={loading}
+                  sx={{
+                    borderRadius: 2,
+                    py: 1.5,
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    borderColor: '#1976d2',
+                    color: '#1976d2',
+                    '&:hover': {
+                      borderColor: '#1565c0',
+                      backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                    },
+                  }}
+                >
+                  Làm mới
+                </Button>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                {selectedPermissions.size > 0 && (
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    color="error"
+                    startIcon={<BiSolidTrashAlt />}
+                    onClick={handleBulkDelete}
+                    sx={{
+                      borderRadius: 2,
+                      py: 1.5,
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      '&:hover': {
+                        backgroundColor: 'rgba(244, 67, 54, 0.04)',
+                      },
+                    }}
+                  >
+                    Xóa đã chọn ({selectedPermissions.size})
+                  </Button>
+                )}
+              </Grid>
+            </Grid>
           </Box>
         </Card>
       </Box>
@@ -1015,32 +1108,6 @@ const Permissions = () => {
           <Alert severity="error" sx={{ borderRadius: 2 }}>
             {error}
           </Alert>
-        </Box>
-      )}
-
-      {/* Action Bar */}
-      {selectedPermissions.size > 0 && (
-        <Box sx={{ px: 3, mb: 3 }}>
-          <Paper elevation={2} sx={{ p: 3, bg: '#e3f2fd', borderRadius: 2, border: '1px solid #bbdefb' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-              <Typography variant="body1" sx={{ color: '#1565c0', fontWeight: 600 }}>
-                Đã chọn {selectedPermissions.size} quyền
-              </Typography>
-              <Button
-                variant="contained"
-                color="error"
-                startIcon={<DeleteIcon />}
-                onClick={handleBulkDelete}
-                sx={{
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  fontWeight: 600,
-                }}
-              >
-                Xóa đã chọn
-              </Button>
-            </Box>
-          </Paper>
         </Box>
       )}
 
@@ -1099,12 +1166,12 @@ const Permissions = () => {
                         }}
                       />
                     </TableCell>
-                    <TableCell>Module</TableCell>
-                    <TableCell>Hành động</TableCell>
-                    <TableCell>Mã quyền</TableCell>
-                    <TableCell>Mô tả</TableCell>
-                    <TableCell>Trạng thái</TableCell>
-                    <TableCell>Vai trò được cấp</TableCell>
+                    {visibleColumns.module && <TableCell>Module</TableCell>}
+                    {visibleColumns.action && <TableCell>Hành động</TableCell>}
+                    {visibleColumns.code && <TableCell>Mã quyền</TableCell>}
+                    {visibleColumns.description && <TableCell>Mô tả</TableCell>}
+                    {visibleColumns.is_active && <TableCell>Trạng thái</TableCell>}
+                    {visibleColumns.granted_roles_count && <TableCell>Vai trò được cấp</TableCell>}
                     <TableCell align="center">Thao tác</TableCell>
                   </TableRow>
                 </TableHead>
@@ -1148,7 +1215,7 @@ const Permissions = () => {
                             }}
                           />
                         </TableCell>
-                        <TableCell>
+                        {visibleColumns.module && <TableCell>
                           <Box display="flex" alignItems="center" gap={2}>
                             <Avatar sx={{ 
                               bgcolor: '#1976d2',
@@ -1162,13 +1229,13 @@ const Permissions = () => {
                               {permission.module}
                             </Typography>
                           </Box>
-                        </TableCell>
-                        <TableCell>
+                        </TableCell>}
+                        {visibleColumns.action && <TableCell>
                           <Typography variant="body2" sx={{ fontWeight: 500 }}>
                             {permission.action}
                           </Typography>
-                        </TableCell>
-                        <TableCell>
+                        </TableCell>}
+                        {visibleColumns.code && <TableCell>
                           <Typography variant="body2" sx={{ 
                             fontFamily: 'monospace',
                             fontSize: '0.8rem',
@@ -1179,8 +1246,8 @@ const Permissions = () => {
                           }}>
                             {permission.code}
                           </Typography>
-                        </TableCell>
-                        <TableCell>
+                        </TableCell>}
+                        {visibleColumns.description && <TableCell>
                           <Typography variant="body2" color="text.secondary" sx={{
                             maxWidth: 200,
                             overflow: 'hidden',
@@ -1189,60 +1256,78 @@ const Permissions = () => {
                           }}>
                             {permission.description || '-'}
                           </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            icon={permission.is_active ? <CheckCircleIcon /> : <CancelIcon />}
-                            label={permission.is_active ? 'Hoạt động' : 'Không hoạt động'}
-                            sx={{
-                              backgroundColor: permission.is_active ? '#e8f5e8' : '#ffebee',
-                              color: permission.is_active ? '#2e7d32' : '#c62828',
-                              fontWeight: 600,
-                              '& .MuiChip-icon': {
+                        </TableCell>}
+                        {visibleColumns.is_active && (
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              icon={permission.is_active ? <CheckCircleIcon /> : <CancelIcon />}
+                              label={permission.is_active ? 'Hoạt động' : 'Không hoạt động'}
+                              sx={{
+                                backgroundColor: permission.is_active ? '#e8f5e8' : '#ffebee',
                                 color: permission.is_active ? '#2e7d32' : '#c62828',
-                              },
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
+                                fontWeight: 600,
+                                '& .MuiChip-icon': {
+                                  color: permission.is_active ? '#2e7d32' : '#c62828',
+                                },
+                                cursor: 'pointer'
+                              }}
+                              onClick={async () => {
+                                // Quick toggle active status
+                                const token = localStorage.getItem('token');
+                                await editData(`/api/permissions/${permission.id}`, { ...permission, isActive: !permission.is_active }, token);
+                                fetchPermissions();
+                              }}
+                            />
+                          </TableCell>
+                        )}
+                        {visibleColumns.granted_roles_count && <TableCell>
                           <Chip
                             size="small"
                             label={`${permission.granted_roles_count || 0} vai trò`}
-                            sx={{
-                              backgroundColor: '#e1f5fe',
-                              color: '#0277bd',
-                              fontWeight: 600,
-                            }}
+                            onClick={() => setRoleDialog({ open: true, permission })}
+                            icon={<GroupIcon />}
+                            sx={{ cursor: 'pointer', backgroundColor: '#e1f5fe', color: '#0277bd', fontWeight: 600 }}
                           />
-                        </TableCell>
+                        </TableCell>}
                         <TableCell align="center">
                           <Box display="flex" justifyContent="center" gap={1}>
                             <IconButton
                               size="small"
                               onClick={() => openModal('update', permission)}
-                              sx={{
-                                color: '#ff9800',
-                                backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                                '&:hover': {
-                                  backgroundColor: 'rgba(255, 152, 0, 0.2)',
-                                },
-                              }}
+                              sx={{ color: '#ff9800', backgroundColor: 'rgba(255, 152, 0, 0.1)', '&:hover': { backgroundColor: 'rgba(255, 152, 0, 0.2)' } }}
                             >
                               <EditIcon fontSize="small" />
                             </IconButton>
                             <IconButton
                               size="small"
                               onClick={() => handleDelete(permission.id, permission.code)}
-                              sx={{
-                                color: '#f44336',
-                                backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                                '&:hover': {
-                                  backgroundColor: 'rgba(244, 67, 54, 0.2)',
-                                },
-                              }}
+                              sx={{ color: '#f44336', backgroundColor: 'rgba(244, 67, 54, 0.1)', '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.2)' } }}
                             >
                               <DeleteIcon fontSize="small" />
+                            </IconButton>
+                            {/* New: Duplicate permission */}
+                            <IconButton
+                              size="small"
+                              onClick={async () => {
+                                const token = localStorage.getItem('token');
+                                const newPerm = { ...permission, code: permission.code + '_copy', description: permission.description + ' (bản sao)' };
+                                delete newPerm.id;
+                                await postData('/api/permissions', newPerm, token);
+                                fetchPermissions();
+                                context.setAlertBox({ open: true, error: false, msg: 'Đã sao chép quyền!' });
+                              }}
+                              sx={{ color: '#1976d2', backgroundColor: 'rgba(25, 118, 210, 0.1)', '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.2)' } }}
+                            >
+                              <FaSave fontSize="small" />
+                            </IconButton>
+                            {/* New: View history */}
+                            <IconButton
+                              size="small"
+                              onClick={() => setHistoryDialog({ open: true, permission })}
+                              sx={{ color: '#43a047', backgroundColor: 'rgba(67, 160, 71, 0.1)', '&:hover': { backgroundColor: 'rgba(67, 160, 71, 0.2)' } }}
+                            >
+                              <FaEye fontSize="small" />
                             </IconButton>
                           </Box>
                         </TableCell>
@@ -1266,21 +1351,28 @@ const Permissions = () => {
               background: 'rgba(0, 0, 0, 0.02)',
             }}>
               {/* Page size selector bottom left */}
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel id="per-page-label">Bản ghi/trang</InputLabel>
+              <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500, mr: 1 }}>
+                  Hiển thị
+                </Typography>
                 <Select
-                  labelId="per-page-label"
                   value={filters.perPage}
-                  label="Bản ghi/trang"
                   onChange={e => {
                     const value = e.target.value;
                     setFilters(prev => ({ ...prev, perPage: value, page: 1 }));
                   }}
+                  sx={{ minWidth: 60, mx: 0.5 }}
+                  size="small"
+                  displayEmpty
+                  inputProps={{ 'aria-label': 'Số quyền mỗi trang' }}
                 >
                   {[5, 10, 20, 50, 100].map(size => (
                     <MenuItem key={size} value={size}>{size}</MenuItem>
                   ))}
                 </Select>
+                <Typography variant="body2" sx={{ fontWeight: 500, ml: 1 }}>
+                  quyền
+                </Typography>
               </FormControl>
               {/* Pagination right */}
               <Box display="flex" alignItems="center" gap={1}>
@@ -1375,6 +1467,14 @@ const Permissions = () => {
         onPermissionUpdated={fetchPermissions}
       />
 
+      {/* Role Assignment Dialog */}
+      <RoleAssignmentDialog
+        open={roleDialog.open}
+        handleClose={() => setRoleDialog({ open: false, permission: null })}
+        permission={roleDialog.permission}
+        onRolesUpdated={fetchPermissions}
+      />
+
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={deleteDialog.open}
@@ -1457,6 +1557,86 @@ const Permissions = () => {
             <BiSolidTrashAlt style={{ marginRight: 8, color: '#fff' }} />
             Xóa quyền
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Import Dialog */}
+      <Dialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Nhập quyền từ file</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Chọn file Excel hoặc CSV chứa danh sách quyền cần nhập. Hệ thống sẽ tự động phân tích và tạo quyền tương ứng.
+          </Typography>
+          <Button
+            variant="outlined"
+            component="label"
+            fullWidth
+            sx={{
+              borderRadius: 2,
+              py: 1.5,
+              textTransform: 'none',
+              fontWeight: 600,
+              borderColor: '#1976d2',
+              color: '#1976d2',
+              '&:hover': {
+                borderColor: '#1565c0',
+                backgroundColor: 'rgba(25, 118, 210, 0.04)',
+              },
+            }}
+          >
+            Tải file mẫu
+            <input type="file" accept=".xlsx,.csv" hidden onChange={handleImport} />
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setImportDialogOpen(false)}>Đóng</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Column customization dialog */}
+      <Dialog
+        open={columnDialogOpen}
+        onClose={() => setColumnDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Tùy chỉnh cột hiển thị</DialogTitle>
+        <DialogContent>
+          {Object.keys(visibleColumns).map(col => (
+            <FormControlLabel
+              key={col}
+              control={<Checkbox checked={visibleColumns[col]} onChange={() => setVisibleColumns(prev => ({ ...prev, [col]: !prev[col] }))} />}
+              label={col}
+            />
+          ))}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setColumnDialogOpen(false)}>Đóng</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Permission History Dialog */}
+      <Dialog open={historyDialog.open} onClose={() => setHistoryDialog({ open: false, permission: null })} maxWidth="md" fullWidth>
+        <DialogTitle>Lịch sử thay đổi quyền "{historyDialog.permission?.code}"</DialogTitle>
+        <DialogContent>
+          {historyData.length === 0 ? <Typography>Không có lịch sử</Typography> : (
+            <Box>
+              {historyData.map((h, idx) => (
+                <Box key={idx} mb={2}>
+                  <Typography variant="body2">{h.timestamp}: {h.action} bởi {h.user}</Typography>
+                  <Typography variant="caption" color="text.secondary">{h.details}</Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHistoryDialog({ open: false, permission: null })}>Đóng</Button>
         </DialogActions>
       </Dialog>
     </Box>

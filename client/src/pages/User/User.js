@@ -42,7 +42,10 @@ import {
   FaLock,
   FaUserTag,
   FaSave,
-  FaTimes
+  FaTimes,
+  FaLockOpen,
+  FaKey,
+  FaEyeSlash,
 } from 'react-icons/fa';
 import {
   BiSolidTrashAlt,
@@ -864,6 +867,128 @@ const UpdateUserDialog = ({ open, handleClose, user, onUserUpdated }) => {
   );
 };
 
+// Reset Password Dialog Component
+const ResetPasswordDialog = ({ open, handleClose, user, onResetSuccess }) => {
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const context = useContext(MyContext);
+
+  // Hàm kiểm tra mật khẩu mạnh
+  const isStrongPassword = (password) => {
+    // Tối thiểu 8 ký tự, ít nhất 1 chữ hoa, 1 ký tự đặc biệt
+    return /^(?=.*[A-Z])(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/.test(password);
+  };
+
+  const validate = () => {
+    if (!newPassword || newPassword.length < 8) {
+      setError('Mật khẩu phải có ít nhất 8 ký tự!');
+      return false;
+    }
+    if (!isStrongPassword(newPassword)) {
+      setError('Mật khẩu phải có ít nhất 8 ký tự, 1 chữ hoa và 1 ký tự đặc biệt!');
+      return false;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Mật khẩu xác nhận không khớp!');
+      return false;
+    }
+    setError('');
+    return true;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setLoading(true);
+    try {
+      context.setProgress(30);
+      const token = localStorage.getItem('token');
+      const response = await postData(`/api/user/${user.id}/reset-password`, { newPassword, forceChangeOnLogin: false }, token);      context.setAlertBox({
+        open: true,
+        error: false,
+        msg: response.message || 'Đặt lại mật khẩu thành công!'
+      });
+      setNewPassword('');
+      setConfirmPassword('');
+      handleClose();
+      if (onResetSuccess) onResetSuccess();
+    } catch (err) {
+      context.setAlertBox({
+        open: true,
+        error: true,
+        msg: handleErrorResponse(err)
+      });
+    } finally {
+      setLoading(false);
+      context.setProgress(100);
+    }
+  };
+
+  const handleDialogClose = () => {
+    setNewPassword('');
+    setConfirmPassword('');
+    setError('');
+    handleClose();
+  };
+
+  return (
+    <Dialog open={open} onClose={handleDialogClose} maxWidth="sm" fullWidth
+      PaperProps={{ sx: { borderRadius: 3, background: 'white', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', border: '1px solid #e0e0e0' } }}
+    >
+      <DialogTitle sx={{ background: '#1976d2', color: 'white', borderRadius: '12px 12px 0 0', borderBottom: '1px solid #e0e0e0' }}>
+        <Box display="flex" alignItems="center">
+          <FaKey style={{ marginRight: 12, fontSize: '1.5rem' }} />
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+            Đặt lại mật khẩu cho "{user?.name}"
+          </Typography>
+        </Box>
+      </DialogTitle>
+      <DialogContent sx={{ p: 3 }}>
+        <TextField
+          fullWidth
+          label="Mật khẩu mới"
+          type={showPassword ? 'text' : 'password'}
+          value={newPassword}
+          onChange={e => setNewPassword(e.target.value)}
+          margin="normal"
+          autoFocus
+          InputProps={{
+            endAdornment: (
+              <IconButton onClick={() => setShowPassword(v => !v)} edge="end" size="small">
+                {showPassword ? <FaEye /> : <FaEyeSlash />}
+              </IconButton>
+            )
+          }}
+        />
+        <TextField
+          fullWidth
+          label="Xác nhận mật khẩu"
+          type={showPassword ? 'text' : 'password'}
+          value={confirmPassword}
+          onChange={e => setConfirmPassword(e.target.value)}
+          margin="normal"
+          InputProps={{
+            endAdornment: (
+              <IconButton onClick={() => setShowPassword(v => !v)} edge="end" size="small">
+                {showPassword ? <FaEye /> : <FaEyeSlash />}
+              </IconButton>
+            )
+          }}
+        />
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      </DialogContent>
+      <DialogActions sx={{ p: 3, borderTop: '1px solid #e0e0e0', background: '#fafafa' }}>
+        <Button onClick={handleDialogClose} disabled={loading} sx={{ borderRadius: 2, px: 3, py: 1.5, textTransform: 'none', fontWeight: 600, color: '#666', backgroundColor: '#f5f5f5', '&:hover': { backgroundColor: '#ededed' } }}>Hủy</Button>
+        <Button variant="contained" onClick={handleSubmit} disabled={loading} sx={{ borderRadius: 2, px: 3, py: 1.5, textTransform: 'none', fontWeight: 600, backgroundColor: '#1976d2', color: 'white', '&:hover': { backgroundColor: '#1565c0' } }}>
+          {loading ? 'Đang xử lý...' : 'Đặt lại mật khẩu'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 // Main Users Management Component
 const UsersManagement = () => {
   const [userData, setUserData] = useState([]);
@@ -881,6 +1006,8 @@ const UsersManagement = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [userToUpdate, setUserToUpdate] = useState(null);
+  // Dialog states
+  const [resetPasswordDialog, setResetPasswordDialog] = useState({ open: false, user: null });
   
   // Permissions
   const [permissions, setPermissions] = useState({
@@ -919,10 +1046,10 @@ const UsersManagement = () => {
         const user = JSON.parse(storedUser);
         const userPermissions = user.permissions || [];
         setPermissions({
-          canCreate: userPermissions.some(p => p.code === 'users.create'),
-          canView: userPermissions.some(p => p.code === 'users.view'),
-          canUpdate: userPermissions.some(p => p.code === 'users.update'),
-          canDelete: userPermissions.some(p => p.code === 'users.delete')
+          canCreate: userPermissions.some(p => p.code === 'user.create'),
+          canView: userPermissions.some(p => p.code === 'user.view'),
+          canUpdate: userPermissions.some(p => p.code === 'user.update'),
+          canDelete: userPermissions.some(p => p.code === 'user.delete')
         });
       } catch (error) {
         console.error('Error parsing user permissions:', error);
@@ -1136,6 +1263,50 @@ const UsersManagement = () => {
     }
     return rangeWithDots;
   }
+
+  // Handler for lock/unlock user
+  const handleLockUnlockUser = async (user) => {
+    const token = localStorage.getItem('token');
+    let newStatus, lockedUntil = null;
+    if (user.status === 'suspended') {
+      newStatus = 'active';
+      lockedUntil = null;
+    } else {
+      newStatus = 'suspended';
+      // 30 ngày kể từ hiện tại
+      const now = new Date();
+      const until = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      lockedUntil = until.toISOString().slice(0, 19).replace('T', ' ');
+    }
+    try {
+      context.setProgress(30);
+      const response = await editData(`/api/user/${user.id}/status`, { status: newStatus, locked_until: lockedUntil }, token);
+      context.setAlertBox({
+        open: true,
+        error: false,
+        msg: response.message || (user.status === 'suspended' ? 'Mở khóa tài khoản thành công!' : 'Khóa tài khoản thành công!')
+      });
+      fetchUsersWithFilters();
+    } catch (error) {
+      context.setAlertBox({
+        open: true,
+        error: true,
+        msg: handleErrorResponse(error)
+      });
+    } finally {
+      context.setProgress(100);
+    }
+  };
+
+  // Handler for reset password
+  const handleResetPassword = (user) => {
+    setResetPasswordDialog({ open: true, user });
+  };
+
+  // Handler for view user history
+  const handleViewHistory = (user) => {
+    navigate(`/user/${user.id}/detailed`);
+  };
 
   return (
     <Box sx={{ 
@@ -1394,9 +1565,10 @@ const UsersManagement = () => {
                   <TableCell sx={{ width: 80 }}>ID</TableCell>
                   <TableCell>Người dùng</TableCell>
                   <TableCell>Email</TableCell>
+                  <TableCell>Số điện thoại</TableCell>
                   <TableCell>Vai trò</TableCell>
+                  <TableCell>Ngày tạo</TableCell>                
                   <TableCell>Trạng thái</TableCell>
-                  <TableCell>Đăng nhập cuối</TableCell>
                   <TableCell align="center" sx={{ width: 120 }}>Thao tác</TableCell>
                 </TableRow>
               </TableHead>
@@ -1495,6 +1667,11 @@ const UsersManagement = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {user.phone || '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
                         <Box display="flex" flexWrap="wrap" gap={0.5}>
                           {user.roles?.map((role) => (
                             <Chip
@@ -1528,6 +1705,11 @@ const UsersManagement = () => {
                         </Box>
                       </TableCell>
                       <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {user.created_at ? new Date(user.created_at).toLocaleDateString('vi-VN') : '-'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
                         <Chip
                           label={getStatusText(user.status)}
                           color={getStatusColor(user.status)}
@@ -1540,21 +1722,12 @@ const UsersManagement = () => {
                           }}
                         />
                       </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {user.last_login ? new Date(user.last_login).toLocaleDateString('vi-VN') : 'Chưa đăng nhập'}
-                        </Typography>
-                      </TableCell>
                       <TableCell align="center">
                         <Box display="flex" justifyContent="center" gap={1}>
                         {permissions.canView && (
                           <IconButton
                             size="small"
                             onClick={() => {
-                              // THAY ĐỔI TỪ:
-                              // navigate('/user/detailed', { state: { user: user } });
-                              
-                              // THÀNH (truyền ID trong URL):
                               navigate(`/user/${user.id}/detailed`);
                             }}
                             title="Xem chi tiết"
@@ -1607,6 +1780,40 @@ const UsersManagement = () => {
                               <BiSolidTrashAlt size={14} />
                             </IconButton>
                           )}
+                          {permissions.canUpdate && (
+                            <IconButton
+                              size="small"
+                              onClick={() => handleLockUnlockUser(user)}
+                              title={user.status === 'suspended' ? 'Mở khóa tài khoản' : 'Khóa tài khoản'}
+                              sx={{
+                                color: user.status === 'suspended' ? '#43a047' : '#e53935',
+                                backgroundColor: user.status === 'suspended' ? 'rgba(67, 160, 71, 0.1)' : 'rgba(229, 57, 53, 0.1)',
+                                '&:hover': {
+                                  backgroundColor: user.status === 'suspended' ? 'rgba(67, 160, 71, 0.2)' : 'rgba(229, 57, 53, 0.2)',
+                                },
+                                transition: 'background-color 0.2s ease',
+                              }}
+                            >
+                              {user.status === 'suspended' ? <FaLockOpen size={14} /> : <FaLock size={14} />}
+                            </IconButton>
+                          )}
+                          {permissions.canUpdate && (
+                            <IconButton
+                              size="small"
+                              onClick={() => handleResetPassword(user)}
+                              title="Reset mật khẩu"
+                              sx={{
+                                color: '#1976d2',
+                                backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(25, 118, 210, 0.2)',
+                                },
+                                transition: 'background-color 0.2s ease',
+                              }}
+                            >
+                              <FaKey size={14} />
+                            </IconButton>
+                          )}
                         </Box>
                       </TableCell>
                     </TableRow>
@@ -1623,22 +1830,29 @@ const UsersManagement = () => {
             borderTop: '1px solid rgba(0, 0, 0, 0.1)',
             background: 'rgba(0, 0, 0, 0.02)',
           }}>
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel id="per-page-label">Bản ghi/trang</InputLabel>
+            <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, mr: 1 }}>
+                Hiển thị
+              </Typography>
               <Select
-                labelId="per-page-label"
                 value={pageSize}
-                label="Bản ghi/trang"
                 onChange={e => {
                   const value = Number(e.target.value);
                   setPageSize(value);
                   setCurrentPage(1);
                 }}
+                sx={{ minWidth: 60, mx: 0.5 }}
+                size="small"
+                displayEmpty
+                inputProps={{ 'aria-label': 'Số hàng mỗi trang' }}
               >
                 {[5, 10, 20, 50, 100].map(size => (
                   <MenuItem key={size} value={size}>{size}</MenuItem>
                 ))}
               </Select>
+              <Typography variant="body2" sx={{ fontWeight: 500, ml: 1 }}>
+                hàng
+              </Typography>
             </FormControl>
             {/* Pagination right */}
             <Box display="flex" alignItems="center" gap={1}>
@@ -1712,6 +1926,14 @@ const UsersManagement = () => {
         }}
         user={userToUpdate}
         onUserUpdated={fetchUsersWithFilters}
+      />
+
+      {/* Reset Password Dialog */}
+      <ResetPasswordDialog
+        open={resetPasswordDialog.open}
+        handleClose={() => setResetPasswordDialog({ open: false, user: null })}
+        user={resetPasswordDialog.user}
+        onResetSuccess={fetchUsersWithFilters}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -1882,4 +2104,4 @@ const UserManagementDemo = () => {
 };
 
 export default UserManagementDemo;
-                     
+
