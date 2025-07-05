@@ -743,126 +743,271 @@ const BlackList = () => {
             </Card>
           </Box>
 
-          {/* Table */}
-          <Card>
-            <CardContent>
-              {loading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                  <CircularProgress />
-                </Box>
-              ) : (
-                <>
-                  <TableContainer component={Paper}>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Biển số</TableCell>
-                          <TableCell>Khu vực</TableCell>
-                          <TableCell>Loại vi phạm</TableCell>
-                          <TableCell>Mức độ</TableCell>
-                          <TableCell>Thời gian hiệu lực</TableCell>
-                          <TableCell>Trạng thái</TableCell>
-                          <TableCell>Thao tác</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {blacklist.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell>
-                              <Typography variant="subtitle2" fontWeight="bold">
-                                {item.plate_number}
+          {/* Enhanced Table (WhiteList style) */}
+          <Box sx={{ px: 3 }}>
+            <Card sx={{ 
+              background: 'white',
+              borderRadius: 3,
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+              border: '1px solid #e0e0e0',
+              overflow: 'hidden'
+            }}>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow sx={{ 
+                      background: '#d32f2f',
+                      '& th': {
+                        color: 'white',
+                        fontWeight: 600,
+                        fontSize: '0.875rem',
+                        borderBottom: 'none',
+                        py: 2
+                      }
+                    }}>
+                      <TableCell padding="checkbox" sx={{ width: 60 }}>
+                        <Checkbox
+                          checked={blacklist.length > 0 && selectedItems.length === blacklist.length}
+                          indeterminate={selectedItems.length > 0 && selectedItems.length < blacklist.length}
+                          onChange={handleSelectAll}
+                          sx={{
+                            color: 'rgba(255, 255, 255, 0.7)',
+                            '&.Mui-checked': { color: 'white' },
+                            '&.MuiCheckbox-indeterminate': { color: 'white' }
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell>Biển số</TableCell>
+                      <TableCell>Khu vực</TableCell>
+                      <TableCell>Loại vi phạm</TableCell>
+                      <TableCell>Mức độ</TableCell>
+                      <TableCell>Thời gian hiệu lực</TableCell>
+                      <TableCell>Trạng thái</TableCell>
+                      <TableCell align="center" sx={{ width: 140 }}>Thao tác</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow>
+                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                          <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
+                            <CircularProgress />
+                            <Typography variant="body2" color="text.secondary">
+                              Đang tải dữ liệu...
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ) : blacklist.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                          <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
+                            <CarIcon sx={{ fontSize: 48, color: '#ccc' }} />
+                            <Typography variant="h6" color="text.secondary">
+                              Không có dữ liệu
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Không tìm thấy blacklist nào phù hợp với bộ lọc
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      blacklist.map((item) => (
+                        <TableRow key={item.id} hover sx={{
+                          '&:hover': {
+                            backgroundColor: 'rgba(211, 47, 47, 0.04)',
+                            transition: 'background-color 0.2s ease'
+                          },
+                          '&:nth-of-type(even)': {
+                            backgroundColor: 'rgba(0, 0, 0, 0.02)'
+                          }
+                        }}>
+                          <TableCell padding="checkbox">
+                            <Checkbox
+                              checked={selectedItems.includes(item.id)}
+                              onChange={() => handleSelectItem(item.id)}
+                              sx={{ '&.Mui-checked': { color: '#d32f2f' } }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="subtitle2" fontWeight="bold">
+                              {item.plate_number}
+                            </Typography>
+                            {item.vehicle_type && (
+                              <Typography variant="caption" color="text.secondary">
+                                {item.make} {item.model} - {item.color}
                               </Typography>
-                              {item.vehicle_type && (
-                                <Typography variant="caption" color="text.secondary">
-                                  {item.make} {item.model} - {item.color}
-                                </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <LocationIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                                {item.location_name}
-                              </Box>
-                            </TableCell>
-                            <TableCell>
-                              {getViolationTypeChip(item.violation_type)}
-                            </TableCell>
-                            <TableCell>
-                              {getSeverityChip(item.severity)}
-                            </TableCell>
-                            <TableCell>
-                              {item.valid_from && (
-                                <Typography variant="caption" display="block">
-                                  Từ: {new Date(item.valid_from).toLocaleDateString('vi-VN')}
-                                </Typography>
-                              )}
-                              {item.valid_to && (
-                                <Typography variant="caption" display="block">
-                                  Đến: {new Date(item.valid_to).toLocaleDateString('vi-VN')}
-                                </Typography>
-                              )}
-                              {!item.valid_from && !item.valid_to && (
-                                <Typography variant="caption" color="text.secondary">
-                                  Vĩnh viễn
-                                </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {getStatusChip(item.current_status)}
-                            </TableCell>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', gap: 0.5 }}>
-                                <Tooltip title="Xem chi tiết">
-                                  <IconButton
-                                    size="small"
-                                    color="info"
-                                    onClick={() => handleView(item.id)}
-                                  >
-                                    <VisibilityIcon />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Chỉnh sửa">
-                                  <IconButton
-                                    size="small"
-                                    color="warning"
-                                    onClick={() => handleEdit(item)}
-                                  >
-                                    <EditIcon />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Xóa">
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    onClick={() => handleDelete(item.id)}
-                                  >
-                                    <DeleteIcon />
-                                  </IconButton>
-                                </Tooltip>
-                              </Box>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                              <LocationIcon sx={{ fontSize: 16, mr: 0.5 }} />
+                              {item.location_name}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            {getViolationTypeChip(item.violation_type)}
+                          </TableCell>
+                          <TableCell>
+                            {getSeverityChip(item.severity)}
+                          </TableCell>
+                          <TableCell>
+                            {item.valid_from && (
+                              <Typography variant="caption" display="block">
+                                Từ: {new Date(item.valid_from).toLocaleDateString('vi-VN')}
+                              </Typography>
+                            )}
+                            {item.valid_to && (
+                              <Typography variant="caption" display="block">
+                                Đến: {new Date(item.valid_to).toLocaleDateString('vi-VN')}
+                              </Typography>
+                            )}
+                            {!item.valid_from && !item.valid_to && (
+                              <Typography variant="caption" color="text.secondary">
+                                Vĩnh viễn
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {getStatusChip(item.current_status)}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box display="flex" justifyContent="center" gap={1}>
+                              <IconButton
+                                size="small"
+                                color="info"
+                                onClick={() => handleView(item.id)}
+                                title="Xem chi tiết"
+                                sx={{
+                                  color: '#1976d2',
+                                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                  '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.2)' },
+                                  transition: 'background-color 0.2s ease'
+                                }}
+                              >
+                                <VisibilityIcon />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                color="warning"
+                                onClick={() => handleEdit(item)}
+                                title="Chỉnh sửa"
+                                sx={{
+                                  color: '#ff9800',
+                                  backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                                  '&:hover': { backgroundColor: 'rgba(255, 152, 0, 0.2)' },
+                                  transition: 'background-color 0.2s ease'
+                                }}
+                              >
+                                <EditIcon />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleDelete(item.id)}
+                                title="Xóa"
+                                sx={{
+                                  color: '#f44336',
+                                  backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                                  '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.2)' },
+                                  transition: 'background-color 0.2s ease'
+                                }}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
 
-                  {/* Pagination */}
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Hiển thị {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} của {totalItems} bản ghi
+              {/* Enhanced Pagination */}
+              <Box sx={{ 
+                borderTop: '1px solid rgba(0, 0, 0, 0.1)',
+                background: 'rgba(0, 0, 0, 0.02)'
+              }}>
+                <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
+                  Hiển thị {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} / {totalItems} bản ghi
+                </Typography>
+                <Box display="flex" justifyContent="space-between" alignItems="center" p={3}>
+                  <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500, mr: 1 }}>
+                      Hiển thị
                     </Typography>
+                    <Select
+                      value={itemsPerPage}
+                      onChange={e => {
+                        const value = Number(e.target.value);
+                        setItemsPerPage(value);
+                        setCurrentPage(1);
+                      }}
+                      sx={{ minWidth: 60, mx: 0.5 }}
+                      size="small"
+                    >
+                      {[5, 10, 20, 50, 100].map(size => (
+                        <MenuItem key={size} value={size}>{size}</MenuItem>
+                      ))}
+                    </Select>
+                    <Typography variant="body2" sx={{ fontWeight: 500, ml: 1 }}>
+                      hàng
+                    </Typography>
+                  </FormControl>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(1)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'<<'}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => prev - 1)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'<'}
+                    </Button>
                     <Pagination
                       count={totalPages}
                       page={currentPage}
                       onChange={handlePageChange}
                       color="primary"
+                      siblingCount={0}
+                      boundaryCount={1}
+                      showFirstButton={false}
+                      showLastButton={false}
                     />
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(prev => prev + 1)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'>'}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(totalPages)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'>>'}
+                    </Button>
                   </Box>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                </Box>
+              </Box>
+            </Card>
+          </Box>
         </>
       )}
 

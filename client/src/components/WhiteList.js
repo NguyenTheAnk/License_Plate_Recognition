@@ -300,8 +300,7 @@ const WhiteList = () => {
     if (window.confirm(`Bạn có chắc chắn muốn xóa ${selectedItems.length} mục đã chọn?`)) {
       try {
         const token = getToken();
-        // Assuming bulk delete API exists
-        const response = await postData('whitelist/bulk-delete', { ids: selectedItems }, token);
+        const response = await postData('whitelist/bulk/delete', { ids: selectedItems }, token);
         if (response.success) {
           setSuccess(`Xóa thành công ${selectedItems.length} mục!`);
           setSelectedItems([]);

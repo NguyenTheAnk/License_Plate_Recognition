@@ -1328,5 +1328,40 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, ca
 ('performance.max_concurrent_detections', '10', 'number', 'performance', 'Số detection đồng thời tối đa', FALSE),
 ('performance.cleanup_interval_hours', '6', 'number', 'performance', 'Khoảng thời gian dọn dẹp (giờ)', FALSE);
 
+ALTER TABLE vehicle_whitelist 
+ADD COLUMN plate_image_path VARCHAR(500) COMMENT 'Đường dẫn ảnh biển số gốc' AFTER contact_email,
+ADD COLUMN plate_image_cropped_path VARCHAR(500) COMMENT 'Đường dẫn ảnh biển số đã cắt' AFTER plate_image_path,
+ADD COLUMN plate_image_processed_path VARCHAR(500) COMMENT 'Đường dẫn ảnh đã xử lý OCR' AFTER plate_image_cropped_path,
+ADD COLUMN ocr_raw_text VARCHAR(100) COMMENT 'Text thô từ OCR' AFTER plate_image_processed_path,
+ADD COLUMN ocr_confidence DECIMAL(5,4) COMMENT 'Độ tin cậy OCR (0-1)' AFTER ocr_raw_text,
+ADD COLUMN ocr_processed_at DATETIME COMMENT 'Thời gian xử lý OCR' AFTER ocr_confidence,
+ADD COLUMN image_metadata JSON COMMENT 'Metadata ảnh (kích thước, format, etc.)' AFTER ocr_processed_at,
+ADD COLUMN verification_status ENUM('pending', 'ocr_matched', 'manually_verified', 'rejected') DEFAULT 'pending' COMMENT 'Trạng thái xác minh OCR' AFTER image_metadata,
+ADD COLUMN verified_plate_number VARCHAR(20) COMMENT 'Biển số sau khi xác minh (có thể khác OCR)' AFTER verification_status;
+
+-- Thêm các trường ảnh và OCR cho bảng vehicle_blacklist  
+ALTER TABLE vehicle_blacklist
+ADD COLUMN plate_image_path VARCHAR(500) COMMENT 'Đường dẫn ảnh biển số gốc' AFTER owner_phone,
+ADD COLUMN plate_image_cropped_path VARCHAR(500) COMMENT 'Đường dẫn ảnh biển số đã cắt' AFTER plate_image_path,
+ADD COLUMN plate_image_processed_path VARCHAR(500) COMMENT 'Đường dẫn ảnh đã xử lý OCR' AFTER plate_image_cropped_path,
+ADD COLUMN ocr_raw_text VARCHAR(100) COMMENT 'Text thô từ OCR' AFTER plate_image_processed_path,
+ADD COLUMN ocr_confidence DECIMAL(5,4) COMMENT 'Độ tin cậy OCR (0-1)' AFTER ocr_raw_text,
+ADD COLUMN ocr_processed_at DATETIME COMMENT 'Thời gian xử lý OCR' AFTER ocr_confidence,
+ADD COLUMN image_metadata JSON COMMENT 'Metadata ảnh (kích thước, format, etc.)' AFTER ocr_processed_at,
+ADD COLUMN verification_status ENUM('pending', 'ocr_matched', 'manually_verified', 'rejected') DEFAULT 'pending' COMMENT 'Trạng thái xác minh OCR' AFTER image_metadata,
+ADD COLUMN verified_plate_number VARCHAR(20) COMMENT 'Biển số sau khi xác minh (có thể khác OCR)' AFTER verification_status;
+
+-- Thêm indexes cho hiệu suất tìm kiếm
+ALTER TABLE vehicle_whitelist 
+ADD INDEX idx_ocr_raw_text (ocr_raw_text),
+ADD INDEX idx_verification_status (verification_status),
+ADD INDEX idx_verified_plate_number (verified_plate_number),
+ADD INDEX idx_ocr_confidence (ocr_confidence);
+
+ALTER TABLE vehicle_blacklist
+ADD INDEX idx_ocr_raw_text (ocr_raw_text), 
+ADD INDEX idx_verification_status (verification_status),
+ADD INDEX idx_verified_plate_number (verified_plate_number),
+ADD INDEX idx_ocr_confidence (ocr_confidence);
 
 

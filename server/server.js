@@ -34,6 +34,7 @@ const authRoute = require('./routes/authRoute');
 const userRoute = require('./routes/user');
 const cameraRoute = require('./routes/camera');
 const locationRoute = require('./routes/location');
+const whiteList = require('./routes/whiteList');
 // Thêm các routes khác nếu có
 
 
@@ -75,6 +76,7 @@ app.use('/api/auth', authRoute);
 app.use('/api/user', userRoute);
 app.use('/api/camera', cameraRoute);
 app.use('/api/location', locationRoute);
+app.use('/api/whitelist', whiteList);
 // Đăng ký các routes khác nếu có
 
 server.listen(port, () => {
