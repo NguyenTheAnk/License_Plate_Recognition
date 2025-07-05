@@ -1,4 +1,4 @@
-const { body, param, validationResult } = require('express-validator');
+const { body, param, query, validationResult } = require('express-validator');
 
 // Middleware to handle validation errors
 const handleValidationErrors = (req, res, next) => {
@@ -16,6 +16,10 @@ const handleValidationErrors = (req, res, next) => {
     }
     next();
 };
+
+// ========================================
+// USER VALIDATORS
+// ========================================
 
 // Register validation
 const registerValidator = [
@@ -256,24 +260,6 @@ const removeRoleValidator = [
     handleValidationErrors
 ];
 
-// Bulk operations validation
-const bulkOperationValidator = [
-    body('userIds')
-        .isArray({ min: 1 })
-        .withMessage('Danh sách ID người dùng phải là mảng không rỗng')
-        .custom((value) => {
-            if (value.some(id => !Number.isInteger(id) || id <= 0)) {
-                throw new Error('Tất cả ID người dùng phải là số nguyên dương');
-            }
-            if (value.length > 100) {
-                throw new Error('Không thể thao tác trên quá 100 người dùng cùng lúc');
-            }
-            return true;
-        }),
-
-    handleValidationErrors
-];
-
 // Bulk assign role validation
 const bulkAssignRoleValidator = [
     body('userIds')
@@ -378,44 +364,488 @@ const forgotPasswordValidator = [
     handleValidationErrors
 ];
 
-// Pagination validation
-const paginationValidator = [
-    body('page')
+// ========================================
+// WHITELIST VALIDATORS
+// ========================================
+
+const createWhitelistValidator = [
+    body('location_id')
+        .isInt({ min: 1 })
+        .withMessage('location_id phải là số nguyên dương'),
+    
+    body('plate_number')
+        .trim()
+        .isLength({ min: 6, max: 20 })
+        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
+        .matches(/^[A-Z0-9\-\.]+$/)
+        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+    
+    body('vehicle_id')
         .optional()
         .isInt({ min: 1 })
-        .withMessage('Trang phải là số nguyên dương'),
-
-    body('limit')
+        .withMessage('vehicle_id phải là số nguyên dương'),
+    
+    body('owner_name')
         .optional()
-        .isInt({ min: 1, max: 100 })
-        .withMessage('Giới hạn phải là số nguyên từ 1 đến 100'),
-
-    body('sort')
+        .trim()
+        .isLength({ max: 200 })
+        .withMessage('Tên chủ xe không được quá 200 ký tự'),
+    
+    body('owner_phone')
         .optional()
-        .isIn(['name', 'username', 'email', 'status', 'created_at', 'last_login', 'updated_at'])
-        .withMessage('Trường sắp xếp không hợp lệ'),
-
-    body('order')
+        .trim()
+        .matches(/^[0-9+\-\s\(\)]+$/)
+        .withMessage('Số điện thoại không hợp lệ')
+        .isLength({ max: 20 })
+        .withMessage('Số điện thoại không được quá 20 ký tự'),
+    
+    body('contact_email')
         .optional()
-        .isIn(['asc', 'desc'])
-        .withMessage('Thứ tự sắp xếp phải là asc hoặc desc'),
+        .isEmail()
+        .withMessage('Email không hợp lệ')
+        .normalizeEmail(),
+    
+    body('valid_from')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_from phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+    
+    body('valid_to')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_to phải có định dạng ngày hợp lệ (YYYY-MM-DD)')
+        .custom((value, { req }) => {
+            if (req.body.valid_from && value && new Date(req.body.valid_from) > new Date(value)) {
+                throw new Error('Ngày kết thúc phải sau ngày bắt đầu');
+            }
+            return true;
+        }),
+    
+    body('description')
+        .optional()
+        .trim()
+        .isLength({ max: 1000 })
+        .withMessage('Mô tả không được quá 1000 ký tự'),
+    
+    body('approval_status')
+        .optional()
+        .isIn(['pending', 'approved', 'rejected'])
+        .withMessage('approval_status phải là: pending, approved, rejected'),
 
     handleValidationErrors
 ];
 
-// Custom validation for Vietnamese phone numbers
+const updateWhitelistValidator = [
+    param('id')
+        .isInt({ min: 1 })
+        .withMessage('ID không hợp lệ'),
+    
+    body('location_id')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('location_id phải là số nguyên dương'),
+    
+    body('plate_number')
+        .optional()
+        .trim()
+        .isLength({ min: 6, max: 20 })
+        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
+        .matches(/^[A-Z0-9\-\.]+$/)
+        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+    
+    body('vehicle_id')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('vehicle_id phải là số nguyên dương'),
+    
+    body('owner_name')
+        .optional()
+        .trim()
+        .isLength({ max: 200 })
+        .withMessage('Tên chủ xe không được quá 200 ký tự'),
+    
+    body('owner_phone')
+        .optional()
+        .trim()
+        .matches(/^[0-9+\-\s\(\)]+$/)
+        .withMessage('Số điện thoại không hợp lệ')
+        .isLength({ max: 20 })
+        .withMessage('Số điện thoại không được quá 20 ký tự'),
+    
+    body('contact_email')
+        .optional()
+        .isEmail()
+        .withMessage('Email không hợp lệ')
+        .normalizeEmail(),
+    
+    body('valid_from')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_from phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+    
+    body('valid_to')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_to phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+    
+    body('description')
+        .optional()
+        .trim()
+        .isLength({ max: 1000 })
+        .withMessage('Mô tả không được quá 1000 ký tự'),
+    
+    body('approval_status')
+        .optional()
+        .isIn(['pending', 'approved', 'rejected'])
+        .withMessage('approval_status phải là: pending, approved, rejected'),
+    
+    body('is_active')
+        .optional()
+        .isBoolean()
+        .withMessage('is_active phải là boolean'),
+
+    handleValidationErrors
+];
+
+// ========================================
+// BLACKLIST VALIDATORS
+// ========================================
+
+const createBlacklistValidator = [
+    body('location_id')
+        .isInt({ min: 1 })
+        .withMessage('location_id phải là số nguyên dương'),
+    
+    body('plate_number')
+        .trim()
+        .isLength({ min: 6, max: 20 })
+        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
+        .matches(/^[A-Z0-9\-\.]+$/)
+        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+    
+    body('vehicle_id')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('vehicle_id phải là số nguyên dương'),
+    
+    body('violation_type')
+        .optional()
+        .isIn(['unauthorized', 'security_threat', 'unpaid_fine', 'banned', 'suspicious', 'other'])
+        .withMessage('violation_type phải là: unauthorized, security_threat, unpaid_fine, banned, suspicious, other'),
+    
+    body('reason')
+        .trim()
+        .isLength({ min: 10, max: 500 })
+        .withMessage('Lý do phải có độ dài từ 10-500 ký tự'),
+    
+    body('severity')
+        .optional()
+        .isIn(['low', 'medium', 'high', 'critical'])
+        .withMessage('severity phải là: low, medium, high, critical'),
+    
+    body('owner_name')
+        .optional()
+        .trim()
+        .isLength({ max: 200 })
+        .withMessage('Tên chủ xe không được quá 200 ký tự'),
+    
+    body('owner_phone')
+        .optional()
+        .trim()
+        .matches(/^[0-9+\-\s\(\)]+$/)
+        .withMessage('Số điện thoại không hợp lệ')
+        .isLength({ max: 20 })
+        .withMessage('Số điện thoại không được quá 20 ký tự'),
+    
+    body('valid_from')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_from phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+    
+    body('valid_to')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_to phải có định dạng ngày hợp lệ (YYYY-MM-DD)')
+        .custom((value, { req }) => {
+            if (req.body.valid_from && value && new Date(req.body.valid_from) > new Date(value)) {
+                throw new Error('Ngày kết thúc phải sau ngày bắt đầu');
+            }
+            return true;
+        }),
+    
+    body('description')
+        .optional()
+        .trim()
+        .isLength({ max: 1000 })
+        .withMessage('Mô tả không được quá 1000 ký tự'),
+    
+    body('evidence_files')
+        .optional()
+        .custom((value) => {
+            if (value && typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    if (!Array.isArray(parsed)) {
+                        throw new Error('evidence_files phải là mảng JSON');
+                    }
+                } catch (error) {
+                    throw new Error('evidence_files phải có định dạng JSON hợp lệ');
+                }
+            } else if (value && !Array.isArray(value)) {
+                throw new Error('evidence_files phải là mảng');
+            }
+            return true;
+        }),
+
+    handleValidationErrors
+];
+
+const updateBlacklistValidator = [
+    param('id')
+        .isInt({ min: 1 })
+        .withMessage('ID không hợp lệ'),
+    
+    body('location_id')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('location_id phải là số nguyên dương'),
+    
+    body('plate_number')
+        .optional()
+        .trim()
+        .isLength({ min: 6, max: 20 })
+        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
+        .matches(/^[A-Z0-9\-\.]+$/)
+        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+    
+    body('vehicle_id')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('vehicle_id phải là số nguyên dương'),
+    
+    body('violation_type')
+        .optional()
+        .isIn(['unauthorized', 'security_threat', 'unpaid_fine', 'banned', 'suspicious', 'other'])
+        .withMessage('violation_type phải là: unauthorized, security_threat, unpaid_fine, banned, suspicious, other'),
+    
+    body('reason')
+        .optional()
+        .trim()
+        .isLength({ min: 10, max: 500 })
+        .withMessage('Lý do phải có độ dài từ 10-500 ký tự'),
+    
+    body('severity')
+        .optional()
+        .isIn(['low', 'medium', 'high', 'critical'])
+        .withMessage('severity phải là: low, medium, high, critical'),
+    
+    body('owner_name')
+        .optional()
+        .trim()
+        .isLength({ max: 200 })
+        .withMessage('Tên chủ xe không được quá 200 ký tự'),
+    
+    body('owner_phone')
+        .optional()
+        .trim()
+        .matches(/^[0-9+\-\s\(\)]+$/)
+        .withMessage('Số điện thoại không hợp lệ')
+        .isLength({ max: 20 })
+        .withMessage('Số điện thoại không được quá 20 ký tự'),
+    
+    body('valid_from')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_from phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+    
+    body('valid_to')
+        .optional()
+        .isISO8601()
+        .withMessage('valid_to phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+    
+    body('description')
+        .optional()
+        .trim()
+        .isLength({ max: 1000 })
+        .withMessage('Mô tả không được quá 1000 ký tự'),
+    
+    body('evidence_files')
+        .optional()
+        .custom((value) => {
+            if (value === null) return true; // Allow null to clear evidence files
+            
+            if (value && typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    if (!Array.isArray(parsed)) {
+                        throw new Error('evidence_files phải là mảng JSON');
+                    }
+                } catch (error) {
+                    throw new Error('evidence_files phải có định dạng JSON hợp lệ');
+                }
+            } else if (value && !Array.isArray(value)) {
+                throw new Error('evidence_files phải là mảng');
+            }
+            return true;
+        }),
+    
+    body('is_active')
+        .optional()
+        .isBoolean()
+        .withMessage('is_active phải là boolean'),
+
+    handleValidationErrors
+];
+
+// ========================================
+// BULK OPERATION VALIDATORS
+// ========================================
+
+const bulkWhitelistValidator = [
+    body('entries')
+        .isArray({ min: 1 })
+        .withMessage('entries phải là mảng có ít nhất 1 phần tử'),
+    
+    body('entries.*.location_id')
+        .isInt({ min: 1 })
+        .withMessage('location_id phải là số nguyên dương'),
+    
+    body('entries.*.plate_number')
+        .trim()
+        .isLength({ min: 6, max: 20 })
+        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
+        .matches(/^[A-Z0-9\-\.]+$/)
+        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+    
+    body('entries.*.vehicle_id')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('vehicle_id phải là số nguyên dương'),
+    
+    body('entries.*.owner_name')
+        .optional()
+        .trim()
+        .isLength({ max: 200 })
+        .withMessage('Tên chủ xe không được quá 200 ký tự'),
+
+    handleValidationErrors
+];
+
+const bulkBlacklistValidator = [
+    body('entries')
+        .isArray({ min: 1 })
+        .withMessage('entries phải là mảng có ít nhất 1 phần tử'),
+    
+    body('entries.*.location_id')
+        .isInt({ min: 1 })
+        .withMessage('location_id phải là số nguyên dương'),
+    
+    body('entries.*.plate_number')
+        .trim()
+        .isLength({ min: 6, max: 20 })
+        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
+        .matches(/^[A-Z0-9\-\.]+$/)
+        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+    
+    body('entries.*.reason')
+        .trim()
+        .isLength({ min: 10, max: 500 })
+        .withMessage('Lý do phải có độ dài từ 10-500 ký tự'),
+    
+    body('entries.*.violation_type')
+        .optional()
+        .isIn(['unauthorized', 'security_threat', 'unpaid_fine', 'banned', 'suspicious', 'other'])
+        .withMessage('violation_type phải là: unauthorized, security_threat, unpaid_fine, banned, suspicious, other'),
+    
+    body('entries.*.severity')
+        .optional()
+        .isIn(['low', 'medium', 'high', 'critical'])
+        .withMessage('severity phải là: low, medium, high, critical'),
+
+    handleValidationErrors
+];
+
+// ========================================
+// COMMON VALIDATORS
+// ========================================
+
+const bulkOperationValidator = [
+    body('ids')
+        .isArray({ min: 1 })
+        .withMessage('ids phải là mảng có ít nhất 1 phần tử'),
+    
+    body('ids.*')
+        .isInt({ min: 1 })
+        .withMessage('Tất cả ID phải là số nguyên dương'),
+
+    handleValidationErrors
+];
+
+const plateNumberValidator = [
+    param('plate_number')
+        .trim()
+        .isLength({ min: 6, max: 20 })
+        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
+        .matches(/^[A-Z0-9\-\.]+$/)
+        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+
+    handleValidationErrors
+];
+
+const locationIdValidator = [
+    param('location_id')
+        .isInt({ min: 1 })
+        .withMessage('location_id phải là số nguyên dương'),
+
+    handleValidationErrors
+];
+
+const paginationValidator = [
+    query('page')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('page phải là số nguyên dương'),
+    
+    query('limit')
+        .optional()
+        .isInt({ min: 1, max: 1000 })
+        .withMessage('limit phải là số nguyên từ 1-1000'),
+    
+    query('sort_by')
+        .optional()
+        .isIn(['created_at', 'plate_number', 'location_name', 'approval_status', 'violation_type', 'severity', 'valid_from', 'valid_to', 'name', 'username', 'email', 'status', 'last_login', 'updated_at'])
+        .withMessage('sort_by không hợp lệ'),
+    
+    query('sort_order')
+        .optional()
+        .isIn(['ASC', 'DESC', 'asc', 'desc'])
+        .withMessage('sort_order phải là ASC hoặc DESC'),
+
+    handleValidationErrors
+];
+
+// ========================================
+// CUSTOM VALIDATION FUNCTIONS
+// ========================================
+
 const isVietnamesePhone = (value) => {
     const phoneRegex = /^(\+84|84|0)(3[2-9]|5[689]|7[06-9]|8[1-689]|9[0-46-9])[0-9]{7}$/;
     return phoneRegex.test(value);
 };
 
-// Custom validation for strong password
 const isStrongPassword = (value) => {
     const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     return strongPasswordRegex.test(value);
 };
 
+// ========================================
+// EXPORTS
+// ========================================
+
 module.exports = {
+    handleValidationErrors,
+    
+    // User validators
     registerValidator,
     loginValidator,
     createUserValidator,
@@ -425,15 +855,32 @@ module.exports = {
     searchValidator,
     assignRoleValidator,
     removeRoleValidator,
-    bulkOperationValidator,
     bulkAssignRoleValidator,
     bulkUpdateStatusValidator,
     refreshTokenValidator,
     resetPasswordValidator,
     changeEmailValidator,
     forgotPasswordValidator,
+    
+    // Whitelist validators
+    createWhitelistValidator,
+    updateWhitelistValidator,
+    
+    // Blacklist validators
+    createBlacklistValidator,
+    updateBlacklistValidator,
+    
+    // Bulk operation validators
+    bulkWhitelistValidator,
+    bulkBlacklistValidator,
+    bulkOperationValidator,
+    
+    // Common validators
+    plateNumberValidator,
+    locationIdValidator,
     paginationValidator,
-    handleValidationErrors,
+    
+    // Custom validation functions
     isVietnamesePhone,
     isStrongPassword
 };

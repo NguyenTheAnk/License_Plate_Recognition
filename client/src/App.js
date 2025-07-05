@@ -13,6 +13,8 @@ import UserDetail from './pages/User/UserDetail';
 import Roles from './pages/Roles';
 import Permissions from './pages/Permissions';
 import axios from 'axios';
+import WhiteList from './components/WhiteList';
+import BlackList from './components/BlackList';
 
 export const MyContext = React.createContext();
 
@@ -170,6 +172,8 @@ function AppContent() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/user" element={<User />} />
                   <Route path="/user/:id/detailed" element={<UserDetail />} />
+                  <Route path="/whitelist" element={<WhiteList />} />
+                  <Route path="/blacklist" element={<BlackList />} />
                   <Route path="/roles" element={<Roles />} />
                   <Route path="/permissions" element={<Permissions />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
