@@ -1,13 +1,16 @@
+const path = require('path');
 const db = require('../../db');
 const multer = require('multer');
-const path = require('path');
 const fs = require('fs').promises;
-const Tesseract = require('tesseract.js');
+const fsSync = require('fs');
+const sharp = require('sharp');
+const { spawn } = require('child_process');
+const { execSync } = require('child_process');
 
 // Configure multer for image uploads
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
-        const uploadDir = path.join('uploads', 'whitelist', 'images');
+        const uploadDir = path.join(__dirname, '../../public/uploads/whitelist/');
         try {
             await fs.mkdir(uploadDir, { recursive: true });
             cb(null, uploadDir);
@@ -36,7 +39,7 @@ const upload = multer({
     fileFilter,
     limits: {
         fileSize: 10 * 1024 * 1024, // 10MB
-        files: 3 // Maximum 3 files (original, cropped, processed)
+        files: 1 // Chỉ 1 file ảnh
     }
 });
 
@@ -46,10 +49,18 @@ const uploadFields = upload.fields([
     { name: 'plate_image_processed', maxCount: 1 }
 ]);
 
+const ensureWhitelistUploadDir = async () => {
+    const dir = path.join(__dirname, '../../public/uploads/whitelist/');
+    if (!fsSync.existsSync(dir)) {
+        await fs.mkdir(dir, { recursive: true });
+    }
+};
+
 const createWhitelist = async (req, res) => {
     const connection = await db.promise();
     
     try {
+        await ensureWhitelistUploadDir();
         const {
             location_id,
             plate_number,
@@ -73,15 +84,6 @@ const createWhitelist = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'location_id và plate_number là bắt buộc'
-            });
-        }
-
-        // Validate plate number format (Vietnamese license plate)
-        const plateRegex = /^[0-9]{2}[A-Z]{1,2}-[0-9]{3,4}\.[0-9]{2}$|^[0-9]{2}[A-Z]{1,2}[0-9]{3,4}$/;
-        if (!plateRegex.test(plate_number)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Định dạng biển số không hợp lệ'
             });
         }
 
@@ -166,15 +168,22 @@ const createWhitelist = async (req, res) => {
 
         // Handle uploaded image (field 'image')
         let plateImagePath = null;
-        let ocrText = null;
+        let ocrText = '';
         if (req.file) {
             plateImagePath = '/uploads/whitelist/' + req.file.filename;
-            const imagePath = require('path').join(__dirname, '../../public/uploads/whitelist/', req.file.filename);
+            const imagePath = path.join(__dirname, '../../public/uploads/whitelist/', req.file.filename);
             try {
-                const result = await Tesseract.recognize(imagePath, 'eng', { logger: m => {} });
-                ocrText = result.data.text.replace(/\s/g, '').toUpperCase();
+                // Gọi script Python PaddleOCR
+                const pythonScript = path.join(__dirname, 'detect_plate.py');
+                const result = execSync(`python "${pythonScript}" --image "${imagePath}"`).toString();
+                const ocrResult = JSON.parse(result);
+                if (ocrResult.success) {
+                    ocrText = ocrResult.text || '';
+                } else {
+                    ocrText = '';
+                }
             } catch (err) {
-                ocrText = null;
+                console.error('OCR error:', err);
             }
         }
 
@@ -182,11 +191,9 @@ const createWhitelist = async (req, res) => {
         const [result] = await connection.execute(
             `INSERT INTO vehicle_whitelist (
                 location_id, plate_number, vehicle_id, owner_name, owner_phone, contact_email,
-                plate_image_path, ocr_raw_text,
-                verification_status, verified_plate_number,
-                valid_from, valid_to, description, approval_status,
-                created_by, is_active, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
+                plate_image_path, ocr_raw_text, verification_status, verified_plate_number,
+                valid_from, valid_to, description, approval_status, created_by, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 location_id,
                 plate_number,
@@ -196,13 +203,14 @@ const createWhitelist = async (req, res) => {
                 contact_email || null,
                 plateImagePath,
                 ocrText,
-                verification_status,
-                verified_plate_number || plate_number,
+                verification_status || 'pending',
+                verified_plate_number || null,
                 valid_from || null,
                 valid_to || null,
                 description || null,
-                approval_status,
-                req.user.userId
+                approval_status || 'approved',
+                req.user ? req.user.userId : null,
+                1
             ]
         );
 
@@ -715,10 +723,64 @@ const updateOCRData = async (req, res) => {
     }
 };
 
+/**
+ * Nhận diện ký tự từ ảnh biển số xe (OCR preview, không lưu DB)
+ */
+const ocrPreview = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Vui lòng upload file ảnh (image)' });
+    }
+    const imagePath = req.file.path;
+    const fs = require('fs');
+    if (!fs.existsSync(imagePath)) {
+      console.error('OCR error: File does not exist:', imagePath);
+      return res.status(500).json({ success: false, message: 'File ảnh không tồn tại trên server. Vui lòng thử lại.' });
+    }
+    let ocrText = '';
+    try {
+      const pythonScript = path.join(__dirname, 'detect_plate.py');
+      const { execSync } = require('child_process');
+      let result, stderr = '';
+      try {
+        result = execSync(`python "${pythonScript}" --image "${imagePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+      } catch (err) {
+        stderr = err.stderr ? err.stderr.toString() : '';
+        console.error('OCR Python stderr:', stderr);
+        throw err;
+      }
+      // Lấy dòng JSON cuối cùng
+      const lines = result.trim().split('\n');
+      const lastLine = lines[lines.length - 1];
+      let ocrResult;
+      try {
+        ocrResult = JSON.parse(lastLine);
+      } catch (parseErr) {
+        console.error('OCR JSON parse error:', lastLine);
+        return res.status(500).json({ success: false, message: 'Lỗi parse kết quả từ Python', raw: lastLine });
+      }
+      if (ocrResult.success) {
+        ocrText = ocrResult.text || '';
+      } else {
+        ocrText = '';
+      }
+    } catch (err) {
+      console.error('OCR error:', err);
+      return res.status(500).json({ success: false, message: 'Lỗi khi nhận diện ký tự từ ảnh', error: err.message });
+    }
+    res.json({ success: true, ocr_text: ocrText });
+  } catch (error) {
+    console.error('OCR preview server error:', error);
+    res.status(500).json({ success: false, message: 'Lỗi server khi nhận diện ký tự từ ảnh', error: error.message });
+  }
+};
+
+
 module.exports = {
     createWhitelist,
     bulkCreateWhitelist,
     importWhitelistFromCSV,
     updateOCRData,
-    uploadFields 
+    uploadFields,
+    ocrPreview
 };

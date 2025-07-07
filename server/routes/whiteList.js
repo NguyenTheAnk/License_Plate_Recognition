@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 
 // Import controllers
-const { createWhitelist, bulkCreateWhitelist } = require('../controllers/WhiteList/createWhiteList');
+const { createWhitelist, bulkCreateWhitelist, ocrPreview } = require('../controllers/WhiteList/createWhiteList');
 const { 
     getAllWhitelist, 
     getWhitelistById, 
@@ -29,7 +30,7 @@ const {
 const auth = require('../middlewares/authMiddleware');
 const checkPermission = require('../middlewares/checkPermission');
 const { onlyAdminAccess } = require('../middlewares/adminMiddleware');
-const upload = require('../middlewares/upload');
+const upload = multer({ dest: 'public/uploads/' });
 
 // Import validators
 const {
@@ -80,7 +81,6 @@ router.get('/plate/:plate_number',
 // Create single whitelist entry
 router.post('/create', 
     auth, 
-    //checkPermission('whitelist.create'), 
     upload.single('image'),
     createWhitelistValidator, 
     createWhitelist
@@ -483,5 +483,8 @@ router.get('/export/csv',
         }
     }
 );
+
+// OCR preview endpoint
+router.post('/ocr-preview', auth, upload.single('image'), ocrPreview);
 
 module.exports = router;

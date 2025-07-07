@@ -374,11 +374,8 @@ const createWhitelistValidator = [
         .withMessage('location_id phải là số nguyên dương'),
     
     body('plate_number')
-        .trim()
-        .isLength({ min: 6, max: 20 })
-        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
-        .matches(/^[A-Z0-9\-\.]+$/)
-        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+        .notEmpty()
+        .withMessage('Biển số là bắt buộc'),
     
     body('vehicle_id')
         .optional()

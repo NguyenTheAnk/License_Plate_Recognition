@@ -81,6 +81,16 @@ app.use('/api/whitelist', whiteList);
 app.use('/api/blacklist', blackList);
 // Đăng ký các routes khác nếu có
 
+// Global error handler (luôn trả về JSON)
+app.use((err, req, res, next) => {
+  console.error('Global error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal Server Error',
+    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
+});
+
 server.listen(port, () => {
   console.log(`Server running on port ${port}`);
 }); 

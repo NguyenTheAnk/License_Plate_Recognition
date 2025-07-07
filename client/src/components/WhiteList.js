@@ -81,6 +81,7 @@ import {
   postData,
   editData,
   deleteData,
+  uploadImage,
   handleErrorResponse,
   isUnauthorizedError
 } from '../utils/auth';
@@ -200,7 +201,8 @@ const WhiteList = () => {
     
     if (!formData.plate_number) {
       errors.plate_number = 'Vui lòng nhập biển số xe';
-    } else {
+    } 
+    else {
       // Validate Vietnamese license plate format
       const plateRegex = /^[0-9]{2}[A-Z]{1,2}-[0-9]{3,4}\.[0-9]{2}$|^[0-9]{2}[A-Z]{1,2}[0-9]{3,4}$/;
       if (!plateRegex.test(formData.plate_number)) {
@@ -312,7 +314,7 @@ const WhiteList = () => {
     }
   };
 
-  const handleImageChange = (e) => {
+  const handleImageChange = async (e) => {
     const file = e.target.files[0];
     if (file) {
       // Validate file type
@@ -320,40 +322,63 @@ const WhiteList = () => {
         setError('Vui lòng chọn file ảnh');
         return;
       }
-      
       // Validate file size (max 10MB)
       if (file.size > 10 * 1024 * 1024) {
         setError('Kích thước file không được vượt quá 10MB');
         return;
       }
-
       setImageFile(file);
-      
       // Create preview
       const reader = new FileReader();
       reader.onload = (ev) => {
         setImagePreview(ev.target.result);
       };
       reader.readAsDataURL(file);
+
+      // Gửi ảnh lên backend để nhận diện OCR ngay khi chọn ảnh
+      try {
+        const token = getToken();
+        const formDataToSend = new FormData();
+        formDataToSend.append('plate_image', file);
+        const data = await uploadImage('/api/whitelist/ocr-preview', formDataToSend, token);
+        console.log('Kết quả nhận diện ký tự biển số:', data);
+        if (data.success && data.ocr_text) {
+          setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
+          setOcrResult(data.ocr_text);
+        } else if (data.message) {
+          setOcrResult('');
+          setError('Nhận diện ký tự thất bại: ' + data.message);
+        } else {
+          setOcrResult('');
+          setError('Không nhận diện được ký tự biển số từ ảnh.');
+        }
+      } catch (err) {
+        setOcrResult('');
+        if (err.response && err.response.data && err.response.data.message) {
+          setError('Lỗi nhận diện ký tự: ' + err.response.data.message);
+        } else if (err.message) {
+          setError('Lỗi nhận diện ký tự: ' + err.message);
+        } else {
+          setError('Lỗi không xác định khi nhận diện ký tự.');
+        }
+      }
     } else {
       setImageFile(null);
       setImagePreview(null);
+      setOcrResult('');
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
     if (!validateForm()) {
       setError('Vui lòng kiểm tra lại thông tin nhập vào');
       return;
     }
-
     setLoading(true);
     try {
       const token = getToken();
       let response;
-
       if (selectedItem) {
         // Update existing item
         if (imageFile) {
@@ -364,15 +389,7 @@ const WhiteList = () => {
             }
           });
           formDataToSend.append('plate_image', imageFile);
-          
-          response = await fetch(`/api/whitelist/${selectedItem.id}`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${token}`
-            },
-            body: formDataToSend
-          });
-          response = await response.json();
+          response = await uploadImage(`/api/whitelist/${selectedItem.id}`, formDataToSend, token);
         } else {
           response = await editData(`/api/whitelist/${selectedItem.id}`, formData, token);
         }
@@ -387,21 +404,12 @@ const WhiteList = () => {
             }
           });
           formDataToSend.append('plate_image', imageFile);
-          
-          response = await fetch('/api/whitelist/create', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`
-            },
-            body: formDataToSend
-          });
-          response = await response.json();
+          response = await uploadImage('/api/whitelist/create', formDataToSend, token);
         } else {
           response = await postData('/api/whitelist/create', formData, token);
         }
         setSuccess('Tạo whitelist thành công');
       }
-
       if (response.success) {
         setOpenModal(false);
         resetForm();
@@ -1166,6 +1174,8 @@ const WhiteList = () => {
                       onChange={handleItemsPerPageChange}
                       sx={{ minWidth: 60, mx: 0.5 }}
                       size="small"
+                      displayEmpty
+                      inputProps={{ 'aria-label': 'Số hàng mỗi trang' }}
                     >
                       {[5, 10, 20, 50, 100].map(size => (
                         <MenuItem key={size} value={size}>{size}</MenuItem>
@@ -1176,66 +1186,65 @@ const WhiteList = () => {
                     </Typography>
                   </FormControl>
                   
-                  {totalPages > 1 && (
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={currentPage === 1}
-                        onClick={() => setCurrentPage(1)}
-                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                      >
-                        {'<<'}
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={currentPage === 1}
-                        onClick={() => setCurrentPage(prev => prev - 1)}
-                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                      >
-                        {'<'}
-                      </Button>
-                      {getPaginationItems(currentPage, totalPages).map((item, idx) =>
-                        item === '...'
-                          ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
-                          : <Button
-                              key={item}
-                              variant={item === currentPage ? 'contained' : 'outlined'}
-                              color={item === currentPage ? 'primary' : 'inherit'}
-                              size="small"
-                              sx={{ 
-                                minWidth: 36, 
-                                fontWeight: 600, 
-                                borderRadius: 2, 
-                                mx: 0.25,
-                                ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' })
-                              }}
-                              onClick={() => setCurrentPage(item)}
-                            >
-                              {item}
-                            </Button>
-                      )}
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={currentPage === totalPages}
-                        onClick={() => setCurrentPage(prev => prev + 1)}
-                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                      >
-                        {'>'}
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={currentPage === totalPages}
-                        onClick={() => setCurrentPage(totalPages)}
-                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                      >
-                        {'>>'}
-                      </Button>
-                    </Box>
-                  )}
+                  {/* Always show pagination controls */}
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(1)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'<<'}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => prev - 1)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'<'}
+                    </Button>
+                    {getPaginationItems(currentPage, totalPages).map((item, idx) =>
+                      item === '...'
+                        ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
+                        : <Button
+                            key={item}
+                            variant={item === currentPage ? 'contained' : 'outlined'}
+                            color={item === currentPage ? 'primary' : 'inherit'}
+                            size="small"
+                            sx={{ 
+                              minWidth: 36, 
+                              fontWeight: 600, 
+                              borderRadius: 2, 
+                              mx: 0.25,
+                              ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' })
+                            }}
+                            onClick={() => setCurrentPage(item)}
+                          >
+                            {item}
+                          </Button>
+                    )}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === totalPages || totalPages === 0}
+                      onClick={() => setCurrentPage(prev => prev + 1)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'>'}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={currentPage === totalPages || totalPages === 0}
+                      onClick={() => setCurrentPage(totalPages)}
+                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                    >
+                      {'>>'}
+                    </Button>
+                  </Box>
                 </Box>
               </Box>
             </Card>
@@ -1656,7 +1665,7 @@ const WhiteList = () => {
         </form>
       </Dialog>
 
-      {/* Enhanced Detail Modal */}
+      {/* Enhanced Detail Modal - Redesigned */}
       <Dialog 
         open={openDetailModal} 
         onClose={() => setOpenDetailModal(false)} 
@@ -1667,114 +1676,431 @@ const WhiteList = () => {
             borderRadius: 3,
             background: 'white',
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
-            border: '1px solid #e0e0e0'
+            border: '1px solid #e0e0e0',
+            overflow: 'hidden'
           }
         }}
       >
         <DialogTitle sx={{ 
-          background: '#1976d2',
+          background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
           color: 'white',
-          borderRadius: '12px 12px 0 0',
-          borderBottom: '1px solid #e0e0e0'
+          p: 0,
+          position: 'relative'
         }}>
-          <Box display="flex" alignItems="center">
-            <VisibilityIcon sx={{ mr: 1.5, fontSize: '1.5rem' }} />
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Chi tiết Whitelist
-            </Typography>
+          <Box sx={{ p: 3 }}>
+            <Box display="flex" alignItems="flex-start" justifyContent="space-between">
+              <Box display="flex" alignItems="center" gap={2} flex={1}>
+                <Avatar sx={{ 
+                  bgcolor: 'rgba(255, 255, 255, 0.2)',
+                  width: 56, 
+                  height: 56, 
+                  fontSize: '1.5rem',
+                  fontWeight: 700,
+                  border: '2px solid rgba(255, 255, 255, 0.3)'
+                }}>
+                  <CarIcon sx={{ fontSize: '2rem' }} />
+                </Avatar>
+                <Box flex={1}>
+                  <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    {selectedItem?.plate_number || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.9, mb: 1 }}>
+                    Chi tiết thông tin whitelist
+                  </Typography>
+                  {/* Status badges moved here */}
+                  <Box display="flex" gap={1} flexWrap="wrap">
+                    {selectedItem && getStatusChip(selectedItem.current_status)}
+                    {selectedItem && getApprovalChip(selectedItem.approval_status)}
+                  </Box>
+                </Box>
+              </Box>
+              <IconButton
+                onClick={() => setOpenDetailModal(false)}
+                sx={{ 
+                  color: 'white',
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.2)' },
+                  ml: 2
+                }}
+              >
+                <FaTimes />
+              </IconButton>
+            </Box>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        
+        <DialogContent sx={{ p: 0 }}>
           {selectedItem && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom sx={{ color: '#1976d2', fontWeight: 600 }}>
-                  Thông tin cơ bản
-                </Typography>
-                <Box sx={{ pl: 2 }}>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Biển số:</strong> {selectedItem.plate_number}
-                  </Typography>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Khu vực:</strong> {selectedItem.location_name}
-                  </Typography>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Trạng thái:</strong> {getStatusChip(selectedItem.current_status)}
-                  </Typography>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Phê duyệt:</strong> {getApprovalChip(selectedItem.approval_status)}
-                  </Typography>
-                  {selectedItem.has_images && (
-                    <Typography sx={{ mb: 1 }}>
-                      <strong>Ảnh:</strong> Có ảnh biển số
-                    </Typography>
-                  )}
-                </Box>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom sx={{ color: '#1976d2', fontWeight: 600 }}>
-                  Thông tin chủ xe
-                </Typography>
-                <Box sx={{ pl: 2 }}>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Tên:</strong> {selectedItem.owner_name || 'N/A'}
-                  </Typography>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>SĐT:</strong> {selectedItem.owner_phone || 'N/A'}
-                  </Typography>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Email:</strong> {selectedItem.contact_email || 'N/A'}
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="h6" gutterBottom sx={{ color: '#1976d2', fontWeight: 600 }}>
-                  Thời gian hiệu lực
-                </Typography>
-                <Box sx={{ pl: 2 }}>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Từ:</strong> {selectedItem.valid_from ? new Date(selectedItem.valid_from).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
-                  </Typography>
-                  <Typography sx={{ mb: 1 }}>
-                    <strong>Đến:</strong> {selectedItem.valid_to ? new Date(selectedItem.valid_to).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
-                  </Typography>
-                </Box>
-                {selectedItem.description && (
-                  <>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="h6" gutterBottom sx={{ color: '#1976d2', fontWeight: 600 }}>
-                      Ghi chú
-                    </Typography>
-                    <Box sx={{ pl: 2 }}>
-                      <Typography>{selectedItem.description}</Typography>
+            <Box>
+              {/* Main Info Section */}
+              <Box sx={{ p: 3, background: '#f8f9fc' }}>
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <Card sx={{ 
+                      height: '100%',
+                      borderRadius: 2,
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                      border: '1px solid #e0e0e0'
+                    }}>
+                      <CardContent sx={{ p: 2.5 }}>
+                        <Box display="flex" alignItems="center" gap={1} mb={2}>
+                          <LocationIcon sx={{ color: '#1976d2', fontSize: '1.2rem' }} />
+                          <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 600 }}>
+                            Thông tin khu vực
+                          </Typography>
+                        </Box>
+                        <Box sx={{ pl: 0.5 }}>
+                          <Box display="flex" alignItems="center" gap={1} mb={1}>
+                            <Box sx={{ 
+                              width: 6, 
+                              height: 6, 
+                              borderRadius: '50%', 
+                              backgroundColor: '#1976d2' 
+                            }} />
+                            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
+                              Tên:
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {selectedItem.location_name || 'Chưa cập nhật'}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Box sx={{ 
+                              width: 6, 
+                              height: 6, 
+                              borderRadius: '50%', 
+                              backgroundColor: '#1976d2' 
+                            }} />
+                            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
+                              Mã:
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {selectedItem.location_code || 'Chưa cập nhật'}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={6}>
+                    <Card sx={{ 
+                      height: '100%',
+                      borderRadius: 2,
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                      border: '1px solid #e0e0e0'
+                    }}>
+                      <CardContent sx={{ p: 2.5 }}>
+                        <Box display="flex" alignItems="center" gap={1} mb={2}>
+                          <PersonIcon sx={{ color: '#1976d2', fontSize: '1.2rem' }} />
+                          <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 600 }}>
+                            Thông tin chủ xe
+                          </Typography>
+                        </Box>
+                        <Box sx={{ pl: 0.5 }}>
+                          <Box display="flex" alignItems="center" gap={1} mb={1}>
+                            <Box sx={{ 
+                              width: 6, 
+                              height: 6, 
+                              borderRadius: '50%', 
+                              backgroundColor: '#1976d2' 
+                            }} />
+                            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
+                              Tên:
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {selectedItem.owner_name || 'Chưa cập nhật'}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" alignItems="center" gap={1} mb={1}>
+                            <Box sx={{ 
+                              width: 6, 
+                              height: 6, 
+                              borderRadius: '50%', 
+                              backgroundColor: '#1976d2' 
+                            }} />
+                            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
+                              SĐT:
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {selectedItem.owner_phone || 'Chưa cập nhật'}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Box sx={{ 
+                              width: 6, 
+                              height: 6, 
+                              borderRadius: '50%', 
+                              backgroundColor: '#1976d2' 
+                            }} />
+                            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
+                              Email:
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {selectedItem.contact_email || 'Chưa cập nhật'}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              {/* Time Validity Section */}
+              <Box sx={{ px: 3, py: 2 }}>
+                <Card sx={{ 
+                  borderRadius: 2,
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                  border: '1px solid #e0e0e0'
+                }}>
+                  <CardContent sx={{ p: 2.5 }}>
+                    <Box display="flex" alignItems="center" gap={1} mb={2}>
+                      <ScheduleIcon sx={{ color: '#1976d2', fontSize: '1.2rem' }} />
+                      <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 600 }}>
+                        Thời gian hiệu lực
+                      </Typography>
                     </Box>
-                  </>
-                )}
-              </Grid>
-            </Grid>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} sm={6}>
+                        <Box sx={{ 
+                          p: 2, 
+                          borderRadius: 2, 
+                          backgroundColor: '#f0f7ff',
+                          border: '1px solid #bbdefb'
+                        }}>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                            Bắt đầu
+                          </Typography>
+                          <Typography variant="body1" sx={{ fontWeight: 600, color: '#1976d2' }}>
+                            {selectedItem.valid_from ? 
+                              new Date(selectedItem.valid_from).toLocaleDateString('vi-VN') : 
+                              'Không giới hạn'
+                            }
+                          </Typography>
+                        </Box>
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <Box sx={{ 
+                          p: 2, 
+                          borderRadius: 2, 
+                          backgroundColor: '#f0f7ff',
+                          border: '1px solid #bbdefb'
+                        }}>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                            Kết thúc
+                          </Typography>
+                          <Typography variant="body1" sx={{ fontWeight: 600, color: '#1976d2' }}>
+                            {selectedItem.valid_to ? 
+                              new Date(selectedItem.valid_to).toLocaleDateString('vi-VN') : 
+                              'Không giới hạn'
+                            }
+                          </Typography>
+                        </Box>
+                      </Grid>
+                    </Grid>
+                  </CardContent>
+                </Card>
+              </Box>
+
+              {/* Image Section */}
+              {selectedItem.has_images && (
+                <Box sx={{ px: 3, py: 2 }}>
+                  <Card sx={{ 
+                    borderRadius: 2,
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                    border: '1px solid #e0e0e0'
+                  }}>
+                    <CardContent sx={{ p: 2.5 }}>
+                      <Box display="flex" alignItems="center" gap={1} mb={2}>
+                        <ImageIcon sx={{ color: '#1976d2', fontSize: '1.2rem' }} />
+                        <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 600 }}>
+                          Hình ảnh biển số
+                        </Typography>
+                      </Box>
+                      <Box sx={{ 
+                        display: 'flex', 
+                        justifyContent: 'center',
+                        p: 2,
+                        backgroundColor: '#fafafa',
+                        borderRadius: 2,
+                        border: '1px dashed #ddd'
+                      }}>
+                        {selectedItem.plate_image_path ? (
+                          <img 
+                            src={selectedItem.plate_image_path} 
+                            alt="Biển số xe" 
+                            style={{ 
+                              maxWidth: '100%', 
+                              maxHeight: 200, 
+                              borderRadius: 8,
+                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+                            }} 
+                          />
+                        ) : (
+                          <Box sx={{ 
+                            display: 'flex', 
+                            flexDirection: 'column', 
+                            alignItems: 'center',
+                            color: 'text.secondary',
+                            py: 3
+                          }}>
+                            <ImageIcon sx={{ fontSize: 48, mb: 1, opacity: 0.5 }} />
+                            <Typography variant="body2">
+                              Không có hình ảnh
+                            </Typography>
+                          </Box>
+                        )}
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Box>
+              )}
+
+              {/* Description Section */}
+              {selectedItem.description && (
+                <Box sx={{ px: 3, py: 2 }}>
+                  <Card sx={{ 
+                    borderRadius: 2,
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                    border: '1px solid #e0e0e0'
+                  }}>
+                    <CardContent sx={{ p: 2.5 }}>
+                      <Box display="flex" alignItems="center" gap={1} mb={2}>
+                        <DescriptionIcon sx={{ color: '#1976d2', fontSize: '1.2rem' }} />
+                        <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 600 }}>
+                          Ghi chú
+                        </Typography>
+                      </Box>
+                      <Box sx={{ 
+                        p: 2, 
+                        borderRadius: 2, 
+                        backgroundColor: '#f8f9fa',
+                        border: '1px solid #e9ecef'
+                      }}>
+                        <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
+                          {selectedItem.description}
+                        </Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Box>
+              )}
+
+              {/* Metadata Section */}
+              <Box sx={{ px: 3, pb: 2 }}>
+                <Card sx={{ 
+                  borderRadius: 2,
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                  border: '1px solid #e0e0e0'
+                }}>
+                  <CardContent sx={{ p: 2.5 }}>
+                    <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 600, mb: 2 }}>
+                      Thông tin hệ thống
+                    </Typography>
+                    <Grid container spacing={2}>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">
+                          Ngày tạo
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {selectedItem.created_at ? 
+                            new Date(selectedItem.created_at).toLocaleString('vi-VN') : 
+                            'Không rõ'
+                          }
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="caption" color="text.secondary">
+                          Cập nhật lần cuối
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {selectedItem.updated_at ? 
+                            new Date(selectedItem.updated_at).toLocaleString('vi-VN') : 
+                            'Không rõ'
+                          }
+                        </Typography>
+                      </Grid>
+                      {selectedItem.created_by_name && (
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary">
+                            Tạo bởi
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {selectedItem.created_by_name}
+                          </Typography>
+                        </Grid>
+                      )}
+                      {selectedItem.approved_by_name && (
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary">
+                            Phê duyệt bởi
+                          </Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {selectedItem.approved_by_name}
+                          </Typography>
+                        </Grid>
+                      )}
+                    </Grid>
+                  </CardContent>
+                </Card>
+              </Box>
+            </Box>
           )}
         </DialogContent>
+        
         <DialogActions sx={{ 
           p: 3, 
           borderTop: '1px solid #e0e0e0',
-          background: '#fafafa'
+          background: '#fafafa',
+          gap: 2
         }}>
           <Button 
             onClick={() => setOpenDetailModal(false)}
+            variant="outlined"
             sx={{
               borderRadius: 2,
-              px: 3,
+              px: 4,
               py: 1.5,
               textTransform: 'none',
               fontWeight: 600,
-              backgroundColor: '#1976d2',
-              color: 'white',
-              '&:hover': { backgroundColor: '#1565c0' }
+              borderColor: '#1976d2',
+              color: '#1976d2',
+              '&:hover': { 
+                backgroundColor: 'rgba(25, 118, 210, 0.04)',
+                borderColor: '#1565c0'
+              }
             }}
           >
+            <FaTimes style={{ marginRight: 8 }} />
             Đóng
           </Button>
+          
+          {selectedItem && (
+            <Button 
+              onClick={() => {
+                setOpenDetailModal(false);
+                handleEdit(selectedItem);
+              }}
+              variant="contained"
+              sx={{
+                borderRadius: 2,
+                px: 4,
+                py: 1.5,
+                textTransform: 'none',
+                fontWeight: 600,
+                backgroundColor: '#1976d2',
+                boxShadow: '0 2px 8px rgba(25, 118, 210, 0.3)',
+                '&:hover': { 
+                  backgroundColor: '#1565c0',
+                  boxShadow: '0 4px 12px rgba(25, 118, 210, 0.4)'
+                }
+              }}
+            >
+              <FaEdit style={{ marginRight: 8 }} />
+              Chỉnh sửa
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
