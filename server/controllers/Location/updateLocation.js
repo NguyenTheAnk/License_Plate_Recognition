@@ -19,8 +19,8 @@ const updateLocation = async (req, res) => {
             is_main_entry,
             is_main_exit,
             max_stay_duration_hours,
-            alert_on_overstay,
-            alert_on_no_exit
+            is_alert_on_overstay,
+            is_alert_on_no_exit
         } = req.body;
 
         // Check if location exists
@@ -144,13 +144,13 @@ const updateLocation = async (req, res) => {
             updateFields.push('max_stay_duration_hours = ?');
             updateValues.push(max_stay_duration_hours);
         }
-        if (alert_on_overstay !== undefined) {
-            updateFields.push('alert_on_overstay = ?');
-            updateValues.push(alert_on_overstay);
+        if (is_alert_on_overstay !== undefined) {
+            updateFields.push('is_alert_on_overstay = ?');
+            updateValues.push(is_alert_on_overstay);
         }
-        if (alert_on_no_exit !== undefined) {
-            updateFields.push('alert_on_no_exit = ?');
-            updateValues.push(alert_on_no_exit);
+        if (is_alert_on_no_exit !== undefined) {
+            updateFields.push('is_alert_on_no_exit = ?');
+            updateValues.push(is_alert_on_no_exit);
         }
 
         if (updateFields.length === 0) {

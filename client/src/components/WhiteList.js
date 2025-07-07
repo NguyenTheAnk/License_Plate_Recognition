@@ -34,7 +34,8 @@ import {
   Divider,
   Checkbox,
   Breadcrumbs,
-  Avatar
+  Avatar,
+  FormHelperText
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -57,7 +58,8 @@ import {
   CheckCircleOutline as CheckCircleOutlineIcon,
   Home as HomeIcon,
   ExpandMore as ExpandMoreIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Image as ImageIcon
 } from '@mui/icons-material';
 import {
   FaShieldAlt,
@@ -68,7 +70,8 @@ import {
   FaTimes,
   FaEdit,
   FaTrash,
-  FaEye
+  FaEye,
+  FaUpload
 } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
 
@@ -112,6 +115,7 @@ const WhiteList = () => {
   // States
   const [whitelist, setWhitelist] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [locationsLoading, setLocationsLoading] = useState(false);
   const [openModal, setOpenModal] = useState(false);
   const [openDetailModal, setOpenDetailModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -149,10 +153,18 @@ const WhiteList = () => {
     approval_status: 'approved'
   });
 
+  // Image handling
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [ocrResult, setOcrResult] = useState('');
+
   // Error handling
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [deleteDialog, setDeleteDialog] = useState({ open: false, itemId: null, plateName: '' });
+
+  // Form validation
+  const [formErrors, setFormErrors] = useState({});
 
   // Get token from localStorage
   const getToken = () => {
@@ -178,24 +190,73 @@ const WhiteList = () => {
     loadStatistics();
   }, [currentPage, itemsPerPage, filters]);
 
+  // Validate form
+  const validateForm = () => {
+    const errors = {};
+    
+    if (!formData.location_id) {
+      errors.location_id = 'Vui lòng chọn khu vực';
+    }
+    
+    if (!formData.plate_number) {
+      errors.plate_number = 'Vui lòng nhập biển số xe';
+    } else {
+      // Validate Vietnamese license plate format
+      const plateRegex = /^[0-9]{2}[A-Z]{1,2}-[0-9]{3,4}\.[0-9]{2}$|^[0-9]{2}[A-Z]{1,2}[0-9]{3,4}$/;
+      if (!plateRegex.test(formData.plate_number)) {
+        errors.plate_number = 'Định dạng biển số không hợp lệ';
+      }
+    }
+
+    if (formData.contact_email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.contact_email)) {
+        errors.contact_email = 'Định dạng email không hợp lệ';
+      }
+    }
+
+    if (formData.owner_phone) {
+      const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
+      if (!phoneRegex.test(formData.owner_phone.replace(/\s+/g, ''))) {
+        errors.owner_phone = 'Định dạng số điện thoại không hợp lệ';
+      }
+    }
+
+    if (formData.valid_from && formData.valid_to) {
+      if (new Date(formData.valid_from) > new Date(formData.valid_to)) {
+        errors.valid_to = 'Ngày kết thúc phải sau ngày bắt đầu';
+      }
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const loadWhitelist = async () => {
     setLoading(true);
     try {
       const token = getToken();
-      const params = {
-        page: currentPage,
-        limit: itemsPerPage,
-        ...Object.fromEntries(
-          Object.entries(filters).filter(([_, value]) => value !== '')
-        )
-      };
+      console.log('Loading whitelist with token:', token ? 'Token exists' : 'No token');
+      
+      const params = new URLSearchParams();
+      params.append('page', currentPage.toString());
+      params.append('limit', itemsPerPage.toString());
+      
+      // Add filters to params
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== '' && value !== null && value !== undefined) {
+          params.append(key, value);
+        }
+      });
 
-      const response = await fetchDataFromAPI('whitelist', token, { params });
+      const response = await fetchDataFromAPI(`/api/whitelist?${params.toString()}`, token);
 
       if (response.success) {
         setWhitelist(response.data || []);
-        setTotalPages(response.pagination?.total_pages || 1);
-        setTotalItems(response.pagination?.total || 0);
+        if (response.pagination) {
+          setTotalPages(response.pagination.total_pages || 1);
+          setTotalItems(response.pagination.total || 0);
+        }
       } else {
         setError(response.message || 'Lỗi khi tải danh sách whitelist');
       }
@@ -205,8 +266,11 @@ const WhiteList = () => {
       setError(errorMessage);
       
       if (isUnauthorizedError(error)) {
-        localStorage.removeItem('token');
-        window.location.href = '/login';
+        const token = getToken();
+        if (!token || token.trim() === '') {
+          localStorage.removeItem('token');
+          window.location.href = '/login';
+        }
       }
     } finally {
       setLoading(false);
@@ -214,49 +278,136 @@ const WhiteList = () => {
   };
 
   const loadLocations = async () => {
+    setLocationsLoading(true);
     try {
       const token = getToken();
-      const response = await fetchDataFromAPI('locations', token);
+      // Gọi API /api/location với limit lớn để lấy đủ danh sách khu vực
+      const response = await fetchDataFromAPI('/api/location?limit=1000&is_active=1', token);
       
       if (response.success) {
-        setLocations(response.data || []);
+        setLocations(response.data.locations || []);
+      } else {
+        console.error('Failed to load locations:', response.message);
+        setError('Không thể tải danh sách khu vực: ' + response.message);
       }
     } catch (error) {
       console.error('Error loading locations:', error);
+      const errorMessage = handleErrorResponse(error);
+      setError('Không thể tải danh sách khu vực: ' + errorMessage);
+    } finally {
+      setLocationsLoading(false);
     }
   };
 
   const loadStatistics = async () => {
     try {
       const token = getToken();
-      const response = await fetchDataFromAPI('whitelist/statistics', token);
+      const response = await fetchDataFromAPI('/api/whitelist/statistics', token);
       
       if (response.success) {
-        setStatistics(response.data || {});
+        setStatistics(response.data?.general_statistics || {});
       }
     } catch (error) {
       console.error('Error loading statistics:', error);
     }
   };
 
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setError('Vui lòng chọn file ảnh');
+        return;
+      }
+      
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError('Kích thước file không được vượt quá 10MB');
+        return;
+      }
+
+      setImageFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setImagePreview(ev.target.result);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setImageFile(null);
+      setImagePreview(null);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (!validateForm()) {
+      setError('Vui lòng kiểm tra lại thông tin nhập vào');
+      return;
+    }
+
     setLoading(true);
     try {
       const token = getToken();
       let response;
 
       if (selectedItem) {
-        response = await editData(`whitelist/${selectedItem.id}`, formData, token);
+        // Update existing item
+        if (imageFile) {
+          const formDataToSend = new FormData();
+          Object.entries(formData).forEach(([key, value]) => {
+            if (value !== null && value !== undefined && value !== '') {
+              formDataToSend.append(key, value);
+            }
+          });
+          formDataToSend.append('plate_image', imageFile);
+          
+          response = await fetch(`/api/whitelist/${selectedItem.id}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            body: formDataToSend
+          });
+          response = await response.json();
+        } else {
+          response = await editData(`/api/whitelist/${selectedItem.id}`, formData, token);
+        }
         setSuccess('Cập nhật whitelist thành công');
       } else {
-        response = await postData('whitelist/create', formData, token);
+        // Create new item
+        if (imageFile) {
+          const formDataToSend = new FormData();
+          Object.entries(formData).forEach(([key, value]) => {
+            if (value !== null && value !== undefined && value !== '') {
+              formDataToSend.append(key, value);
+            }
+          });
+          formDataToSend.append('plate_image', imageFile);
+          
+          response = await fetch('/api/whitelist/create', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            body: formDataToSend
+          });
+          response = await response.json();
+        } else {
+          response = await postData('/api/whitelist/create', formData, token);
+        }
         setSuccess('Tạo whitelist thành công');
       }
 
       if (response.success) {
         setOpenModal(false);
         resetForm();
+        if (response.data?.ocr_text) {
+          setOcrResult(response.data.ocr_text);
+        }
         loadWhitelist();
       } else {
         setError(response.message || 'Có lỗi xảy ra');
@@ -273,7 +424,7 @@ const WhiteList = () => {
   const handleDelete = async (id) => {
     try {
       const token = getToken();
-      const response = await deleteData(`whitelist/${id}`, token);
+      const response = await deleteData(`/api/whitelist/${id}`, token);
       
       if (response.success) {
         setSuccess('Xóa whitelist thành công');
@@ -300,7 +451,7 @@ const WhiteList = () => {
     if (window.confirm(`Bạn có chắc chắn muốn xóa ${selectedItems.length} mục đã chọn?`)) {
       try {
         const token = getToken();
-        const response = await postData('whitelist/bulk/delete', { ids: selectedItems }, token);
+        const response = await postData('/api/whitelist/bulk/delete', { ids: selectedItems }, token);
         if (response.success) {
           setSuccess(`Xóa thành công ${selectedItems.length} mục!`);
           setSelectedItems([]);
@@ -329,13 +480,14 @@ const WhiteList = () => {
       description: item.description || '',
       approval_status: item.approval_status || 'approved'
     });
+    setFormErrors({});
     setOpenModal(true);
   };
 
   const handleView = async (id) => {
     try {
       const token = getToken();
-      const response = await fetchDataFromAPI(`whitelist/${id}`, token);
+      const response = await fetchDataFromAPI(`/api/whitelist/${id}`, token);
       
       if (response.success) {
         setSelectedItem(response.data);
@@ -364,6 +516,10 @@ const WhiteList = () => {
       approval_status: 'approved'
     });
     setSelectedItem(null);
+    setImageFile(null);
+    setImagePreview(null);
+    setOcrResult('');
+    setFormErrors({});
   };
 
   const handleRefresh = () => {
@@ -377,6 +533,14 @@ const WhiteList = () => {
     setCurrentPage(1);
     setSelectedItems([]);
     loadWhitelist();
+  };
+
+  const handleFilterChange = (key, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [key]: value
+    }));
+    setCurrentPage(1); // Reset to first page when filter changes
   };
 
   const handleSelectItem = (itemId) => {
@@ -418,6 +582,11 @@ const WhiteList = () => {
 
   const handlePageChange = (event, page) => {
     setCurrentPage(page);
+  };
+
+  const handleItemsPerPageChange = (event) => {
+    setItemsPerPage(parseInt(event.target.value));
+    setCurrentPage(1);
   };
 
   // Pagination helper
@@ -561,6 +730,24 @@ const WhiteList = () => {
         </Box>
       )}
 
+      {/* OCR Result Alert */}
+      {ocrResult && (
+        <Box sx={{ px: 3, mb: 2 }}>
+          <Alert 
+            severity="info" 
+            onClose={() => setOcrResult('')}
+            sx={{ 
+              borderRadius: 3,
+              boxShadow: '0 2px 8px rgba(33, 150, 243, 0.2)',
+              '& .MuiAlert-icon': { fontSize: '1.5rem' },
+              '& .MuiAlert-message': { fontWeight: 500 }
+            }}
+          >
+            Kết quả nhận diện biển số từ ảnh: <strong>{ocrResult}</strong>
+          </Alert>
+        </Box>
+      )}
+
       {/* Enhanced Tabs */}
       <Box sx={{ px: 3, mb: 3 }}>
         <Card sx={{ 
@@ -615,7 +802,7 @@ const WhiteList = () => {
                       label="Biển số xe"
                       placeholder="Nhập biển số..."
                       value={filters.plate_number}
-                      onChange={(e) => setFilters({...filters, plate_number: e.target.value})}
+                      onChange={(e) => handleFilterChange('plate_number', e.target.value)}
                       size="small"
                       sx={{
                         '& .MuiOutlinedInput-root': {
@@ -632,15 +819,40 @@ const WhiteList = () => {
                       <Select
                         value={filters.location_id}
                         label="Khu vực"
-                        onChange={(e) => setFilters({...filters, location_id: e.target.value})}
+                        onChange={(e) => handleFilterChange('location_id', e.target.value)}
+                        disabled={locationsLoading}
                         sx={{ borderRadius: 2 }}
                       >
                         <MenuItem value="">Tất cả khu vực</MenuItem>
-                        {locations.map(location => (
-                          <MenuItem key={location.id} value={location.id}>
-                            {location.name}
+                        {locationsLoading ? (
+                          <MenuItem disabled>
+                            <Box display="flex" alignItems="center" gap={1}>
+                              <CircularProgress size={14} />
+                              <Typography variant="caption">Đang tải...</Typography>
+                            </Box>
                           </MenuItem>
-                        ))}
+                        ) : locations.length === 0 ? (
+                          <MenuItem disabled>
+                            <Typography variant="caption" color="text.secondary">
+                              Không có khu vực nào
+                            </Typography>
+                          </MenuItem>
+                        ) : (
+                          locations?.map(location => (
+                            <MenuItem key={location.id} value={location.id}>
+                              <Box display="flex" flexDirection="column">
+                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                  {location.name}
+                                </Typography>
+                                {location.code && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {location.code}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </MenuItem>
+                          ))
+                        )}
                       </Select>
                     </FormControl>
                   </Grid>
@@ -650,7 +862,7 @@ const WhiteList = () => {
                       <Select
                         value={filters.approval_status}
                         label="Phê duyệt"
-                        onChange={(e) => setFilters({...filters, approval_status: e.target.value})}
+                        onChange={(e) => handleFilterChange('approval_status', e.target.value)}
                         sx={{ borderRadius: 2 }}
                       >
                         <MenuItem value="">Tất cả</MenuItem>
@@ -666,7 +878,7 @@ const WhiteList = () => {
                       <Select
                         value={filters.valid_status}
                         label="Hiệu lực"
-                        onChange={(e) => setFilters({...filters, valid_status: e.target.value})}
+                        onChange={(e) => handleFilterChange('valid_status', e.target.value)}
                         sx={{ borderRadius: 2 }}
                       >
                         <MenuItem value="">Tất cả</MenuItem>
@@ -767,20 +979,7 @@ const WhiteList = () => {
                       <TableRow>
                         <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                           <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
-                            <Box
-                              sx={{
-                                width: 40,
-                                height: 40,
-                                border: '3px solid #f3f3f3',
-                                borderTop: '3px solid #1976d2',
-                                borderRadius: '50%',
-                                animation: 'spin 1s linear infinite',
-                                '@keyframes spin': {
-                                  '0%': { transform: 'rotate(0deg)' },
-                                  '100%': { transform: 'rotate(360deg)' },
-                                },
-                              }}
-                            />
+                            <CircularProgress size={40} />
                             <Typography variant="body2" color="text.secondary">
                               Đang tải dữ liệu...
                             </Typography>
@@ -802,7 +1001,7 @@ const WhiteList = () => {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      whitelist.map((item, index) => (
+                      whitelist.map((item) => (
                         <TableRow 
                           key={item.id} 
                           hover
@@ -838,10 +1037,10 @@ const WhiteList = () => {
                                 <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                                   {item.plate_number}
                                 </Typography>
-                                {item.vehicle_type && (
-                                  <Typography variant="caption" color="text.secondary">
-                                    {item.make} {item.model} - {item.color}
-                                  </Typography>
+                                {item.has_images && (
+                                  <Tooltip title="Có ảnh biển số">
+                                    <ImageIcon sx={{ fontSize: 16, color: '#1976d2' }} />
+                                  </Tooltip>
                                 )}
                               </Box>
                             </Box>
@@ -964,11 +1163,7 @@ const WhiteList = () => {
                     </Typography>
                     <Select
                       value={itemsPerPage}
-                      onChange={e => {
-                        const value = Number(e.target.value);
-                        setItemsPerPage(value);
-                        setCurrentPage(1);
-                      }}
+                      onChange={handleItemsPerPageChange}
                       sx={{ minWidth: 60, mx: 0.5 }}
                       size="small"
                     >
@@ -981,64 +1176,66 @@ const WhiteList = () => {
                     </Typography>
                   </FormControl>
                   
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'<<'}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(prev => prev - 1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'<'}
-                    </Button>
-                    {getPaginationItems(currentPage, totalPages).map((item, idx) =>
-                      item === '...'
-                        ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
-                        : <Button
-                            key={item}
-                            variant={item === currentPage ? 'contained' : 'outlined'}
-                            color={item === currentPage ? 'primary' : 'inherit'}
-                            size="small"
-                            sx={{ 
-                              minWidth: 36, 
-                              fontWeight: 600, 
-                              borderRadius: 2, 
-                              mx: 0.25,
-                              ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' })
-                            }}
-                            onClick={() => setCurrentPage(item)}
-                          >
-                            {item}
-                          </Button>
-                    )}
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(prev => prev + 1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'>'}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(totalPages)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'>>'}
-                    </Button>
-                  </Box>
+                  {totalPages > 1 && (
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(1)}
+                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                      >
+                        {'<<'}
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(prev => prev - 1)}
+                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                      >
+                        {'<'}
+                      </Button>
+                      {getPaginationItems(currentPage, totalPages).map((item, idx) =>
+                        item === '...'
+                          ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
+                          : <Button
+                              key={item}
+                              variant={item === currentPage ? 'contained' : 'outlined'}
+                              color={item === currentPage ? 'primary' : 'inherit'}
+                              size="small"
+                              sx={{ 
+                                minWidth: 36, 
+                                fontWeight: 600, 
+                                borderRadius: 2, 
+                                mx: 0.25,
+                                ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' })
+                              }}
+                              onClick={() => setCurrentPage(item)}
+                            >
+                              {item}
+                            </Button>
+                      )}
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(prev => prev + 1)}
+                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                      >
+                        {'>'}
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(totalPages)}
+                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
+                      >
+                        {'>>'}
+                      </Button>
+                    </Box>
+                  )}
                 </Box>
               </Box>
             </Card>
@@ -1182,20 +1379,48 @@ const WhiteList = () => {
           <DialogContent sx={{ p: 3 }}>
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>
-                <FormControl fullWidth required>
+                <FormControl fullWidth required error={!!formErrors.location_id}>
                   <InputLabel>Khu vực</InputLabel>
                   <Select
                     value={formData.location_id}
                     label="Khu vực"
                     onChange={(e) => setFormData({...formData, location_id: e.target.value})}
+                    disabled={locationsLoading}
                     sx={{ borderRadius: 2 }}
                   >
-                    {locations.map(location => (
-                      <MenuItem key={location.id} value={location.id}>
-                        {location.name}
+                    {locationsLoading ? (
+                      <MenuItem disabled>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <CircularProgress size={16} />
+                          <Typography variant="body2">Đang tải khu vực...</Typography>
+                        </Box>
                       </MenuItem>
-                    ))}
+                    ) : locations.length === 0 ? (
+                      <MenuItem disabled>
+                        <Typography variant="body2" color="text.secondary">
+                          Không có khu vực nào
+                        </Typography>
+                      </MenuItem>
+                    ) : (
+                      locations.map(location => (
+                        <MenuItem key={location.id} value={location.id}>
+                          <Box display="flex" flexDirection="column">
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {location.name}
+                            </Typography>
+                            {location.code && (
+                              <Typography variant="caption" color="text.secondary">
+                                {location.code}
+                              </Typography>
+                            )}
+                          </Box>
+                        </MenuItem>
+                      ))
+                    )}
                   </Select>
+                  {formErrors.location_id && (
+                    <FormHelperText>{formErrors.location_id}</FormHelperText>
+                  )}
                 </FormControl>
               </Grid>
               <Grid item xs={12} md={6}>
@@ -1206,6 +1431,8 @@ const WhiteList = () => {
                   placeholder="Nhập biển số xe"
                   value={formData.plate_number}
                   onChange={(e) => setFormData({...formData, plate_number: e.target.value})}
+                  error={!!formErrors.plate_number}
+                  helperText={formErrors.plate_number}
                   sx={{
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,
@@ -1238,6 +1465,8 @@ const WhiteList = () => {
                   placeholder="Nhập số điện thoại"
                   value={formData.owner_phone}
                   onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
+                  error={!!formErrors.owner_phone}
+                  helperText={formErrors.owner_phone}
                   sx={{
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,
@@ -1255,6 +1484,8 @@ const WhiteList = () => {
                   placeholder="Nhập email"
                   value={formData.contact_email}
                   onChange={(e) => setFormData({...formData, contact_email: e.target.value})}
+                  error={!!formErrors.contact_email}
+                  helperText={formErrors.contact_email}
                   sx={{
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,
@@ -1304,6 +1535,8 @@ const WhiteList = () => {
                   InputLabelProps={{ shrink: true }}
                   value={formData.valid_to}
                   onChange={(e) => setFormData({...formData, valid_to: e.target.value})}
+                  error={!!formErrors.valid_to}
+                  helperText={formErrors.valid_to}
                   sx={{
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,
@@ -1330,6 +1563,54 @@ const WhiteList = () => {
                     }
                   }}
                 />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Button
+                  variant="outlined"
+                  component="label"
+                  fullWidth
+                  startIcon={<FaUpload />}
+                  sx={{ 
+                    mb: 2,
+                    borderRadius: 2,
+                    py: 1.5,
+                    textTransform: 'none',
+                    fontWeight: 600
+                  }}
+                >
+                  Tải ảnh biển số xe
+                  <input
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={handleImageChange}
+                  />
+                </Button>
+                {imagePreview && (
+                  <Box mt={1} display="flex" flexDirection="column" alignItems="center">
+                    <img 
+                      src={imagePreview} 
+                      alt="preview" 
+                      style={{ 
+                        maxWidth: '100%', 
+                        maxHeight: 200, 
+                        borderRadius: 8, 
+                        border: '1px solid #eee' 
+                      }} 
+                    />
+                    <Button
+                      size="small"
+                      color="error"
+                      onClick={() => {
+                        setImageFile(null);
+                        setImagePreview(null);
+                      }}
+                      sx={{ mt: 1 }}
+                    >
+                      Xóa ảnh
+                    </Button>
+                  </Box>
+                )}
               </Grid>
             </Grid>
           </DialogContent>
@@ -1423,6 +1704,11 @@ const WhiteList = () => {
                   <Typography sx={{ mb: 1 }}>
                     <strong>Phê duyệt:</strong> {getApprovalChip(selectedItem.approval_status)}
                   </Typography>
+                  {selectedItem.has_images && (
+                    <Typography sx={{ mb: 1 }}>
+                      <strong>Ảnh:</strong> Có ảnh biển số
+                    </Typography>
+                  )}
                 </Box>
               </Grid>
               <Grid item xs={12} md={6}>

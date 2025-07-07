@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 // Import controllers
-const { createWhitelist, createMultipleWhitelist } = require('../controllers/WhiteList/createWhiteList');
+const { createWhitelist, bulkCreateWhitelist } = require('../controllers/WhiteList/createWhiteList');
 const { 
     getAllWhitelist, 
     getWhitelistById, 
@@ -29,6 +29,7 @@ const {
 const auth = require('../middlewares/authMiddleware');
 const checkPermission = require('../middlewares/checkPermission');
 const { onlyAdminAccess } = require('../middlewares/adminMiddleware');
+const upload = require('../middlewares/upload');
 
 // Import validators
 const {
@@ -44,42 +45,43 @@ const {
 // Get all whitelist entries with pagination and filters
 router.get('/', 
     auth, 
-    checkPermission('whitelist.view'), 
+    // checkPermission('whitelist.view'), 
     getAllWhitelist
 );
 
 // Get whitelist statistics
 router.get('/statistics', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     getWhitelistStatistics
 );
 
 // Search whitelist entries
 router.get('/search', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     searchWhitelist
 );
 
 // Get whitelist entry by ID
 router.get('/:id', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     getWhitelistById
 );
 
 // Get whitelist entries by plate number
 router.get('/plate/:plate_number', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     getWhitelistByPlateNumber
 );
 
 // Create single whitelist entry
 router.post('/create', 
     auth, 
-    checkPermission('whitelist.create'), 
+    //checkPermission('whitelist.create'), 
+    upload.single('image'),
     createWhitelistValidator, 
     createWhitelist
 );
@@ -87,15 +89,15 @@ router.post('/create',
 // Create multiple whitelist entries
 router.post('/create/bulk', 
     auth, 
-    checkPermission('whitelist.create'), 
+    //checkPermission('whitelist.create'), 
     bulkWhitelistValidator, 
-    createMultipleWhitelist
+    bulkCreateWhitelist
 );
 
 // Update whitelist entry
 router.put('/:id', 
     auth, 
-    checkPermission('whitelist.update'), 
+    //checkPermission('whitelist.update'), 
     updateWhitelistValidator, 
     updateWhitelist
 );
@@ -103,35 +105,35 @@ router.put('/:id',
 // Update whitelist status (active/inactive)
 router.put('/:id/status', 
     auth, 
-    checkPermission('whitelist.update'), 
+    //checkPermission('whitelist.update'), 
     updateWhitelistStatus
 );
 
 // Update whitelist approval status
 router.put('/:id/approval', 
     auth, 
-    checkPermission('whitelist.update'), 
+    //checkPermission('whitelist.update'), 
     updateWhitelistApproval
 );
 
 // Extend whitelist validity period
 router.put('/:id/extend', 
     auth, 
-    checkPermission('whitelist.update'), 
+    //checkPermission('whitelist.update'), 
     extendWhitelistValidity
 );
 
 // Soft delete whitelist entry (set inactive)
 router.delete('/:id', 
     auth, 
-    checkPermission('whitelist.delete'), 
+    //checkPermission('whitelist.delete'), 
     deleteWhitelist
 );
 
 // Restore deleted (inactive) whitelist entry
 router.post('/:id/restore', 
     auth, 
-    checkPermission('whitelist.update'), 
+    //checkPermission('whitelist.update'), 
     restoreWhitelist
 );
 
@@ -142,21 +144,21 @@ router.post('/:id/restore',
 // Bulk update whitelist entries
 router.put('/bulk/update', 
     auth, 
-    checkPermission('whitelist.update'), 
+    //checkPermission('whitelist.update'), 
     bulkUpdateWhitelist
 );
 
 // Bulk delete whitelist entries
 router.post('/bulk/delete', 
     auth, 
-    checkPermission('whitelist.delete'), 
+    //checkPermission('whitelist.delete'), 
     bulkDeleteWhitelist
 );
 
 // Bulk restore whitelist entries
 router.post('/bulk/restore', 
     auth, 
-    checkPermission('whitelist.update'), 
+    //checkPermission('whitelist.update'), 
     bulkRestoreWhitelist
 );
 
@@ -168,7 +170,7 @@ router.post('/bulk/restore',
 router.post('/maintenance/delete-expired', 
     auth, 
     onlyAdminAccess, 
-    checkPermission('whitelist.delete'), 
+    //checkPermission('whitelist.delete'), 
     deleteExpiredWhitelist
 );
 
@@ -179,7 +181,7 @@ router.post('/maintenance/delete-expired',
 // Check if plate number is whitelisted at specific location
 router.get('/check/:plate_number/:location_id', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -248,7 +250,7 @@ router.get('/check/:plate_number/:location_id',
 // Get whitelist entries that are expiring soon
 router.get('/alerts/expiring', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -301,7 +303,7 @@ router.get('/alerts/expiring',
 // Get whitelist entries by location with summary
 router.get('/location/:location_id/summary', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -371,7 +373,7 @@ router.get('/location/:location_id/summary',
 // Export whitelist data
 router.get('/export/csv', 
     auth, 
-    checkPermission('whitelist.view'), 
+    //checkPermission('whitelist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();

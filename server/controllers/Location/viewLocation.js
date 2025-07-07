@@ -105,7 +105,7 @@ const getLocationDetailedView = async (req, res) => {
         // Get cameras
         const [cameras] = await connection.execute(`
             SELECT 
-                c.id, c.name, c.code, c.url, c.direction, c.camera_type, c.camera_role,
+                c.id, c.name, c.url, c.direction, c.camera_type, c.camera_role,
                 c.resolution, c.fps, c.status, c.last_heartbeat, c.installation_date
             FROM cameras c
             WHERE (c.location_id = ? OR c.monitoring_location_id = ?) AND c.is_active = 1

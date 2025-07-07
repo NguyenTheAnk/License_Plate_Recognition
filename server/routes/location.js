@@ -3,7 +3,7 @@ const router = express.Router();
 
 // Import controllers
 const { createLocation } = require('../controllers/Location/createLocation');
-const { getLocationById, getAllLocations } = require('../controllers/Location/getLocation');
+const { getLocationById, getAllLocations, getAllActiveLocations } = require('../controllers/Location/getLocation');
 const { updateLocation, updateLocationStatus } = require('../controllers/Location/updateLocation');
 const { deleteLocation, hardDeleteLocation, restoreLocation } = require('../controllers/Location/deleteLocation');
 const { searchLocations, searchLocationsByCriteria, getLocationsByZoneType } = require('../controllers/Location/searchLocation');
@@ -25,6 +25,12 @@ router.get('/',
     auth, 
     // checkPermission('locations.view'),
     getAllLocations
+);
+
+router.get('/active', 
+    auth, 
+    // checkPermission('locations.view'),
+    getAllActiveLocations
 );
 
 router.get('/statistics', 

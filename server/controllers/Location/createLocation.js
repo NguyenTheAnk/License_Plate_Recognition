@@ -18,8 +18,8 @@ const createLocation = async (req, res) => {
             is_main_entry = false,
             is_main_exit = false,
             max_stay_duration_hours = 24,
-            alert_on_overstay = true,
-            alert_on_no_exit = true
+            is_alert_on_overstay = true,
+            is_alert_on_no_exit = true
         } = req.body;
 
         // Validate required fields
@@ -81,13 +81,13 @@ const createLocation = async (req, res) => {
                 name, code, address, latitude, longitude, description, zone_type,
                 is_restricted, parent_location_id, entry_exit_pair_id,
                 is_main_entry, is_main_exit, max_stay_duration_hours,
-                alert_on_overstay, alert_on_no_exit, is_active, created_at, updated_at
+                is_alert_on_overstay, is_alert_on_no_exit, is_active, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
             [
                 name, code, address, latitude, longitude, description, zone_type,
                 is_restricted, parent_location_id, entry_exit_pair_id,
                 is_main_entry, is_main_exit, max_stay_duration_hours,
-                alert_on_overstay, alert_on_no_exit
+                is_alert_on_overstay, is_alert_on_no_exit
             ]
         );
 

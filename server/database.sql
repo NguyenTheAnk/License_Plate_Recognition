@@ -1328,6 +1328,123 @@ INSERT IGNORE INTO system_settings (setting_key, setting_value, setting_type, ca
 ('performance.max_concurrent_detections', '10', 'number', 'performance', 'Số detection đồng thời tối đa', FALSE),
 ('performance.cleanup_interval_hours', '6', 'number', 'performance', 'Khoảng thời gian dọn dẹp (giờ)', FALSE);
 
+
+-- Khu vực chính của tòa nhà/khuôn viên
+INSERT INTO locations (name, code, address, latitude, longitude, description, zone_type, is_restricted, entry_exit_pair_id, is_main_entry, is_main_exit, max_stay_duration_hours, is_alert_on_overstay, is_alert_on_no_exit, is_active) VALUES
+('Cổng chính tòa nhà ABC', 'MAIN_GATE', 'Số 123 Đường Nguyễn Trãi, Quận 1, TP.HCM', 10.7756592, 106.7004394, 'Cổng chính ra vào tòa nhà văn phòng ABC', 'entrance', TRUE, 1, TRUE, FALSE, 8, TRUE, TRUE, TRUE),
+('Lối ra chính tòa nhà ABC', 'MAIN_EXIT', 'Số 123 Đường Nguyễn Trãi, Quận 1, TP.HCM', 10.7756192, 106.7004894, 'Lối ra chính từ tòa nhà văn phòng ABC', 'exit', TRUE, 1, FALSE, TRUE, 8, TRUE, TRUE, TRUE),
+
+-- Bãi đỗ xe các tầng
+('Bãi đỗ xe tầng hầm B1', 'PARKING_B1', 'Tầng hầm B1, Tòa nhà ABC', 10.7756292, 106.7004594, 'Bãi đỗ xe tầng hầm B1 dành cho nhân viên', 'parking', FALSE, 2, FALSE, FALSE, 24, TRUE, TRUE, TRUE),
+('Cổng vào bãi xe B1', 'PARKING_B1_IN', 'Lối vào tầng hầm B1', 10.7756392, 106.7004694, 'Cổng kiểm soát vào bãi xe tầng B1', 'entrance', FALSE, 2, TRUE, FALSE, 24, TRUE, TRUE, TRUE),
+('Cổng ra bãi xe B1', 'PARKING_B1_OUT', 'Lối ra tầng hầm B1', 10.7756092, 106.7004794, 'Cổng kiểm soát ra khỏi bãi xe B1', 'exit', FALSE, 2, FALSE, TRUE, 24, TRUE, TRUE, TRUE),
+
+('Bãi đỗ xe tầng hầm B2', 'PARKING_B2', 'Tầng hầm B2, Tòa nhà ABC', 10.7756192, 106.7004494, 'Bãi đỗ xe tầng hầm B2 dành cho khách VIP', 'parking', TRUE, 3, FALSE, FALSE, 12, TRUE, TRUE, TRUE),
+('Cổng vào bãi xe B2', 'PARKING_B2_IN', 'Lối vào tầng hầm B2', 10.7756292, 106.7004594, 'Cổng kiểm soát vào bãi xe VIP B2', 'entrance', TRUE, 3, TRUE, FALSE, 12, TRUE, TRUE, TRUE),
+('Cổng ra bãi xe B2', 'PARKING_B2_OUT', 'Lối ra tầng hầm B2', 10.7755992, 106.7004694, 'Cổng kiểm soát ra khỏi bãi xe VIP B2', 'exit', TRUE, 3, FALSE, TRUE, 12, TRUE, TRUE, TRUE),
+
+-- ========================================
+-- KHU VỰC CHECKPOINT VÀ KIỂM SOÁT
+-- ========================================
+
+-- Các điểm kiểm soát an ninh
+('Checkpoint an ninh tầng 1', 'SECURITY_L1', 'Sảnh tầng 1, Tòa nhà ABC', 10.7756492, 106.7004394, 'Điểm kiểm soát an ninh tại sảnh tầng 1', 'checkpoint', TRUE, NULL, FALSE, FALSE, 2, TRUE, TRUE, TRUE),
+('Checkpoint thang máy VIP', 'VIP_ELEVATOR', 'Khu vực thang máy VIP, Tầng 1', 10.7756592, 106.7004294, 'Kiểm soát truy cập thang máy VIP', 'checkpoint', TRUE, NULL, FALSE, FALSE, 1, TRUE, TRUE, TRUE),
+('Checkpoint khu văn phòng A', 'OFFICE_A_CHECK', 'Lối vào khu văn phòng A, Tầng 5', 10.7756692, 106.7004194, 'Kiểm soát ra vào khu văn phòng A', 'checkpoint', TRUE, NULL, FALSE, FALSE, 8, TRUE, TRUE, TRUE),
+
+-- ========================================
+-- KHU VỰC HẠN CHẾ ĐẶC BIỆT
+-- ========================================
+
+-- Khu vực hạn chế cao
+('Phòng máy chủ', 'SERVER_ROOM', 'Tầng 10, Tòa nhà ABC', 10.7756792, 106.7004094, 'Khu vực phòng máy chủ - hạn chế nghiêm ngặt', 'restricted', TRUE, NULL, FALSE, FALSE, 1, TRUE, TRUE, TRUE),
+('Kho tài liệu mật', 'CONFIDENTIAL_STORAGE', 'Tầng 8, Tòa nhà ABC', 10.7756892, 106.7003994, 'Khu vực lưu trữ tài liệu mật', 'restricted', TRUE, NULL, FALSE, FALSE, 2, TRUE, TRUE, TRUE),
+('Phòng họp cấp cao', 'EXECUTIVE_MEETING', 'Tầng 15, Tòa nhà ABC', 10.7756992, 106.7003894, 'Phòng họp dành cho ban lãnh đạo', 'restricted', TRUE, NULL, FALSE, FALSE, 4, TRUE, TRUE, TRUE),
+
+-- ========================================
+-- KHU VỰC GIÁM SÁT CHUNG
+-- ========================================
+
+-- Các khu vực giám sát thường xuyên
+('Sảnh chính tầng trệt', 'MAIN_LOBBY', 'Tầng trệt, Tòa nhà ABC', 10.7756592, 106.7004394, 'Sảnh chính tiếp đón khách', 'monitoring_zone', FALSE, NULL, FALSE, FALSE, 24, FALSE, FALSE, TRUE),
+('Hành lang tầng 2', 'CORRIDOR_L2', 'Hành lang chính tầng 2', 10.7756692, 106.7004294, 'Hành lang chính kết nối các phòng ban tầng 2', 'monitoring_zone', FALSE, NULL, FALSE, FALSE, 24, FALSE, FALSE, TRUE),
+('Hành lang tầng 3', 'CORRIDOR_L3', 'Hành lang chính tầng 3', 10.7756792, 106.7004194, 'Hành lang chính kết nối các phòng ban tầng 3', 'monitoring_zone', FALSE, NULL, FALSE, FALSE, 24, FALSE, FALSE, TRUE),
+('Khu ăn uống tầng 6', 'FOOD_COURT_L6', 'Khu ăn uống tầng 6', 10.7756892, 106.7004094, 'Khu vực ăn uống và nghỉ ngơi tầng 6', 'monitoring_zone', FALSE, NULL, FALSE, FALSE, 24, FALSE, FALSE, TRUE),
+
+-- ========================================
+-- CÁC LỐI RA VÀO PHỤ
+-- ========================================
+
+-- Lối thoát hiểm
+('Lối thoát hiểm A - Tầng 1', 'EMERGENCY_A_L1', 'Cầu thang thoát hiểm A, Tầng 1', 10.7756992, 106.7004494, 'Lối thoát hiểm A dành cho tầng 1-5', 'exit', FALSE, 4, FALSE, TRUE, 1, TRUE, TRUE, TRUE),
+('Lối thoát hiểm B - Tầng 1', 'EMERGENCY_B_L1', 'Cầu thang thoát hiểm B, Tầng 1', 10.7757092, 106.7004594, 'Lối thoát hiểm B dành cho tầng 6-10', 'exit', FALSE, 5, FALSE, TRUE, 1, TRUE, TRUE, TRUE),
+('Lối thoát hiểm C - Tầng 1', 'EMERGENCY_C_L1', 'Cầu thang thoát hiểm C, Tầng 1', 10.7757192, 106.7004694, 'Lối thoát hiểm C dành cho tầng 11-15', 'exit', FALSE, 6, FALSE, TRUE, 1, TRUE, TRUE, TRUE),
+
+-- Lối vào phụ cho nhân viên
+('Lối vào nhân viên - Cổng phụ', 'STAFF_ENTRANCE', 'Lối vào phụ dành cho nhân viên', 10.7756492, 106.7004794, 'Cổng phụ dành riêng cho nhân viên vào làm', 'entrance', FALSE, 7, TRUE, FALSE, 12, TRUE, TRUE, TRUE),
+('Lối ra nhân viên - Cổng phụ', 'STAFF_EXIT', 'Lối ra phụ dành cho nhân viên', 10.7756392, 106.7004894, 'Cổng phụ dành riêng cho nhân viên ra về', 'exit', FALSE, 7, FALSE, TRUE, 12, TRUE, TRUE, TRUE),
+
+-- ========================================
+-- KHU VỰC DỊCH VỤ VÀ TIỆN ÍCH
+-- ========================================
+
+-- Khu vực dịch vụ
+('Khu vực gửi xe máy', 'MOTORBIKE_PARKING', 'Khu gửi xe máy ngoài trời', 10.7756292, 106.7005094, 'Bãi gửi xe máy dành cho nhân viên và khách', 'parking', FALSE, 8, FALSE, FALSE, 24, FALSE, TRUE, TRUE),
+('Cổng vào bãi xe máy', 'MOTORBIKE_IN', 'Cổng vào bãi xe máy', 10.7756192, 106.7005194, 'Cổng kiểm soát vào bãi xe máy', 'entrance', FALSE, 8, TRUE, FALSE, 24, FALSE, TRUE, TRUE),
+('Cổng ra bãi xe máy', 'MOTORBIKE_OUT', 'Cổng ra bãi xe máy', 10.7756092, 106.7005294, 'Cổng kiểm soát ra khỏi bãi xe máy', 'exit', FALSE, 8, FALSE, TRUE, 24, FALSE, TRUE, TRUE),
+
+('Khu vực loading dock', 'LOADING_DOCK', 'Khu vực bốc dỡ hàng hóa', 10.7755992, 106.7004994, 'Khu vực dành cho xe tải bốc dỡ hàng', 'checkpoint', TRUE, NULL, FALSE, FALSE, 4, TRUE, TRUE, TRUE),
+('Khu vực rửa xe', 'CAR_WASH', 'Khu dịch vụ rửa xe', 10.7755892, 106.7005094, 'Khu vực dịch vụ rửa xe cho nhân viên', 'monitoring_zone', FALSE, NULL, FALSE, FALSE, 2, FALSE, FALSE, TRUE),
+
+-- ========================================
+-- KHU VỰC ĐẶC BIỆT VÀ SỰ KIỆN
+-- ========================================
+
+-- Khu vực tổ chức sự kiện
+('Hội trường lớn', 'MAIN_AUDITORIUM', 'Hội trường chính tầng 4', 10.7756792, 106.7003994, 'Hội trường lớn tổ chức sự kiện, hội nghị', 'monitoring_zone', TRUE, NULL, FALSE, FALSE, 8, TRUE, TRUE, TRUE),
+('Phòng triển lãm', 'EXHIBITION_HALL', 'Phòng triển lãm tầng 2', 10.7756692, 106.7004094, 'Không gian triển lãm sản phẩm', 'monitoring_zone', FALSE, NULL, FALSE, FALSE, 12, TRUE, TRUE, TRUE),
+
+-- Khu vực VIP đặc biệt
+('Phòng chờ VIP', 'VIP_LOUNGE', 'Phòng chờ VIP tầng 12', 10.7756992, 106.7003794, 'Phòng chờ dành cho khách VIP', 'restricted', TRUE, NULL, FALSE, FALSE, 6, TRUE, TRUE, TRUE),
+('Bãi đỗ xe VIP ngoài trời', 'VIP_OUTDOOR_PARKING', 'Bãi đỗ VIP khu vực ngoài trời', 10.7757092, 106.7003694, 'Bãi đỗ xe cao cấp dành cho khách VIP', 'parking', TRUE, 9, FALSE, FALSE, 8, TRUE, TRUE, TRUE),
+('Cổng vào VIP ngoài trời', 'VIP_OUTDOOR_IN', 'Cổng vào bãi VIP ngoài trời', 10.7757192, 106.7003594, 'Cổng kiểm soát vào bãi VIP ngoài trời', 'entrance', TRUE, 9, TRUE, FALSE, 8, TRUE, TRUE, TRUE),
+('Cổng ra VIP ngoài trời', 'VIP_OUTDOOR_OUT', 'Cổng ra bãi VIP ngoài trời', 10.7757292, 106.7003494, 'Cổng kiểm soát ra khỏi bãi VIP ngoài trời', 'exit', TRUE, 9, FALSE, TRUE, 8, TRUE, TRUE, TRUE),
+
+-- ========================================
+-- KHU VỰC BẢO TRÌ VÀ KỸ THUẬT
+-- ========================================
+
+-- Khu vực kỹ thuật
+('Phòng điện chính', 'MAIN_ELECTRICAL', 'Phòng điện chính tầng hầm', 10.7755792, 106.7004594, 'Phòng điện và hệ thống kỹ thuật chính', 'restricted', TRUE, NULL, FALSE, FALSE, 1, TRUE, TRUE, TRUE),
+('Phòng máy lạnh trung tâm', 'CENTRAL_AC', 'Phòng máy lạnh tầng mái', 10.7756992, 106.7003594, 'Hệ thống điều hòa trung tâm toà nhà', 'restricted', TRUE, NULL, FALSE, FALSE, 2, TRUE, TRUE, TRUE),
+('Khu vực bảo trì', 'MAINTENANCE_AREA', 'Khu vực bảo trì tầng hầm', 10.7755692, 106.7004694, 'Khu vực công cụ và thiết bị bảo trì', 'restricted', TRUE, NULL, FALSE, FALSE, 4, TRUE, TRUE, TRUE),
+
+-- ========================================
+-- CÁC VỊ TRÍ NGOÀI TÒA NHÀ
+-- ========================================
+
+-- Khu vực xung quanh tòa nhà
+('Lối vào từ đường Nguyễn Trãi', 'NGUYEN_TRAI_ENTRANCE', 'Lối vào chính từ đường Nguyễn Trãi', 10.7757392, 106.7003394, 'Điểm kiểm soát từ đường chính', 'entrance', FALSE, 10, TRUE, FALSE, 1, TRUE, TRUE, TRUE),
+('Lối ra ra đường Nguyễn Trãi', 'NGUYEN_TRAI_EXIT', 'Lối ra chính ra đường Nguyễn Trãi', 10.7757492, 106.7003294, 'Điểm kiểm soát ra đường chính', 'exit', FALSE, 10, FALSE, TRUE, 1, TRUE, TRUE, TRUE),
+
+('Checkpoint cổng bảo vệ', 'SECURITY_GATE', 'Trạm bảo vệ cổng chính', 10.7757592, 106.7003194, 'Trạm kiểm soát an ninh cổng chính', 'checkpoint', TRUE, NULL, FALSE, FALSE, 0.5, TRUE, TRUE, TRUE),
+
+-- Các vị trí backup và dự phòng
+('Khu vực tập kết khẩn cấp', 'EMERGENCY_ASSEMBLY', 'Điểm tập kết khẩn cấp', 10.7757692, 106.7003094, 'Khu vực tập kết trong trường hợp khẩn cấp', 'monitoring_zone', FALSE, NULL, FALSE, FALSE, 4, FALSE, FALSE, TRUE);
+
+-- ========================================
+-- CẬP NHẬT PARENT RELATIONSHIPS
+-- ========================================
+
+-- Cập nhật mối quan hệ cha-con cho các location
+UPDATE locations SET parent_location_id = 1 WHERE code IN ('MAIN_EXIT', 'SECURITY_L1', 'MAIN_LOBBY');
+UPDATE locations SET parent_location_id = 3 WHERE code IN ('PARKING_B1_IN', 'PARKING_B1_OUT');
+UPDATE locations SET parent_location_id = 6 WHERE code IN ('PARKING_B2_IN', 'PARKING_B2_OUT');
+UPDATE locations SET parent_location_id = 24 WHERE code IN ('MOTORBIKE_IN', 'MOTORBIKE_OUT');
+UPDATE locations SET parent_location_id = 19 WHERE code IN ('STAFF_EXIT');
+UPDATE locations SET parent_location_id = 31 WHERE code IN ('VIP_OUTDOOR_IN', 'VIP_OUTDOOR_OUT');
+
+
 ALTER TABLE vehicle_whitelist 
 ADD COLUMN plate_image_path VARCHAR(500) COMMENT 'Đường dẫn ảnh biển số gốc' AFTER contact_email,
 ADD COLUMN plate_image_cropped_path VARCHAR(500) COMMENT 'Đường dẫn ảnh biển số đã cắt' AFTER plate_image_path,

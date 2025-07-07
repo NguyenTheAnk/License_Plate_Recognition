@@ -2,6 +2,7 @@ const db = require('../../db');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
+const Tesseract = require('tesseract.js');
 
 // Configure multer for image uploads
 const storage = multer.diskStorage({
@@ -163,36 +164,17 @@ const createWhitelist = async (req, res) => {
             }
         }
 
-        // Handle uploaded images
+        // Handle uploaded image (field 'image')
         let plateImagePath = null;
-        let plateImageCroppedPath = null;
-        let plateImageProcessedPath = null;
-        let imageMetadata = {};
-
-        if (req.files) {
-            if (req.files.plate_image) {
-                plateImagePath = req.files.plate_image[0].path;
-                imageMetadata.original = {
-                    filename: req.files.plate_image[0].filename,
-                    size: req.files.plate_image[0].size,
-                    mimetype: req.files.plate_image[0].mimetype
-                };
-            }
-            if (req.files.plate_image_cropped) {
-                plateImageCroppedPath = req.files.plate_image_cropped[0].path;
-                imageMetadata.cropped = {
-                    filename: req.files.plate_image_cropped[0].filename,
-                    size: req.files.plate_image_cropped[0].size,
-                    mimetype: req.files.plate_image_cropped[0].mimetype
-                };
-            }
-            if (req.files.plate_image_processed) {
-                plateImageProcessedPath = req.files.plate_image_processed[0].path;
-                imageMetadata.processed = {
-                    filename: req.files.plate_image_processed[0].filename,
-                    size: req.files.plate_image_processed[0].size,
-                    mimetype: req.files.plate_image_processed[0].mimetype
-                };
+        let ocrText = null;
+        if (req.file) {
+            plateImagePath = '/uploads/whitelist/' + req.file.filename;
+            const imagePath = require('path').join(__dirname, '../../public/uploads/whitelist/', req.file.filename);
+            try {
+                const result = await Tesseract.recognize(imagePath, 'eng', { logger: m => {} });
+                ocrText = result.data.text.replace(/\s/g, '').toUpperCase();
+            } catch (err) {
+                ocrText = null;
             }
         }
 
@@ -200,12 +182,11 @@ const createWhitelist = async (req, res) => {
         const [result] = await connection.execute(
             `INSERT INTO vehicle_whitelist (
                 location_id, plate_number, vehicle_id, owner_name, owner_phone, contact_email,
-                plate_image_path, plate_image_cropped_path, plate_image_processed_path,
-                ocr_raw_text, ocr_confidence, ocr_processed_at, image_metadata,
+                plate_image_path, ocr_raw_text,
                 verification_status, verified_plate_number,
                 valid_from, valid_to, description, approval_status,
                 created_by, is_active, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
             [
                 location_id,
                 plate_number,
@@ -214,12 +195,7 @@ const createWhitelist = async (req, res) => {
                 owner_phone || null,
                 contact_email || null,
                 plateImagePath,
-                plateImageCroppedPath,
-                plateImageProcessedPath,
-                ocr_raw_text || null,
-                ocr_confidence || null,
-                ocr_raw_text ? new Date() : null,
-                Object.keys(imageMetadata).length > 0 ? JSON.stringify(imageMetadata) : null,
+                ocrText,
                 verification_status,
                 verified_plate_number || plate_number,
                 valid_from || null,
@@ -281,12 +257,16 @@ const createWhitelist = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: 'Tạo whitelist entry thành công',
-            data: createdEntry[0]
+            message: 'Tạo whitelist thành công',
+            data: {
+                id: result.insertId,
+                ocr_text: ocrText,
+                plate_image_path: plateImagePath
+            }
         });
 
     } catch (error) {
-        console.error('Error creating whitelist entry:', error);
+        console.error('Error creating whitelist:', error);
         
         // Clean up uploaded files if there was an error
         if (req.files) {
@@ -314,7 +294,7 @@ const createWhitelist = async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: 'Lỗi khi tạo whitelist entry',
+            message: 'Lỗi khi tạo whitelist',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
