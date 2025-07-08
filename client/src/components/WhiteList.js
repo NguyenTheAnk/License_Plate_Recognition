@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef  } from 'react';
 import {
-  Container,
   Box,
-  Card,
-  CardContent,
+  Button,
+  TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   Table,
   TableBody,
   TableCell,
@@ -11,72 +14,77 @@ import {
   TableHead,
   TableRow,
   Paper,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
+  IconButton,
+  Typography,
+  Grid,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
   Chip,
   Alert,
+  Snackbar,
   CircularProgress,
+  Card,
+  CardContent,
+  CardActions,
+  Divider,
+  Tooltip,
+  Fab,
+  Modal,
+  Backdrop,
+  Fade,
   Pagination,
   Tabs,
   Tab,
-  Typography,
-  Grid,
-  IconButton,
-  Tooltip,
-  Divider,
   Checkbox,
   Breadcrumbs,
   Avatar,
-  FormHelperText
+  FormHelperText,
+  Container,
+  InputAdornment
 } from '@mui/material';
 import {
   Add as AddIcon,
-  Search as SearchIcon,
-  FilterList as FilterIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Visibility as VisibilityIcon,
-  CheckCircle as CheckCircleIcon,
+  Search as SearchIcon,
+  FilterList as FilterIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  Visibility as ViewIcon,
+  Close as CloseIcon,
+  Save as SaveIcon,
   Cancel as CancelIcon,
-  Event as EventIcon,
-  LocationOn as LocationIcon,
-  DirectionsCar as CarIcon,
-  Person as PersonIcon,
-  Phone as PhoneIcon,
-  Email as EmailIcon,
-  Description as DescriptionIcon,
-  Schedule as ScheduleIcon,
+  Refresh as RefreshIcon,
+  CheckCircle as CheckIcon,
+  Error as ErrorIcon,
   Warning as WarningIcon,
+  Info as InfoIcon,
+  CalendarToday as CalendarIcon,
+  LocationOn as LocationIcon,
+  Person as PersonIcon,
+  Email as EmailIcon,
+  Phone as PhoneIcon,
+  DirectionsCar as CarIcon,
+  Security as SecurityIcon,
+  Settings as SettingsIcon,
+  MoreVert as MoreIcon,
   CheckCircleOutline as CheckCircleOutlineIcon,
   Home as HomeIcon,
   ExpandMore as ExpandMoreIcon,
-  Refresh as RefreshIcon,
+  Event as EventIcon,
+  Description as DescriptionIcon,
+  Schedule as ScheduleIcon,
   Image as ImageIcon
 } from '@mui/icons-material';
-import {
-  FaShieldAlt,
-  FaClock,
-  FaExclamationTriangle,
-  FaPlus,
-  FaSave,
-  FaTimes,
-  FaEdit,
-  FaTrash,
-  FaEye,
-  FaUpload
-} from 'react-icons/fa';
+import { FaUpload, FaDownload, FaEye, FaEdit, FaTrash, FaPlus, FaSearch, FaFilter, FaSync, FaCheck, FaTimes, FaExclamationTriangle, FaInfoCircle, FaCalendarAlt, FaMapMarkerAlt, FaUser, FaEnvelope, FaPhone, FaCar, FaShieldAlt, FaCog, FaEllipsisV, FaClock, FaSave } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
 
 // Import các hàm từ auth.js
-import {
+import { 
+  getToken, 
+  logout,
   fetchDataFromAPI,
   postData,
   editData,
@@ -85,6 +93,46 @@ import {
   handleErrorResponse,
   isUnauthorizedError
 } from '../utils/auth';
+
+// Hàm format ngày từ yyyy-MM-dd sang dd/MM/yyyy
+const formatDateForDisplay = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('vi-VN');
+};
+
+// Hàm format ngày từ dd/MM/yyyy sang yyyy-MM-dd
+const formatDateForInput = (dateString) => {
+  if (!dateString) return '';
+  if (dateString.includes('-') && dateString.length === 10) {
+    return dateString;
+  }
+  if (dateString.includes('/')) {
+    const parts = dateString.split('/');
+    if (parts.length !== 3) return '';
+    const day = parts[0].padStart(2, '0');
+    const month = parts[1].padStart(2, '0');
+    const year = parts[2];
+    return `${year}-${month}-${day}`;
+  }
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  return date.toISOString().split('T')[0];
+};
+
+// Hàm validate ngày dd/MM/yyyy
+const validateDateFormat = (dateString) => {
+  if (!dateString) return true;
+  const regex = /^\d{2}\/\d{2}\/\d{4}$/;
+  if (!regex.test(dateString)) return false;
+  const parts = dateString.split('/');
+  const day = parseInt(parts[0]);
+  const month = parseInt(parts[1]);
+  const year = parseInt(parts[2]);
+  const date = new Date(year, month - 1, day);
+  return date.getDate() === day && date.getMonth() === month - 1 && date.getFullYear() === year;
+};
 
 // Styled Breadcrumb component
 const StyledBreadcrumb = ({ component, href, label, icon, onClick, ...props }) => (
@@ -124,7 +172,12 @@ const WhiteList = () => {
   const [statistics, setStatistics] = useState({});
   const [activeTab, setActiveTab] = useState(0);
   const [selectedItems, setSelectedItems] = useState([]);
-
+  const [showDateInput, setShowDateInput] = useState({
+    valid_from: false,
+    valid_to: false
+  });
+  const validFromDateRef = useRef(null);
+  const validToDateRef = useRef(null);
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -166,6 +219,10 @@ const WhiteList = () => {
 
   // Form validation
   const [formErrors, setFormErrors] = useState({});
+  
+  // Date picker states
+  const [showDatePicker, setShowDatePicker] = useState({ valid_from: false, valid_to: false });
+  const [tempDateValue, setTempDateValue] = useState({ valid_from: '', valid_to: '' });
 
   // Get token from localStorage
   const getToken = () => {
@@ -194,42 +251,29 @@ const WhiteList = () => {
   // Validate form
   const validateForm = () => {
     const errors = {};
-    
     if (!formData.location_id) {
       errors.location_id = 'Vui lòng chọn khu vực';
     }
-    
     if (!formData.plate_number) {
       errors.plate_number = 'Vui lòng nhập biển số xe';
-    } 
-    else {
-      // Validate Vietnamese license plate format
-      const plateRegex = /^[0-9]{2}[A-Z]{1,2}-[0-9]{3,4}\.[0-9]{2}$|^[0-9]{2}[A-Z]{1,2}[0-9]{3,4}$/;
-      if (!plateRegex.test(formData.plate_number)) {
-        errors.plate_number = 'Định dạng biển số không hợp lệ';
-      }
     }
-
     if (formData.contact_email) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(formData.contact_email)) {
         errors.contact_email = 'Định dạng email không hợp lệ';
       }
     }
-
     if (formData.owner_phone) {
       const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
       if (!phoneRegex.test(formData.owner_phone.replace(/\s+/g, ''))) {
         errors.owner_phone = 'Định dạng số điện thoại không hợp lệ';
       }
     }
-
     if (formData.valid_from && formData.valid_to) {
       if (new Date(formData.valid_from) > new Date(formData.valid_to)) {
         errors.valid_to = 'Ngày kết thúc phải sau ngày bắt đầu';
       }
     }
-
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -473,7 +517,25 @@ const WhiteList = () => {
       }
     }
   };
+useEffect(() => {
+  const handleClickOutside = (event) => {
+    // Kiểm tra nếu click bên ngoài date input overlay
+    const target = event.target;
+    const isDateInput = target.closest('[data-date-overlay]');
+    const isCalendarIcon = target.closest('button[title="Chọn ngày"]');
+    
+    if (!isDateInput && !isCalendarIcon) {
+      setShowDateInput({ valid_from: false, valid_to: false });
+    }
+  };
 
+  if (showDateInput.valid_from || showDateInput.valid_to) {
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }
+}, [showDateInput]);
   const handleEdit = (item) => {
     setSelectedItem(item);
     setFormData({
@@ -511,25 +573,85 @@ const WhiteList = () => {
   };
 
   const resetForm = () => {
-    setFormData({
-      location_id: '',
-      plate_number: '',
-      vehicle_id: '',
-      owner_name: '',
-      owner_phone: '',
-      contact_email: '',
-      valid_from: '',
-      valid_to: '',
-      description: '',
-      approval_status: 'approved'
-    });
-    setSelectedItem(null);
-    setImageFile(null);
-    setImagePreview(null);
-    setOcrResult('');
-    setFormErrors({});
-  };
+  setFormData({
+    location_id: '',
+    plate_number: '',
+    vehicle_id: '',
+    owner_name: '',
+    owner_phone: '',
+    contact_email: '',
+    valid_from: '',
+    valid_to: '',
+    description: '',
+    approval_status: 'approved'
+  });
+  setSelectedItem(null);
+  setImageFile(null);
+  setImagePreview(null);
+  setOcrResult('');
+  setFormErrors({});
+  setShowDateInput({ valid_from: false, valid_to: false }); // Thêm dòng này
+};
+const handleDateIconClickBackup = (field) => {
+  // Tạo date input tạm thời và trigger click
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.value = formData[field] || '';
+  
+  // Style để ẩn input
+  input.style.position = 'absolute';
+  input.style.top = '-9999px';
+  input.style.left = '-9999px';
+  input.style.opacity = '0';
+  input.style.pointerEvents = 'none';
+  
+  // Thêm vào DOM
+  document.body.appendChild(input);
+  
+  // Xử lý khi chọn ngày
+  input.addEventListener('change', (e) => {
+    handleDateChange(field, e.target.value);
+    document.body.removeChild(input);
+  });
+  
+  // Xử lý khi hủy (không chọn gì)
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (document.body.contains(input)) {
+        document.body.removeChild(input);
+      }
+    }, 100);
+  });
+  
+  // Focus và trigger date picker
+  input.focus();
+  input.click();
+};
 
+const handleDateIconClickWithFallback = (field) => {
+  try {
+    // Thử method showPicker() trước
+    if (field === 'valid_from' && validFromDateRef.current) {
+      if (validFromDateRef.current.showPicker) {
+        validFromDateRef.current.showPicker();
+      } else {
+        validFromDateRef.current.focus();
+        validFromDateRef.current.click();
+      }
+    } else if (field === 'valid_to' && validToDateRef.current) {
+      if (validToDateRef.current.showPicker) {
+        validToDateRef.current.showPicker();
+      } else {
+        validToDateRef.current.focus();
+        validToDateRef.current.click();
+      }
+    }
+  } catch (error) {
+    // Fallback nếu showPicker() không được hỗ trợ
+    console.log('showPicker() not supported, using fallback method');
+    handleDateIconClickBackup(field);
+  }
+};
   const handleRefresh = () => {
     setFilters({
       location_id: '',
@@ -588,14 +710,31 @@ const WhiteList = () => {
     return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
   };
 
-  const handlePageChange = (event, page) => {
-    setCurrentPage(page);
-  };
+  const handleDateChange = (field, value) => {
+  setFormData(prev => ({ ...prev, [field]: value }));
+};
 
   const handleItemsPerPageChange = (event) => {
     setItemsPerPage(parseInt(event.target.value));
     setCurrentPage(1);
   };
+
+  // Date picker handlers
+  const handleDateIconClick = (field) => {
+  if (field === 'valid_from' && validFromDateRef.current) {
+    validFromDateRef.current.showPicker(); // Mở date picker trực tiếp
+  } else if (field === 'valid_to' && validToDateRef.current) {
+    validToDateRef.current.showPicker(); // Mở date picker trực tiếp
+  }
+};
+const handleDateInputChange = (field, value) => {
+  if (value) {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  }
+  // Tự động ẩn date input sau khi chọn
+  setShowDateInput(prev => ({ ...prev, [field]: false }));
+};
+
 
   // Pagination helper
   function getPaginationItems(current, total) {
@@ -1270,7 +1409,7 @@ const WhiteList = () => {
                 }
               }}>
                 <CardContent sx={{ p: 3 }}>
-                  <CheckCircleIcon sx={{ fontSize: 48, color: '#4caf50', mb: 2 }} />
+                                      <CheckIcon sx={{ fontSize: 48, color: '#4caf50', mb: 2 }} />
                   <Typography variant="h3" sx={{ fontWeight: 700, color: '#4caf50', mb: 1 }}>
                     {statistics.total_entries || 0}
                   </Typography>
@@ -1437,9 +1576,8 @@ const WhiteList = () => {
                   fullWidth
                   required
                   label="Biển số xe"
-                  placeholder="Nhập biển số xe"
                   value={formData.plate_number}
-                  onChange={(e) => setFormData({...formData, plate_number: e.target.value})}
+                  disabled
                   error={!!formErrors.plate_number}
                   helperText={formErrors.plate_number}
                   sx={{
@@ -1519,42 +1657,132 @@ const WhiteList = () => {
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Có hiệu lực từ"
-                  type="date"
-                  InputLabelProps={{ shrink: true }}
-                  value={formData.valid_from}
-                  onChange={(e) => setFormData({...formData, valid_from: e.target.value})}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      '&:hover fieldset': { borderColor: '#1976d2' },
-                      '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Có hiệu lực đến"
-                  type="date"
-                  InputLabelProps={{ shrink: true }}
-                  value={formData.valid_to}
-                  onChange={(e) => setFormData({...formData, valid_to: e.target.value})}
-                  error={!!formErrors.valid_to}
-                  helperText={formErrors.valid_to}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      '&:hover fieldset': { borderColor: '#1976d2' },
-                      '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                    }
-                  }}
-                />
-              </Grid>
+                <Grid item xs={12} md={6}>
+  <Box position="relative">
+    <TextField
+      fullWidth
+      label="Có hiệu lực từ"
+      placeholder="dd/MM/yyyy"
+      value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
+      onChange={(e) => {
+        const value = e.target.value;
+        if (value === '' || validateDateFormat(value)) {
+          const formattedValue = formatDateForInput(value);
+          setFormData({...formData, valid_from: formattedValue});
+        }
+      }}
+      InputProps={{
+        endAdornment: (
+          <InputAdornment position="end">
+            <IconButton
+              onClick={() => handleDateIconClick('valid_from')}
+              sx={{ 
+                color: '#1976d2',
+                '&:hover': { 
+                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }}
+              title="Chọn ngày"
+            >
+              <CalendarIcon />
+            </IconButton>
+          </InputAdornment>
+        ),
+      }}
+      sx={{
+        '& .MuiOutlinedInput-root': {
+          borderRadius: 2,
+          '&:hover fieldset': { borderColor: '#1976d2' },
+          '&.Mui-focused fieldset': { borderColor: '#1976d2' }
+        }
+      }}
+    />
+    
+    {/* Date Input ẩn */}
+    <input
+      ref={validFromDateRef}
+      type="date"
+      value={formData.valid_from || ''}
+      onChange={(e) => handleDateChange('valid_from', e.target.value)}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        opacity: 0,
+        pointerEvents: 'none',
+        zIndex: -1
+      }}
+    />
+  </Box>
+</Grid>
+                <Grid item xs={12} md={6}>
+  <Box position="relative">
+    <TextField
+      fullWidth
+      label="Có hiệu lực đến"
+      placeholder="dd/MM/yyyy"
+      value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
+      onChange={(e) => {
+        const value = e.target.value;
+        if (value === '' || validateDateFormat(value)) {
+          const formattedValue = formatDateForInput(value);
+          setFormData({...formData, valid_to: formattedValue});
+        }
+      }}
+      error={!!formErrors.valid_to}
+      helperText={formErrors.valid_to}
+      InputProps={{
+        endAdornment: (
+          <InputAdornment position="end">
+            <IconButton
+              onClick={() => handleDateIconClick('valid_to')}
+              sx={{ 
+                color: '#1976d2',
+                '&:hover': { 
+                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }}
+              title="Chọn ngày"
+            >
+              <CalendarIcon />
+            </IconButton>
+          </InputAdornment>
+        ),
+      }}
+      sx={{
+        '& .MuiOutlinedInput-root': {
+          borderRadius: 2,
+          '&:hover fieldset': { borderColor: '#1976d2' },
+          '&.Mui-focused fieldset': { borderColor: '#1976d2' }
+        }
+      }}
+    />
+    
+    {/* Date Input ẩn */}
+    <input
+      ref={validToDateRef}
+      type="date"
+      value={formData.valid_to || ''}
+      onChange={(e) => handleDateChange('valid_to', e.target.value)}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        opacity: 0,
+        pointerEvents: 'none',
+        zIndex: -1
+      }}
+    />
+  </Box>
+</Grid>
               <Grid item xs={12}>
                 <TextField
                   fullWidth
@@ -2185,6 +2413,8 @@ const WhiteList = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      
     </Box>
   );
 };

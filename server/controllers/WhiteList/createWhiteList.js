@@ -79,11 +79,11 @@ const createWhitelist = async (req, res) => {
             verified_plate_number
         } = req.body;
 
-        // Validation
-        if (!location_id || !plate_number) {
+        // Validation: chỉ kiểm tra location_id (không kiểm tra plate_number hợp lệ)
+        if (!location_id) {
             return res.status(400).json({
                 success: false,
-                message: 'location_id và plate_number là bắt buộc'
+                message: 'location_id là bắt buộc'
             });
         }
 
@@ -284,6 +284,16 @@ const createWhitelist = async (req, res) => {
             ]
         );
 
+        // Format valid_from, valid_to sang dd/mm/yyyy nếu có
+        const formatDate = (d) => {
+            if (!d) return null;
+            const date = new Date(d);
+            if (isNaN(date)) return null;
+            return date.toLocaleDateString('vi-VN');
+        };
+        const valid_from_text = formatDate(valid_from);
+        const valid_to_text = formatDate(valid_to);
+
         res.status(201).json({
             success: true,
             message: 'Tạo whitelist thành công',
@@ -291,7 +301,9 @@ const createWhitelist = async (req, res) => {
                 id: result.insertId,
                 ocr_text: ocrText,
                 plate_image_path: plateImagePath,
-                ocr_details: ocrDetails
+                ocr_details: ocrDetails,
+                valid_from_text,
+                valid_to_text
             }
         });
 
@@ -364,12 +376,12 @@ const bulkCreateWhitelist = async (req, res) => {
                 const { location_id, plate_number, vehicle_id, owner_name, owner_phone, contact_email, valid_from, valid_to, description } = entry;
 
                 try {
-                    // Basic validation
-                    if (!location_id || !plate_number) {
+                    // Basic validation: chỉ cần location_id
+                    if (!location_id) {
                         results.errors.push({
                             index: i,
                             entry,
-                            error: 'location_id và plate_number là bắt buộc'
+                            error: 'location_id là bắt buộc'
                         });
                         continue;
                     }
@@ -433,12 +445,23 @@ const bulkCreateWhitelist = async (req, res) => {
                         ]
                     );
 
+                    // Format valid_from, valid_to sang dd/mm/yyyy nếu có
+                    const formatDate = (d) => {
+                        if (!d) return null;
+                        const date = new Date(d);
+                        if (isNaN(date)) return null;
+                        return date.toLocaleDateString('vi-VN');
+                    };
+                    const valid_from_text = formatDate(valid_from);
+                    const valid_to_text = formatDate(valid_to);
                     results.created.push({
                         index: i,
                         id: result.insertId,
                         location_id,
                         plate_number,
-                        ...entry
+                        ...entry,
+                        valid_from_text,
+                        valid_to_text
                     });
 
                 } catch (entryError) {
