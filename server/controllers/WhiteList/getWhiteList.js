@@ -92,6 +92,7 @@ const getAllWhitelist = async (req, res) => {
                    w.valid_from, w.valid_to, w.description, 
                    w.approval_status, w.approved_by, w.approved_at,
                    w.is_active, w.created_by, w.created_at, w.updated_at,
+                   w.plate_image_path, w.detected_plate_image, w.ocr_raw_text, w.ocr_processed_at,
                    l.name as location_name, 
                    l.code as location_code,
                    l.zone_type,
@@ -102,7 +103,11 @@ const getAllWhitelist = async (req, res) => {
                        WHEN w.valid_from IS NOT NULL AND w.valid_from > CURDATE() THEN 'future'
                        WHEN w.valid_to IS NOT NULL AND w.valid_to < CURDATE() THEN 'expired'
                        ELSE 'valid'
-                   END as current_status
+                   END as current_status,
+                   CASE 
+                       WHEN w.plate_image_path IS NOT NULL THEN 1 
+                       ELSE 0 
+                   END as has_images
             FROM vehicle_whitelist w
             LEFT JOIN locations l ON w.location_id = l.id
             LEFT JOIN users u1 ON w.created_by = u1.id

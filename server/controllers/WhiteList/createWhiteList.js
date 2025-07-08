@@ -176,7 +176,7 @@ const createWhitelist = async (req, res) => {
             try {
                 // Sử dụng module Python tích hợp với YOLOv5 + PaddleOCR
                 const pythonScript = path.join(__dirname, 'detect_plate.py');
-                const result = execSync(`python "${pythonScript}" --image "${imagePath}"`).toString();
+                const result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`).toString();
                 
                 // Lấy dòng JSON cuối cùng
                 const lines = result.trim().split('\n');
@@ -190,7 +190,8 @@ const createWhitelist = async (req, res) => {
                         confidence: ocrResult.confidence,
                         bbox: ocrResult.bbox,
                         detections: ocrResult.detections || [],
-                        message: ocrResult.message
+                        message: ocrResult.message,
+                        detected_plate_image: ocrResult.detected_plate_image
                     };
                 } else {
                     ocrText = '';
@@ -212,9 +213,9 @@ const createWhitelist = async (req, res) => {
         const [result] = await connection.execute(
             `INSERT INTO vehicle_whitelist (
                 location_id, plate_number, vehicle_id, owner_name, owner_phone, contact_email,
-                plate_image_path, ocr_raw_text, verification_status, verified_plate_number,
+                plate_image_path, detected_plate_image, ocr_raw_text, verification_status, verified_plate_number,
                 valid_from, valid_to, description, approval_status, created_by, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 location_id,
                 plate_number,
@@ -223,6 +224,7 @@ const createWhitelist = async (req, res) => {
                 owner_phone || null,
                 contact_email || null,
                 plateImagePath,
+                ocrDetails?.detected_plate_image || null,
                 ocrText,
                 verification_status || 'pending',
                 verified_plate_number || null,
@@ -301,6 +303,7 @@ const createWhitelist = async (req, res) => {
                 id: result.insertId,
                 ocr_text: ocrText,
                 plate_image_path: plateImagePath,
+                detected_plate_image: ocrDetails?.detected_plate_image || null,
                 ocr_details: ocrDetails,
                 valid_from_text,
                 valid_to_text
@@ -791,7 +794,7 @@ const ocrPreview = async (req, res) => {
       const { execSync } = require('child_process');
       let result, stderr = '';
       try {
-        result = execSync(`python "${pythonScript}" --image "${imagePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
       } catch (err) {
         stderr = err.stderr ? err.stderr.toString() : '';
         console.error('OCR Python stderr:', stderr);
@@ -831,6 +834,7 @@ const ocrPreview = async (req, res) => {
       res.json({ 
         success: true, 
         ocr_text: ocrText,
+        detected_plate_image: ocrResult?.detected_plate_image || null,
         method: ocrResult?.method || 'unknown',
         confidence: ocrResult?.confidence || null,
         bbox: ocrResult?.bbox || null,
@@ -840,6 +844,7 @@ const ocrPreview = async (req, res) => {
       res.json({ 
         success: false, 
         ocr_text: fallbackText, 
+        detected_plate_image: ocrResult?.detected_plate_image || null,
         method: ocrResult?.method || 'failed',
         message: ocrMessage || 'Không nhận diện được ký tự. Hãy kiểm tra lại ảnh hoặc model.' 
       });

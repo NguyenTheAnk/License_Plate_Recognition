@@ -13,7 +13,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   IconButton,
   Typography,
   Grid,
@@ -23,68 +22,38 @@ import {
   MenuItem,
   Chip,
   Alert,
-  Snackbar,
   CircularProgress,
   Card,
   CardContent,
-  CardActions,
-  Divider,
   Tooltip,
-  Fab,
-  Modal,
-  Backdrop,
-  Fade,
-  Pagination,
   Tabs,
   Tab,
   Checkbox,
   Breadcrumbs,
   Avatar,
   FormHelperText,
-  Container,
   InputAdornment
 } from '@mui/material';
 import {
   Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Search as SearchIcon,
-  FilterList as FilterIcon,
-  Download as DownloadIcon,
-  Upload as UploadIcon,
-  Visibility as ViewIcon,
-  Close as CloseIcon,
-  Save as SaveIcon,
-  Cancel as CancelIcon,
-  Refresh as RefreshIcon,
   CheckCircle as CheckIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
-  Info as InfoIcon,
   CalendarToday as CalendarIcon,
   LocationOn as LocationIcon,
   Person as PersonIcon,
-  Email as EmailIcon,
   Phone as PhoneIcon,
   DirectionsCar as CarIcon,
-  Security as SecurityIcon,
-  Settings as SettingsIcon,
-  MoreVert as MoreIcon,
   CheckCircleOutline as CheckCircleOutlineIcon,
   Home as HomeIcon,
   ExpandMore as ExpandMoreIcon,
-  Event as EventIcon,
   Description as DescriptionIcon,
   Schedule as ScheduleIcon,
   Image as ImageIcon
 } from '@mui/icons-material';
-import { FaUpload, FaDownload, FaEye, FaEdit, FaTrash, FaPlus, FaSearch, FaFilter, FaSync, FaCheck, FaTimes, FaExclamationTriangle, FaInfoCircle, FaCalendarAlt, FaMapMarkerAlt, FaUser, FaEnvelope, FaPhone, FaCar, FaShieldAlt, FaCog, FaEllipsisV, FaClock, FaSave } from 'react-icons/fa';
+import { FaUpload, FaEye, FaEdit, FaTrash, FaPlus,  FaTimes, FaExclamationTriangle,  FaShieldAlt, FaClock, FaSave } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
 
 // Import các hàm từ auth.js
 import { 
-  getToken, 
-  logout,
   fetchDataFromAPI,
   postData,
   editData,
@@ -211,6 +180,7 @@ const WhiteList = () => {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [ocrResult, setOcrResult] = useState('');
+  const [detectedPlateImage, setDetectedPlateImage] = useState(null);
 
   // Error handling
   const [error, setError] = useState('');
@@ -220,9 +190,6 @@ const WhiteList = () => {
   // Form validation
   const [formErrors, setFormErrors] = useState({});
   
-  // Date picker states
-  const [showDatePicker, setShowDatePicker] = useState({ valid_from: false, valid_to: false });
-  const [tempDateValue, setTempDateValue] = useState({ valid_from: '', valid_to: '' });
 
   // Get token from localStorage
   const getToken = () => {
@@ -389,11 +356,19 @@ const WhiteList = () => {
         if (data.success && data.ocr_text) {
           setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
           setOcrResult(data.ocr_text);
+          // Lưu ảnh biển số đã phát hiện nếu có
+          if (data.detected_plate_image) {
+            setDetectedPlateImage(data.detected_plate_image);
+          } else {
+            setDetectedPlateImage(null);
+          }
         } else if (data.message) {
           setOcrResult('');
+          setDetectedPlateImage(null);
           setError('Nhận diện ký tự thất bại: ' + data.message);
         } else {
           setOcrResult('');
+          setDetectedPlateImage(null);
           setError('Không nhận diện được ký tự biển số từ ảnh.');
         }
       } catch (err) {
@@ -410,6 +385,7 @@ const WhiteList = () => {
       setImageFile(null);
       setImagePreview(null);
       setOcrResult('');
+      setDetectedPlateImage(null);
     }
   };
 
@@ -589,6 +565,7 @@ useEffect(() => {
   setImageFile(null);
   setImagePreview(null);
   setOcrResult('');
+  setDetectedPlateImage(null);
   setFormErrors({});
   setShowDateInput({ valid_from: false, valid_to: false }); // Thêm dòng này
 };
@@ -1113,6 +1090,7 @@ const handleDateInputChange = (field, value) => {
                         />
                       </TableCell>
                       <TableCell>Biển số</TableCell>
+                      <TableCell>Ảnh biển số</TableCell>
                       <TableCell>Khu vực</TableCell>
                       <TableCell>Chủ xe</TableCell>
                       <TableCell>Thời gian hiệu lực</TableCell>
@@ -1124,7 +1102,7 @@ const handleDateInputChange = (field, value) => {
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                           <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
                             <CircularProgress size={40} />
                             <Typography variant="body2" color="text.secondary">
@@ -1135,7 +1113,7 @@ const handleDateInputChange = (field, value) => {
                       </TableRow>
                     ) : whitelist.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                           <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
                             <CarIcon sx={{ fontSize: 48, color: '#ccc' }} />
                             <Typography variant="h6" color="text.secondary">
@@ -1191,6 +1169,68 @@ const handleDateInputChange = (field, value) => {
                                 )}
                               </Box>
                             </Box>
+                          </TableCell>
+                          <TableCell>
+                            {item.detected_plate_image ? (
+                              <Box
+                                component="img"
+                                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`}
+                                alt="Ảnh biển số"
+                                sx={{
+                                  width: 60,
+                                  height: 40,
+                                  objectFit: 'cover',
+                                  borderRadius: 1,
+                                  border: '1px solid #e0e0e0',
+                                  cursor: 'pointer',
+                                  transition: 'transform 0.2s ease',
+                                  '&:hover': {
+                                    transform: 'scale(1.1)',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                                  }
+                                }}
+                                onClick={() => {
+                                  window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`, '_blank');
+                                }}
+                              />
+                            ) : item.plate_image_path ? (
+                              <Box
+                                component="img"
+                                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`}
+                                alt="Ảnh gốc"
+                                sx={{
+                                  width: 60,
+                                  height: 40,
+                                  objectFit: 'cover',
+                                  borderRadius: 1,
+                                  border: '1px solid #e0e0e0',
+                                  cursor: 'pointer',
+                                  transition: 'transform 0.2s ease',
+                                  '&:hover': {
+                                    transform: 'scale(1.1)',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                                  }
+                                }}
+                                onClick={() => {
+                                  window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`, '_blank');
+                                }}
+                              />
+                            ) : (
+                              <Box
+                                sx={{
+                                  width: 60,
+                                  height: 40,
+                                  backgroundColor: '#f5f5f5',
+                                  borderRadius: 1,
+                                  border: '1px solid #e0e0e0',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                              >
+                                <ImageIcon sx={{ fontSize: 20, color: '#ccc' }} />
+                              </Box>
+                            )}
                           </TableCell>
                           <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -1846,6 +1886,63 @@ const handleDateInputChange = (field, value) => {
                     >
                       Xóa ảnh
                     </Button>
+                  </Box>
+                )}
+                
+                {/* Hiển thị thông tin OCR và ảnh phát hiện */}
+                {ocrResult && (
+                  <Box mt={2} p={2} sx={{ 
+                    backgroundColor: '#f8f9fa', 
+                    borderRadius: 2, 
+                    border: '1px solid #e9ecef' 
+                  }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+                      Kết quả nhận diện biển số:
+                    </Typography>
+                    <Typography variant="body2" sx={{ 
+                      backgroundColor: '#e3f2fd', 
+                      p: 1, 
+                      borderRadius: 1, 
+                      fontWeight: 600,
+                      color: '#1565c0'
+                    }}>
+                      {ocrResult}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#666', mt: 1, display: 'block' }}>
+                      * Hệ thống đã được cải thiện để nhận diện dấu chấm (.) trong biển số
+                    </Typography>
+                  </Box>
+                )}
+                
+                {detectedPlateImage && (
+                  <Box mt={2} p={2} sx={{ 
+                    backgroundColor: '#f8f9fa', 
+                    borderRadius: 2, 
+                    border: '1px solid #e9ecef' 
+                  }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+                      Ảnh biển số đã phát hiện:
+                    </Typography>
+                    <Box
+                      component="img"
+                      src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`}
+                      alt="Ảnh biển số phát hiện"
+                      sx={{
+                        maxWidth: '100%',
+                        maxHeight: 150,
+                        borderRadius: 4,
+                        border: '2px solid #1976d2',
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s ease',
+                        '&:hover': {
+                          transform: 'scale(1.05)',
+                          boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+                        }
+                      }}
+                      onClick={() => {
+                        window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`, '_blank');
+                      }}
+                    />
                   </Box>
                 )}
               </Grid>

@@ -8,6 +8,7 @@ import torch
 from pathlib import Path
 from paddleocr import PaddleOCR
 import re
+import time
 
 # Cấu hình encoding cho stdout
 if sys.platform.startswith('win'):
@@ -76,11 +77,22 @@ def preprocess_variants(plate_img):
     # 7. Median blur (loại bỏ noise)
     blur = cv2.medianBlur(enhanced3, 3)
     variants.append((blur, 'median_blur'))
+    # 8. Morphological operations để làm rõ dấu chấm
+    kernel_morph = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
+    morph = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel_morph)
+    morph3 = cv2.cvtColor(morph, cv2.COLOR_GRAY2BGR)
+    variants.append((morph3, 'morphology'))
+    # 9. Gaussian blur nhẹ để làm mịn
+    gaussian = cv2.GaussianBlur(enhanced3, (3,3), 0)
+    variants.append((gaussian, 'gaussian_blur'))
+    # 10. Bilateral filter để giữ edge
+    bilateral = cv2.bilateralFilter(enhanced3, 9, 75, 75)
+    variants.append((bilateral, 'bilateral'))
     return variants
 
 def postprocess_text(text):
-    # Chỉ giữ lại ký tự hợp lệ cho biển số VN: A-Z, 0-9, dấu gạch ngang, khoảng trắng
-    allowed = re.compile(r'[^A-Z0-9\- ]')
+    # Chỉ giữ lại ký tự hợp lệ cho biển số VN: A-Z, 0-9, dấu gạch ngang, dấu chấm, khoảng trắng
+    allowed = re.compile(r'[^A-Z0-9\-\. ]')
     text = text.upper()
     text = allowed.sub('', text)
     # Loại bỏ khoảng trắng dư thừa
@@ -92,6 +104,8 @@ def recognize_plate_paddleocr_multi(plate_img, ocr):
     best_text = ''
     best_score = 0
     best_variant = ''
+    print(f"[OCR] Processing {len(variants)} variants...")
+    
     for img, name in variants:
         temp_crop_path = f'temp_plate_crop_{name}.jpg'
         cv2.imwrite(temp_crop_path, img)
@@ -100,6 +114,7 @@ def recognize_plate_paddleocr_multi(plate_img, ocr):
         finally:
             if os.path.exists(temp_crop_path):
                 os.remove(temp_crop_path)
+        
         texts = []
         if result and len(result) > 0:
             for line in result:
@@ -107,14 +122,20 @@ def recognize_plate_paddleocr_multi(plate_img, ocr):
                     for word in line:
                         if word and len(word) > 1:
                             texts.append(word[1][0])
+        
         joined = ' '.join(texts)
         processed = postprocess_text(joined)
-        # Đánh giá: số ký tự hợp lệ (A-Z, 0-9)
-        score = len(re.findall(r'[A-Z0-9]', processed))
+        # Đánh giá: số ký tự hợp lệ (A-Z, 0-9, dấu chấm)
+        score = len(re.findall(r'[A-Z0-9\.]', processed))
+        
+        print(f"[OCR] Variant '{name}': raw='{joined}', processed='{processed}', score={score}")
+        
         if score > best_score:
             best_score = score
             best_text = processed
             best_variant = name
+    
+    print(f"[OCR] Best variant: '{best_variant}' with score {best_score}, text: '{best_text}'")
     return best_text, best_variant, best_score
 
 def recognize_plate_paddleocr(plate_img):
@@ -172,6 +193,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', required=True, help='Path to input image')
     parser.add_argument('--yolo-weights', default=None, help='Path to YOLOv5 weights (.pt)')
+    parser.add_argument('--save-crop', action='store_true', help='Save detected plate crop image')
     args = parser.parse_args()
     try:
         # Đường dẫn mặc định đến model
@@ -189,14 +211,21 @@ def main():
         # Phát hiện biển số
         print("Detecting license plate...")
         plate_img, bbox, orig_img = detect_plate_yolov5(args.image, model)
+        detected_plate_image = None
+        
         if plate_img is not None and plate_img.size > 0:
             print("License plate detected, recognizing characters...")
             text = recognize_plate_paddleocr(plate_img)
             if text and text.strip():
+                # Lưu ảnh biển số đã phát hiện nếu được yêu cầu
+                if args.save_crop:
+                    detected_plate_image = save_detected_plate_image(plate_img, args.image)
+                
                 print(json.dumps({
                     'success': True, 
                     'text': text, 
                     'bbox': bbox,
+                    'detected_plate_image': detected_plate_image,
                     'method': 'yolov5_detection_paddleocr_recognition'
                 }))
                 return
@@ -210,6 +239,7 @@ def main():
                 'success': True,
                 'text': fallback_text,
                 'bbox': None,
+                'detected_plate_image': None,
                 'method': 'full_image_paddleocr_recognition',
                 'message': 'No license plate detected, using full image recognition.'
             }))
@@ -220,6 +250,28 @@ def main():
             }))
     except Exception as e:
         print(json.dumps({'success': False, 'message': str(e)}))
+
+def save_detected_plate_image(plate_img, original_image_path):
+    """Lưu ảnh biển số đã phát hiện"""
+    try:
+        # Tạo thư mục lưu ảnh biển số đã phát hiện
+        crop_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../public/uploads/whitelist/detected_plates/'))
+        os.makedirs(crop_dir, exist_ok=True)
+        
+        # Tạo tên file dựa trên ảnh gốc
+        original_filename = os.path.basename(original_image_path)
+        name_without_ext = os.path.splitext(original_filename)[0]
+        crop_filename = f"detected_{name_without_ext}_{int(time.time())}.jpg"
+        crop_path = os.path.join(crop_dir, crop_filename)
+        
+        # Lưu ảnh biển số đã phát hiện
+        cv2.imwrite(crop_path, plate_img)
+        
+        # Trả về đường dẫn tương đối
+        return f'/uploads/whitelist/detected_plates/{crop_filename}'
+    except Exception as e:
+        print(f"Error saving detected plate image: {e}")
+        return None
 
 def load_yolo_model(weights_path):
     try:
