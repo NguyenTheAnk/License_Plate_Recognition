@@ -339,7 +339,7 @@ const WhiteList = () => {
       try {
         const token = getToken();
         const formDataToSend = new FormData();
-        formDataToSend.append('plate_image', file);
+        formDataToSend.append('image', file);
         const data = await uploadImage('/api/whitelist/ocr-preview', formDataToSend, token);
         console.log('Kết quả nhận diện ký tự biển số:', data);
         if (data.success && data.ocr_text) {
@@ -388,7 +388,7 @@ const WhiteList = () => {
               formDataToSend.append(key, value);
             }
           });
-          formDataToSend.append('plate_image', imageFile);
+          formDataToSend.append('image', imageFile);
           response = await uploadImage(`/api/whitelist/${selectedItem.id}`, formDataToSend, token);
         } else {
           response = await editData(`/api/whitelist/${selectedItem.id}`, formData, token);
@@ -403,7 +403,7 @@ const WhiteList = () => {
               formDataToSend.append(key, value);
             }
           });
-          formDataToSend.append('plate_image', imageFile);
+          formDataToSend.append('image', imageFile);
           response = await uploadImage('/api/whitelist/create', formDataToSend, token);
         } else {
           response = await postData('/api/whitelist/create', formData, token);

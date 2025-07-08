@@ -1,0 +1,7 @@
+Plate Detection System - Using device: cpu
+Processing image: public\uploads\9541129ed7f1d9bfc02344749deced56
+Loading detector model: C:\Users\ASUS\Desktop\License Plate Recognition\server\models\LP_detector_nano_61.pt
+Initializing PaddleOCR...
+✅ Models initialized successfully
+
+---

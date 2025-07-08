@@ -169,21 +169,42 @@ const createWhitelist = async (req, res) => {
         // Handle uploaded image (field 'image')
         let plateImagePath = null;
         let ocrText = '';
+        let ocrDetails = null;
         if (req.file) {
             plateImagePath = '/uploads/whitelist/' + req.file.filename;
             const imagePath = path.join(__dirname, '../../public/uploads/whitelist/', req.file.filename);
             try {
-                // Gọi script Python PaddleOCR
+                // Sử dụng module Python tích hợp với YOLOv5 + PaddleOCR
                 const pythonScript = path.join(__dirname, 'detect_plate.py');
                 const result = execSync(`python "${pythonScript}" --image "${imagePath}"`).toString();
-                const ocrResult = JSON.parse(result);
+                
+                // Lấy dòng JSON cuối cùng
+                const lines = result.trim().split('\n');
+                const lastLine = lines[lines.length - 1];
+                const ocrResult = JSON.parse(lastLine);
+                
                 if (ocrResult.success) {
                     ocrText = ocrResult.text || '';
+                    ocrDetails = {
+                        method: ocrResult.method,
+                        confidence: ocrResult.confidence,
+                        bbox: ocrResult.bbox,
+                        detections: ocrResult.detections || [],
+                        message: ocrResult.message
+                    };
                 } else {
                     ocrText = '';
+                    ocrDetails = {
+                        method: 'failed',
+                        message: ocrResult.message
+                    };
                 }
             } catch (err) {
                 console.error('OCR error:', err);
+                ocrDetails = {
+                    method: 'error',
+                    message: err.message
+                };
             }
         }
 
@@ -269,7 +290,8 @@ const createWhitelist = async (req, res) => {
             data: {
                 id: result.insertId,
                 ocr_text: ocrText,
-                plate_image_path: plateImagePath
+                plate_image_path: plateImagePath,
+                ocr_details: ocrDetails
             }
         });
 
@@ -738,6 +760,9 @@ const ocrPreview = async (req, res) => {
       return res.status(500).json({ success: false, message: 'File ảnh không tồn tại trên server. Vui lòng thử lại.' });
     }
     let ocrText = '';
+    let ocrMessage = '';
+    let fallbackText = '';
+    let ocrResult = null;
     try {
       const pythonScript = path.join(__dirname, 'detect_plate.py');
       const { execSync } = require('child_process');
@@ -747,28 +772,55 @@ const ocrPreview = async (req, res) => {
       } catch (err) {
         stderr = err.stderr ? err.stderr.toString() : '';
         console.error('OCR Python stderr:', stderr);
-        throw err;
+        // Nếu có stdout, log luôn
+        if (err.stdout) console.error('OCR Python stdout:', err.stdout.toString());
+        return res.status(500).json({ success: false, message: 'Lỗi khi chạy nhận diện ký tự từ ảnh', stderr, stdout: err.stdout ? err.stdout.toString() : '' });
       }
       // Lấy dòng JSON cuối cùng
       const lines = result.trim().split('\n');
       const lastLine = lines[lines.length - 1];
-      let ocrResult;
       try {
         ocrResult = JSON.parse(lastLine);
       } catch (parseErr) {
         console.error('OCR JSON parse error:', lastLine);
-        return res.status(500).json({ success: false, message: 'Lỗi parse kết quả từ Python', raw: lastLine });
+        // Trả về toàn bộ stdout để debug
+        return res.status(500).json({ success: false, message: 'Lỗi parse kết quả từ Python', raw: result });
       }
-      if (ocrResult.success) {
-        ocrText = ocrResult.text || '';
+      if (ocrResult.success && ocrResult.text) {
+        ocrText = ocrResult.text;
+        // Thêm thông tin chi tiết về detection
+        ocrMessage = ocrResult.message || '';
+        if (ocrResult.method) {
+          ocrMessage += ` (Method: ${ocrResult.method})`;
+        }
+        if (ocrResult.confidence) {
+          ocrMessage += ` (Confidence: ${(ocrResult.confidence * 100).toFixed(1)}%)`;
+        }
       } else {
-        ocrText = '';
+        ocrMessage = ocrResult.message || 'Không phát hiện được biển số hoặc nhận diện rỗng.';
+        fallbackText = ocrResult.text || '';
       }
     } catch (err) {
       console.error('OCR error:', err);
       return res.status(500).json({ success: false, message: 'Lỗi khi nhận diện ký tự từ ảnh', error: err.message });
     }
-    res.json({ success: true, ocr_text: ocrText });
+    if (ocrText && ocrText.trim()) {
+      res.json({ 
+        success: true, 
+        ocr_text: ocrText,
+        method: ocrResult?.method || 'unknown',
+        confidence: ocrResult?.confidence || null,
+        bbox: ocrResult?.bbox || null,
+        message: ocrMessage || 'Nhận diện thành công'
+      });
+    } else {
+      res.json({ 
+        success: false, 
+        ocr_text: fallbackText, 
+        method: ocrResult?.method || 'failed',
+        message: ocrMessage || 'Không nhận diện được ký tự. Hãy kiểm tra lại ảnh hoặc model.' 
+      });
+    }
   } catch (error) {
     console.error('OCR preview server error:', error);
     res.status(500).json({ success: false, message: 'Lỗi server khi nhận diện ký tự từ ảnh', error: error.message });
