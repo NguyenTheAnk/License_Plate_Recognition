@@ -257,7 +257,10 @@ CREATE TABLE IF NOT EXISTS vehicle_whitelist (
     
     -- Metadata
     description TEXT COMMENT 'Ghi chú',
+    plate_image_path VARCHAR(500) COMMENT 'Đường dẫn ảnh gốc',
+    detected_plate_image VARCHAR(500) COMMENT 'Đường dẫn ảnh biển số đã phát hiện',
     approval_status ENUM('pending', 'approved', 'rejected') DEFAULT 'approved' COMMENT 'Trạng thái phê duyệt',
+    
     approved_by INT UNSIGNED COMMENT 'Người phê duyệt',
     approved_at DATETIME COMMENT 'Thời gian phê duyệt',
     
@@ -1480,5 +1483,18 @@ ADD INDEX idx_ocr_raw_text (ocr_raw_text),
 ADD INDEX idx_verification_status (verification_status),
 ADD INDEX idx_verified_plate_number (verified_plate_number),
 ADD INDEX idx_ocr_confidence (ocr_confidence);
+-- Script để thêm cột detected_plate_image vào bảng vehicle_whitelist
+-- Chạy script này để hỗ trợ lưu ảnh biển số đã phát hiện từ OCR
+
+-- Thêm cột detected_plate_image để lưu đường dẫn ảnh biển số đã phát hiện
+ALTER TABLE vehicle_whitelist 
+ADD COLUMN detected_plate_image VARCHAR(500) NULL 
+COMMENT 'Đường dẫn ảnh biển số đã phát hiện từ OCR' 
+AFTER plate_image_path;
+
+ALTER TABLE vehicle_blacklist 
+ADD COLUMN detected_plate_image VARCHAR(500) NULL 
+COMMENT 'Đường dẫn ảnh biển số đã phát hiện từ OCR' 
+AFTER plate_image_path;
 
 

@@ -87,34 +87,35 @@ const getAllWhitelist = async (req, res) => {
 
         // SOLUTION: Use direct string interpolation for LIMIT and OFFSET to avoid parameter issues
         const dataQuery = `
-            SELECT w.id, w.location_id, w.plate_number, w.vehicle_id,
-                   w.owner_name, w.owner_phone, w.contact_email,
-                   w.valid_from, w.valid_to, w.description, 
-                   w.approval_status, w.approved_by, w.approved_at,
-                   w.is_active, w.created_by, w.created_at, w.updated_at,
-                   w.plate_image_path, w.detected_plate_image, w.ocr_raw_text, w.ocr_processed_at,
-                   l.name as location_name, 
-                   l.code as location_code,
-                   l.zone_type,
-                   u1.name as created_by_name,
-                   u2.name as approved_by_name,
-                   CASE 
-                       WHEN w.valid_from IS NULL AND w.valid_to IS NULL THEN 'permanent'
-                       WHEN w.valid_from IS NOT NULL AND w.valid_from > CURDATE() THEN 'future'
-                       WHEN w.valid_to IS NOT NULL AND w.valid_to < CURDATE() THEN 'expired'
-                       ELSE 'valid'
-                   END as current_status,
-                   CASE 
-                       WHEN w.plate_image_path IS NOT NULL THEN 1 
-                       ELSE 0 
-                   END as has_images
-            FROM vehicle_whitelist w
-            LEFT JOIN locations l ON w.location_id = l.id
-            LEFT JOIN users u1 ON w.created_by = u1.id
-            LEFT JOIN users u2 ON w.approved_by = u2.id
-            ${whereClause}
-            ORDER BY w.${sortBy} ${sortOrder}
-            LIMIT ${parsedLimit} OFFSET ${offset}`;
+        SELECT w.id, w.location_id, w.plate_number, w.vehicle_id,
+               w.owner_name, w.owner_phone, w.contact_email,
+               w.valid_from, w.valid_to, w.description, 
+               w.approval_status, w.approved_by, w.approved_at,
+               w.is_active, w.created_by, w.created_at, w.updated_at,
+               w.plate_image_path, w.detected_plate_image, w.ocr_raw_text, w.ocr_processed_at,
+               w.ocr_confidence, w.verification_status, w.verified_plate_number,
+               l.name as location_name, 
+               l.code as location_code,
+               l.zone_type,
+               u1.name as created_by_name,
+               u2.name as approved_by_name,
+               CASE 
+                   WHEN w.valid_from IS NULL AND w.valid_to IS NULL THEN 'permanent'
+                   WHEN w.valid_from IS NOT NULL AND w.valid_from > CURDATE() THEN 'future'
+                   WHEN w.valid_to IS NOT NULL AND w.valid_to < CURDATE() THEN 'expired'
+                   ELSE 'valid'
+               END as current_status,
+               CASE 
+                   WHEN w.plate_image_path IS NOT NULL OR w.detected_plate_image IS NOT NULL THEN 1 
+                   ELSE 0 
+               END as has_images
+        FROM vehicle_whitelist w
+        LEFT JOIN locations l ON w.location_id = l.id
+        LEFT JOIN users u1 ON w.created_by = u1.id
+        LEFT JOIN users u2 ON w.approved_by = u2.id
+        ${whereClause}
+        ORDER BY w.${sortBy} ${sortOrder}
+        LIMIT ${parsedLimit} OFFSET ${offset}`;
 
         console.log('Data query:', dataQuery);
         console.log('Data query params (only filters):', queryParams);
@@ -217,7 +218,7 @@ const getWhitelistById = async (req, res) => {
                     END as current_status,
                     DATEDIFF(COALESCE(w.valid_to, '9999-12-31'), CURDATE()) as days_until_expiry,
                     CASE 
-                        WHEN w.plate_image_path IS NOT NULL OR w.plate_image_cropped_path IS NOT NULL OR w.plate_image_processed_path IS NOT NULL THEN TRUE
+                        WHEN w.plate_image_path IS NOT NULL OR w.detected_plate_image IS NOT NULL OR w.plate_image_cropped_path IS NOT NULL OR w.plate_image_processed_path IS NOT NULL THEN TRUE
                         ELSE FALSE
                     END as has_images
              FROM vehicle_whitelist w
@@ -245,6 +246,10 @@ const getWhitelistById = async (req, res) => {
                 path: entry.plate_image_path,
                 exists: true
             } : null,
+            detected_image: entry.detected_plate_image ? {
+                path: entry.detected_plate_image,
+                exists: true
+            } : null,
             cropped_image: entry.plate_image_cropped_path ? {
                 path: entry.plate_image_cropped_path,
                 exists: true
@@ -255,7 +260,6 @@ const getWhitelistById = async (req, res) => {
             } : null,
             image_metadata: entry.image_metadata ? JSON.parse(entry.image_metadata) : null
         };
-
         // Get OCR information
         const ocrInfo = {
             raw_text: entry.ocr_raw_text,

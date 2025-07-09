@@ -28,9 +28,9 @@ original_cwd = os.getcwd()
 os.chdir(YOLOV5_PATH)
 
 try:
-    from models.common import DetectMultiBackend
-    from utils.general import (non_max_suppression, scale_coords, cv2 as yolo_cv2)
-    from utils.torch_utils import select_device
+from models.common import DetectMultiBackend
+from utils.general import (non_max_suppression, scale_coords, cv2 as yolo_cv2)
+from utils.torch_utils import select_device
 finally:
     # Khôi phục working directory
     os.chdir(original_cwd)

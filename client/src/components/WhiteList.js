@@ -512,23 +512,36 @@ useEffect(() => {
     };
   }
 }, [showDateInput]);
-  const handleEdit = (item) => {
-    setSelectedItem(item);
-    setFormData({
-      location_id: item.location_id || '',
-      plate_number: item.plate_number || '',
-      vehicle_id: item.vehicle_id || '',
-      owner_name: item.owner_name || '',
-      owner_phone: item.owner_phone || '',
-      contact_email: item.contact_email || '',
-      valid_from: item.valid_from || '',
-      valid_to: item.valid_to || '',
-      description: item.description || '',
-      approval_status: item.approval_status || 'approved'
-    });
-    setFormErrors({});
-    setOpenModal(true);
-  };
+const handleEdit = (item) => {
+  setSelectedItem(item);
+  setFormData({
+    location_id: item.location_id || '',
+    plate_number: item.plate_number || '',
+    vehicle_id: item.vehicle_id || '',
+    owner_name: item.owner_name || '',
+    owner_phone: item.owner_phone || '',
+    contact_email: item.contact_email || '',
+    valid_from: item.valid_from || '',
+    valid_to: item.valid_to || '',
+    description: item.description || '',
+    approval_status: item.approval_status || 'approved'
+  });
+  setFormErrors({});
+  
+  // Reset image states
+  setImageFile(null);
+  setImagePreview(null);
+  setOcrResult('');
+  
+  // Set detected plate image từ item hiện tại
+  if (item.detected_plate_image) {
+    setDetectedPlateImage(item.detected_plate_image);
+  } else {
+    setDetectedPlateImage(null);
+  }
+  
+  setOpenModal(true);
+};
 
   const handleView = async (id) => {
     try {
@@ -549,26 +562,26 @@ useEffect(() => {
   };
 
   const resetForm = () => {
-  setFormData({
-    location_id: '',
-    plate_number: '',
-    vehicle_id: '',
-    owner_name: '',
-    owner_phone: '',
-    contact_email: '',
-    valid_from: '',
-    valid_to: '',
-    description: '',
-    approval_status: 'approved'
-  });
-  setSelectedItem(null);
-  setImageFile(null);
-  setImagePreview(null);
-  setOcrResult('');
-  setDetectedPlateImage(null);
-  setFormErrors({});
-  setShowDateInput({ valid_from: false, valid_to: false }); // Thêm dòng này
-};
+    setFormData({
+      location_id: '',
+      plate_number: '',
+      vehicle_id: '',
+      owner_name: '',
+      owner_phone: '',
+      contact_email: '',
+      valid_from: '',
+      valid_to: '',
+      description: '',
+      approval_status: 'approved'
+    });
+    setSelectedItem(null);
+    setImageFile(null);
+    setImagePreview(null);
+    setOcrResult('');
+    setDetectedPlateImage(null); // Đảm bảo reset detected image
+    setFormErrors({});
+    setShowDateInput({ valid_from: false, valid_to: false });
+  };
 const handleDateIconClickBackup = (field) => {
   // Tạo date input tạm thời và trigger click
   const input = document.createElement('input');
@@ -1162,11 +1175,7 @@ const handleDateInputChange = (field, value) => {
                                 <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                                   {item.plate_number}
                                 </Typography>
-                                {item.has_images && (
-                                  <Tooltip title="Có ảnh biển số">
-                                    <ImageIcon sx={{ fontSize: 16, color: '#1976d2' }} />
-                                  </Tooltip>
-                                )}
+                               
                               </Box>
                             </Box>
                           </TableCell>
@@ -1175,10 +1184,33 @@ const handleDateInputChange = (field, value) => {
                               <Box
                                 component="img"
                                 src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`}
-                                alt="Ảnh biển số"
+                                alt="Ảnh biển số đã phát hiện"
                                 sx={{
-                                  width: 60,
-                                  height: 40,
+                                  width: 80,
+                                  height: 50,
+                                  objectFit: 'cover',
+                                  borderRadius: 1,
+                                  border: '2px solid #1976d2',
+                                  cursor: 'pointer',
+                                  transition: 'transform 0.2s ease',
+                                  '&:hover': {
+                                    transform: 'scale(1.1)',
+                                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+                                  }
+                                }}
+                                onClick={() => {
+                                  window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`, '_blank');
+                                }}
+                                title="Ảnh biển số đã phát hiện (click để xem lớn)"
+                              />
+                            ) : item.plate_image_path ? (
+                              <Box
+                                component="img"
+                                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`}
+                                alt="Ảnh gốc"
+                                sx={{
+                                  width: 80,
+                                  height: 50,
                                   objectFit: 'cover',
                                   borderRadius: 1,
                                   border: '1px solid #e0e0e0',
@@ -1192,34 +1224,13 @@ const handleDateInputChange = (field, value) => {
                                 onClick={() => {
                                   window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`, '_blank');
                                 }}
-                              />
-                            ) : item.plate_image_path ? (
-                              <Box
-                                component="img"
-                                src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`}
-                                alt="Ảnh gốc"
-                                sx={{
-                                  width: 60,
-                                  height: 40,
-                                  objectFit: 'cover',
-                                  borderRadius: 1,
-                                  border: '1px solid #e0e0e0',
-                                  cursor: 'pointer',
-                                  transition: 'transform 0.2s ease',
-                                  '&:hover': {
-                                    transform: 'scale(1.1)',
-                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                                  }
-                                }}
-                                onClick={() => {
-                                  window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`, '_blank');
-                                }}
+                                title="Ảnh gốc (click để xem lớn)"
                               />
                             ) : (
                               <Box
                                 sx={{
-                                  width: 60,
-                                  height: 40,
+                                  width: 80,
+                                  height: 50,
                                   backgroundColor: '#f5f5f5',
                                   borderRadius: 1,
                                   border: '1px solid #e0e0e0',
@@ -1842,110 +1853,154 @@ const handleDateInputChange = (field, value) => {
                 />
               </Grid>
               <Grid item xs={12} md={6}>
-                <Button
-                  variant="outlined"
-                  component="label"
-                  fullWidth
-                  startIcon={<FaUpload />}
-                  sx={{ 
-                    mb: 2,
-                    borderRadius: 2,
-                    py: 1.5,
-                    textTransform: 'none',
-                    fontWeight: 600
-                  }}
-                >
-                  Tải ảnh biển số xe
-                  <input
-                    type="file"
-                    accept="image/*"
-                    hidden
-                    onChange={handleImageChange}
-                  />
-                </Button>
-                {imagePreview && (
-                  <Box mt={1} display="flex" flexDirection="column" alignItems="center">
-                    <img 
-                      src={imagePreview} 
-                      alt="preview" 
-                      style={{ 
-                        maxWidth: '100%', 
-                        maxHeight: 200, 
-                        borderRadius: 8, 
-                        border: '1px solid #eee' 
-                      }} 
-                    />
-                    <Button
-                      size="small"
-                      color="error"
-                      onClick={() => {
-                        setImageFile(null);
-                        setImagePreview(null);
-                      }}
-                      sx={{ mt: 1 }}
-                    >
-                      Xóa ảnh
-                    </Button>
-                  </Box>
-                )}
-                
-                {/* Hiển thị thông tin OCR và ảnh phát hiện */}
-                {ocrResult && (
-                  <Box mt={2} p={2} sx={{ 
-                    backgroundColor: '#f8f9fa', 
-                    borderRadius: 2, 
-                    border: '1px solid #e9ecef' 
-                  }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
-                      Kết quả nhận diện biển số:
-                    </Typography>
-                    <Typography variant="body2" sx={{ 
-                      backgroundColor: '#e3f2fd', 
-                      p: 1, 
-                      borderRadius: 1, 
-                      fontWeight: 600,
-                      color: '#1565c0'
-                    }}>
-                      {ocrResult}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: '#666', mt: 1, display: 'block' }}>
-                      * Hệ thống đã được cải thiện để nhận diện dấu chấm (.) trong biển số
-                    </Typography>
-                  </Box>
-                )}
-                
-                {detectedPlateImage && (
-                  <Box mt={2} p={2} sx={{ 
-                    backgroundColor: '#f8f9fa', 
-                    borderRadius: 2, 
-                    border: '1px solid #e9ecef' 
-                  }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
-                      Ảnh biển số đã phát hiện:
-                    </Typography>
-                    <Box
-                      component="img"
-                      src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`}
-                      alt="Ảnh biển số phát hiện"
-                      sx={{
-                        maxWidth: '100%',
-                        maxHeight: 150,
-                        borderRadius: 4,
-                        border: '2px solid #1976d2',
-                        cursor: 'pointer',
-                        transition: 'transform 0.2s ease',
-                        '&:hover': {
-                          transform: 'scale(1.05)',
-                          boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
-                        }
-                      }}
-                      onClick={() => {
-                        window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`, '_blank');
-                      }}
-                    />
-                  </Box>
-                )}
-              </Grid>
+  <Button
+    variant="outlined"
+    component="label"
+    fullWidth
+    startIcon={<FaUpload />}
+    sx={{ 
+      mb: 2,
+      borderRadius: 2,
+      py: 1.5,
+      textTransform: 'none',
+      fontWeight: 600
+    }}
+  >
+    Tải ảnh biển số xe
+    <input
+      type="file"
+      accept="image/*"
+      hidden
+      onChange={handleImageChange}
+    />
+  </Button>
+  
+  {/* Hiển thị ảnh preview mới upload */}
+  {imagePreview && (
+    <Box mt={1} display="flex" flexDirection="column" alignItems="center">
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+        Ảnh mới upload:
+      </Typography>
+      <img 
+        src={imagePreview} 
+        alt="preview" 
+        style={{ 
+          maxWidth: '100%', 
+          maxHeight: 200, 
+          borderRadius: 8, 
+          border: '1px solid #eee' 
+        }} 
+      />
+      <Button
+        size="small"
+        color="error"
+        onClick={() => {
+          setImageFile(null);
+          setImagePreview(null);
+          setOcrResult('');
+          setDetectedPlateImage(null);
+        }}
+        sx={{ mt: 1 }}
+      >
+        Xóa ảnh mới
+      </Button>
+    </Box>
+  )}
+  
+  {/* Hiển thị ảnh detected hiện tại (khi edit) */}
+  {!imagePreview && detectedPlateImage && (
+    <Box mt={2} p={2} sx={{ 
+      backgroundColor: '#f8f9fa', 
+      borderRadius: 2, 
+      border: '1px solid #e9ecef' 
+    }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+        Ảnh biển số hiện tại:
+      </Typography>
+      <Box
+        component="img"
+        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`}
+        alt="Ảnh biển số hiện tại"
+        sx={{
+          maxWidth: '100%',
+          maxHeight: 150,
+          borderRadius: 4,
+          border: '2px solid #1976d2',
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease',
+          '&:hover': {
+            transform: 'scale(1.05)',
+            boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+          }
+        }}
+        onClick={() => {
+          window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`, '_blank');
+        }}
+      />
+      <Typography variant="caption" sx={{ color: '#666', mt: 1, display: 'block' }}>
+        * Ảnh biển số đã được phát hiện từ ảnh gốc
+      </Typography>
+    </Box>
+  )}
+  
+  {/* Hiển thị thông tin OCR và ảnh phát hiện khi upload ảnh mới */}
+  {ocrResult && imagePreview && (
+    <Box mt={2} p={2} sx={{ 
+      backgroundColor: '#f8f9fa', 
+      borderRadius: 2, 
+      border: '1px solid #e9ecef' 
+    }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+        Kết quả nhận diện biển số:
+      </Typography>
+      <Typography variant="body2" sx={{ 
+        backgroundColor: '#e3f2fd', 
+        p: 1, 
+        borderRadius: 1, 
+        fontWeight: 600,
+        color: '#1565c0'
+      }}>
+        {ocrResult}
+      </Typography>
+      <Typography variant="caption" sx={{ color: '#666', mt: 1, display: 'block' }}>
+        * Hệ thống đã được cải thiện để nhận diện dấu chấm (.) trong biển số
+      </Typography>
+    </Box>
+  )}
+  
+  {/* Hiển thị ảnh detected từ OCR mới */}
+  {detectedPlateImage && imagePreview && (
+    <Box mt={2} p={2} sx={{ 
+      backgroundColor: '#f8f9fa', 
+      borderRadius: 2, 
+      border: '1px solid #e9ecef' 
+    }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+        Ảnh biển số đã phát hiện (mới):
+      </Typography>
+      <Box
+        component="img"
+        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`}
+        alt="Ảnh biển số phát hiện mới"
+        sx={{
+          maxWidth: '100%',
+          maxHeight: 150,
+          borderRadius: 4,
+          border: '2px solid #1976d2',
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease',
+          '&:hover': {
+            transform: 'scale(1.05)',
+            boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+          }
+        }}
+        onClick={() => {
+          window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`, '_blank');
+        }}
+      />
+    </Box>
+  )}
+</Grid>
             </Grid>
           </DialogContent>
           <DialogActions sx={{ 
@@ -2228,59 +2283,7 @@ const handleDateInputChange = (field, value) => {
                 </Card>
               </Box>
 
-              {/* Image Section */}
-              {selectedItem.has_images && (
-                <Box sx={{ px: 3, py: 2 }}>
-                  <Card sx={{ 
-                    borderRadius: 2,
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                    border: '1px solid #e0e0e0'
-                  }}>
-                    <CardContent sx={{ p: 2.5 }}>
-                      <Box display="flex" alignItems="center" gap={1} mb={2}>
-                        <ImageIcon sx={{ color: '#1976d2', fontSize: '1.2rem' }} />
-                        <Typography variant="h6" sx={{ color: '#1976d2', fontWeight: 600 }}>
-                          Hình ảnh biển số
-                        </Typography>
-                      </Box>
-                      <Box sx={{ 
-                        display: 'flex', 
-                        justifyContent: 'center',
-                        p: 2,
-                        backgroundColor: '#fafafa',
-                        borderRadius: 2,
-                        border: '1px dashed #ddd'
-                      }}>
-                        {selectedItem.plate_image_path ? (
-                          <img 
-                            src={selectedItem.plate_image_path} 
-                            alt="Biển số xe" 
-                            style={{ 
-                              maxWidth: '100%', 
-                              maxHeight: 200, 
-                              borderRadius: 8,
-                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
-                            }} 
-                          />
-                        ) : (
-                          <Box sx={{ 
-                            display: 'flex', 
-                            flexDirection: 'column', 
-                            alignItems: 'center',
-                            color: 'text.secondary',
-                            py: 3
-                          }}>
-                            <ImageIcon sx={{ fontSize: 48, mb: 1, opacity: 0.5 }} />
-                            <Typography variant="body2">
-                              Không có hình ảnh
-                            </Typography>
-                          </Box>
-                        )}
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Box>
-              )}
+             
 
               {/* Description Section */}
               {selectedItem.description && (

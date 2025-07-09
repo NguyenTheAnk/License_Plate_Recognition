@@ -1,139 +1,131 @@
 #!/usr/bin/env python3
 """
-Script test cho module detect_plate.py
+Script test để kiểm tra việc phát hiện và lưu ảnh biển số
 """
 
-import sys
 import os
+import sys
 import json
-import argparse
+import subprocess
 from pathlib import Path
 
-def test_plate_detection_module():
-    """Test module detect_plate.py"""
-    print("=== Testing Plate Detection Module ===")
-    
-    # Kiểm tra file detect_plate.py có tồn tại không
+def test_plate_detection():
+    # Đường dẫn đến script detect_plate.py
     script_path = os.path.join(os.path.dirname(__file__), 'controllers', 'WhiteList', 'detect_plate.py')
-    if not os.path.exists(script_path):
-        print(f"❌ Module not found: {script_path}")
+    
+    # Tạo một ảnh test đơn giản (nếu không có ảnh nào)
+    test_image_path = os.path.join(os.path.dirname(__file__), 'public', 'uploads', 'test_image.jpg')
+    
+    # Kiểm tra xem có ảnh test nào không
+    if not os.path.exists(test_image_path):
+        print("Không tìm thấy ảnh test. Hãy tạo một ảnh test trước.")
         return False
     
-    print(f"✅ Module found: {script_path}")
+    print(f"Testing plate detection with image: {test_image_path}")
+    print(f"Script path: {script_path}")
     
-    # Kiểm tra model files
-    models_dir = os.path.join(os.path.dirname(__file__), 'models')
-    detector_model = os.path.join(models_dir, 'LP_detector_nano_61.pt')
-    
-    if not os.path.exists(detector_model):
-        print(f"❌ Detector model not found: {detector_model}")
-        return False
-    
-    print(f"✅ Detector model found: {detector_model}")
-    
-    # Kiểm tra thư mục yolov5
-    yolov5_dir = os.path.join(os.path.dirname(__file__), 'models', 'yolov5')
-    if not os.path.exists(yolov5_dir):
-        print(f"❌ YOLOv5 directory not found: {yolov5_dir}")
-        return False
-    
-    print(f"✅ YOLOv5 directory found: {yolov5_dir}")
-    
-    return True
-
-def test_with_sample_image(image_path):
-    """Test với ảnh mẫu"""
-    print(f"\n=== Testing with Sample Image ===")
-    print(f"Image path: {image_path}")
-    
-    if not os.path.exists(image_path):
-        print(f"❌ Image file not found: {image_path}")
-        return False
-    
-    print(f"✅ Image file found")
-    
-    # Import và test module
     try:
-        script_path = os.path.join(os.path.dirname(__file__), 'controllers', 'WhiteList', 'detect_plate.py')
+        # Chạy script detect_plate.py
+        cmd = [
+            sys.executable,  # Sử dụng Python interpreter hiện tại
+            script_path,
+            '--image', test_image_path,
+            '--save-crop'
+        ]
         
-        # Thay đổi working directory để module có thể import YOLOv5
-        original_cwd = os.getcwd()
-        os.chdir(os.path.dirname(__file__))
+        print(f"Running command: {' '.join(cmd)}")
         
-        # Import module
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("detect_plate", script_path)
-        plate_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(plate_module)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(__file__)
+        )
         
-        # Test với ảnh
-        print("Running plate detection...")
-        result = plate_module.detect_plate_from_image(image_path)
+        print(f"Return code: {result.returncode}")
+        print(f"STDOUT:\n{result.stdout}")
+        print(f"STDERR:\n{result.stderr}")
         
-        print("\n=== Detection Results ===")
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-        
-        if result.get('success'):
-            print(f"\n✅ Detection successful!")
-            print(f"   Text: {result.get('text', 'N/A')}")
-            print(f"   Method: {result.get('method', 'N/A')}")
-            if result.get('confidence'):
-                print(f"   Confidence: {result['confidence']:.3f}")
-            if result.get('bbox'):
-                print(f"   Bounding box: {result['bbox']}")
-            if result.get('detections'):
-                print(f"   Total detections: {len(result['detections'])}")
+        if result.returncode == 0:
+            # Parse kết quả JSON
+            lines = result.stdout.strip().split('\n')
+            if lines:
+                try:
+                    last_line = lines[-1]
+                    ocr_result = json.loads(last_line)
+                    print(f"Parsed result: {json.dumps(ocr_result, indent=2)}")
+                    
+                    if ocr_result.get('detected_plate_image'):
+                        detected_path = ocr_result['detected_plate_image']
+                        full_path = os.path.join(os.path.dirname(__file__), 'public', detected_path.lstrip('/'))
+                        print(f"Detected plate image should be at: {full_path}")
+                        print(f"File exists: {os.path.exists(full_path)}")
+                        return True
+                    else:
+                        print("No detected_plate_image in result")
+                        return False
+                except json.JSONDecodeError as e:
+                    print(f"Failed to parse JSON: {e}")
+                    return False
         else:
-            print(f"\n❌ Detection failed: {result.get('message', 'Unknown error')}")
-        
-        os.chdir(original_cwd)
-        return result.get('success', False)
-        
+            print("Script failed to run")
+            return False
+            
     except Exception as e:
-        print(f"❌ Error testing detection: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error running test: {e}")
         return False
 
-def main():
-    parser = argparse.ArgumentParser(description='Test Plate Detection Module')
-    parser.add_argument('--image', help='Path to test image')
-    args = parser.parse_args()
+def check_directories():
+    """Kiểm tra các thư mục cần thiết"""
+    base_dir = os.path.dirname(__file__)
     
-    print("License Plate Detection Module Test")
-    print("=" * 50)
+    directories = [
+        os.path.join(base_dir, 'public', 'uploads'),
+        os.path.join(base_dir, 'public', 'uploads', 'whitelist'),
+        os.path.join(base_dir, 'public', 'uploads', 'whitelist', 'detected_plates')
+    ]
     
-    # Test cơ bản
-    basic_test_passed = test_plate_detection_module()
-    
-    if not basic_test_passed:
-        print("\n❌ Basic module test failed!")
-        return 1
-    
-    print("\n✅ Basic module test passed!")
-    
-    # Test với ảnh nếu được cung cấp
-    if args.image:
-        image_test_passed = test_with_sample_image(args.image)
-        if image_test_passed:
-            print("\n✅ Image test passed!")
-        else:
-            print("\n❌ Image test failed!")
-            return 1
-    else:
-        print("\nℹ️  No image provided for testing. Use --image <path> to test with an image.")
-    
-    print("\n" + "=" * 50)
-    print("✅ Module test completed successfully!")
-    print("\nModule features:")
-    print("- YOLOv5 detection with LP_detector_nano_61.pt")
-    print("- PaddleOCR recognition with Vietnamese language")
-    print("- Multiple plate detection support")
-    print("- Fallback to full image OCR")
-    print("- Confidence scoring")
-    print("- Detailed detection information")
-    
-    return 0
+    print("Checking directories:")
+    for dir_path in directories:
+        exists = os.path.exists(dir_path)
+        print(f"  {dir_path}: {'EXISTS' if exists else 'MISSING'}")
+        if not exists:
+            try:
+                os.makedirs(dir_path, exist_ok=True)
+                print(f"    Created directory: {dir_path}")
+            except Exception as e:
+                print(f"    Failed to create directory: {e}")
 
-if __name__ == "__main__":
-    sys.exit(main()) 
+def check_model_file():
+    """Kiểm tra file model YOLOv5"""
+    base_dir = os.path.dirname(__file__)
+    model_path = os.path.join(base_dir, 'models', 'LP_detector_nano_61.pt')
+    
+    print(f"Checking model file: {model_path}")
+    exists = os.path.exists(model_path)
+    print(f"  Model exists: {exists}")
+    
+    if exists:
+        size = os.path.getsize(model_path)
+        print(f"  Model size: {size:,} bytes ({size/1024/1024:.1f} MB)")
+    
+    return exists
+
+if __name__ == '__main__':
+    print("=== Plate Detection Test ===")
+    
+    # Kiểm tra thư mục
+    check_directories()
+    print()
+    
+    # Kiểm tra model
+    check_model_file()
+    print()
+    
+    # Test detection
+    success = test_plate_detection()
+    
+    if success:
+        print("\n✅ Test PASSED - Plate detection working correctly")
+    else:
+        print("\n❌ Test FAILED - Plate detection not working") 

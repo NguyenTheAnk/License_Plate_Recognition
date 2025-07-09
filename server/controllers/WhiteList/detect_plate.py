@@ -189,74 +189,20 @@ def detect_plate_yolov5(image_path, model):
         print(f"Error in detect_plate_yolov5: {e}")
         return None, None, None
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--image', required=True, help='Path to input image')
-    parser.add_argument('--yolo-weights', default=None, help='Path to YOLOv5 weights (.pt)')
-    parser.add_argument('--save-crop', action='store_true', help='Save detected plate crop image')
-    args = parser.parse_args()
-    try:
-        # Đường dẫn mặc định đến model
-        weights_path = args.yolo_weights or os.path.abspath(os.path.join(os.path.dirname(__file__), '../../models/LP_detector_nano_61.pt'))
-        # Kiểm tra file model có tồn tại không
-        if not os.path.exists(weights_path):
-            print(json.dumps({'success': False, 'message': f'Model file not found: {weights_path}'}))
-            return
-        # Tải mô hình YOLOv5
-        print(f"Loading YOLOv5 model from: {weights_path}")
-        model = load_yolo_model(weights_path)
-        if model is None:
-            print(json.dumps({'success': False, 'message': 'Failed to load YOLOv5 model'}))
-            return
-        # Phát hiện biển số
-        print("Detecting license plate...")
-        plate_img, bbox, orig_img = detect_plate_yolov5(args.image, model)
-        detected_plate_image = None
-        
-        if plate_img is not None and plate_img.size > 0:
-            print("License plate detected, recognizing characters...")
-            text = recognize_plate_paddleocr(plate_img)
-            if text and text.strip():
-                # Lưu ảnh biển số đã phát hiện nếu được yêu cầu
-                if args.save_crop:
-                    detected_plate_image = save_detected_plate_image(plate_img, args.image)
-                
-                print(json.dumps({
-                    'success': True, 
-                    'text': text, 
-                    'bbox': bbox,
-                    'detected_plate_image': detected_plate_image,
-                    'method': 'yolov5_detection_paddleocr_recognition'
-                }))
-                return
-            else:
-                print("Character recognition empty, trying full image...")
-        # Fallback: nhận diện toàn ảnh nếu không phát hiện được hoặc nhận diện rỗng
-        print("Trying full image recognition...")
-        fallback_text = recognize_plate_paddleocr(orig_img)
-        if fallback_text and fallback_text.strip():
-            print(json.dumps({
-                'success': True,
-                'text': fallback_text,
-                'bbox': None,
-                'detected_plate_image': None,
-                'method': 'full_image_paddleocr_recognition',
-                'message': 'No license plate detected, using full image recognition.'
-            }))
-        else:
-            print(json.dumps({
-                'success': False,
-                'message': 'Could not recognize license plate characters from image.'
-            }))
-    except Exception as e:
-        print(json.dumps({'success': False, 'message': str(e)}))
-
 def save_detected_plate_image(plate_img, original_image_path):
     """Lưu ảnh biển số đã phát hiện"""
     try:
         # Tạo thư mục lưu ảnh biển số đã phát hiện
         crop_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../public/uploads/whitelist/detected_plates/'))
+        print(f"[DEBUG] Creating directory: {crop_dir}")
         os.makedirs(crop_dir, exist_ok=True)
+        
+        # Kiểm tra thư mục đã được tạo
+        if not os.path.exists(crop_dir):
+            print(f"[DEBUG] Failed to create directory: {crop_dir}")
+            return None
+        
+        print(f"[DEBUG] Directory exists: {crop_dir}")
         
         # Tạo tên file dựa trên ảnh gốc
         original_filename = os.path.basename(original_image_path)
@@ -264,13 +210,42 @@ def save_detected_plate_image(plate_img, original_image_path):
         crop_filename = f"detected_{name_without_ext}_{int(time.time())}.jpg"
         crop_path = os.path.join(crop_dir, crop_filename)
         
-        # Lưu ảnh biển số đã phát hiện
-        cv2.imwrite(crop_path, plate_img)
+        print(f"[DEBUG] Will save to: {crop_path}")
         
-        # Trả về đường dẫn tương đối
-        return f'/uploads/whitelist/detected_plates/{crop_filename}'
+        # SỬA: Đảm bảo ảnh có kích thước hợp lý trước khi lưu
+        if plate_img is not None and plate_img.size > 0:
+            print(f"[DEBUG] Plate image shape: {plate_img.shape}")
+        
+            # Resize ảnh để có kích thước chuẩn
+            height, width = plate_img.shape[:2]
+            if width < 100 or height < 30:
+                # Resize lên nếu ảnh quá nhỏ
+                new_width = max(200, width * 2)
+                new_height = max(60, height * 2)
+                plate_img = cv2.resize(plate_img, (new_width, new_height))
+                print(f"[DEBUG] Resized to: {plate_img.shape}")
+            
+            # Lưu ảnh biển số đã phát hiện
+            success = cv2.imwrite(crop_path, plate_img)
+            
+            if success:
+                print(f"[DEBUG] Detected plate image saved to: {crop_path}")
+                print(f"[DEBUG] File exists after save: {os.path.exists(crop_path)}")
+                # Trả về đường dẫn tương đối
+                relative_path = f'/uploads/whitelist/detected_plates/{crop_filename}'
+                print(f"[DEBUG] Returning relative path: {relative_path}")
+                return relative_path
+            else:
+                print(f"[DEBUG] Failed to save detected plate image to: {crop_path}")
+                return None
+        else:
+            print(f"[DEBUG] Invalid plate image, cannot save")
+            return None
+        
     except Exception as e:
         print(f"Error saving detected plate image: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def load_yolo_model(weights_path):
@@ -280,6 +255,80 @@ def load_yolo_model(weights_path):
     except Exception as e:
         print(f"Error loading YOLOv5 model: {e}")
         return None
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--image', required=True, help='Path to input image')
+    parser.add_argument('--yolo-weights', default=None, help='Path to YOLOv5 weights (.pt)')
+    parser.add_argument('--save-crop', action='store_true', help='Save detected plate crop image')
+    args = parser.parse_args()
+    
+    try:
+        # Đường dẫn mặc định đến model
+        weights_path = args.yolo_weights or os.path.abspath(os.path.join(os.path.dirname(__file__), '../../models/LP_detector_nano_61.pt'))
+        
+        # Kiểm tra file model có tồn tại không
+        if not os.path.exists(weights_path):
+            print(json.dumps({'success': False, 'message': f'Model file not found: {weights_path}'}))
+            return
+        
+        # Tải mô hình YOLOv5
+        print(f"Loading YOLOv5 model from: {weights_path}")
+        model = load_yolo_model(weights_path)
+        if model is None:
+            print(json.dumps({'success': False, 'message': 'Failed to load YOLOv5 model'}))
+            return
+        
+        # Phát hiện biển số
+        print("Detecting license plate...")
+        plate_img, bbox, orig_img = detect_plate_yolov5(args.image, model)
+        detected_plate_image = None
+        
+        if plate_img is not None and plate_img.size > 0:
+            print("License plate detected, recognizing characters...")
+            
+            # SỬA: Luôn lưu ảnh detected nếu có --save-crop
+            if args.save_crop:
+                detected_plate_image = save_detected_plate_image(plate_img, args.image)
+                print(f"[DEBUG] Detected plate image path: {detected_plate_image}")
+            
+            text = recognize_plate_paddleocr(plate_img)
+            if text and text.strip():
+                print(json.dumps({
+                    'success': True, 
+                    'text': text, 
+                    'bbox': bbox,
+                    'detected_plate_image': detected_plate_image,
+                    'method': 'yolov5_detection_paddleocr_recognition',
+                    'confidence': bbox.get('confidence', 0) if bbox else 0
+                }))
+                return
+            else:
+                print("Character recognition empty, trying full image...")
+        
+        # Fallback: nhận diện toàn ảnh nếu không phát hiện được hoặc nhận diện rỗng
+        print("Trying full image recognition...")
+        fallback_text = recognize_plate_paddleocr(orig_img if orig_img is not None else cv2.imread(args.image))
+        
+        if fallback_text and fallback_text.strip():
+            print(json.dumps({
+                'success': True,
+                'text': fallback_text,
+                'bbox': None,
+                'detected_plate_image': detected_plate_image,
+                'method': 'full_image_paddleocr_recognition',
+                'message': 'No license plate detected, using full image recognition.',
+                'confidence': 0
+            }))
+        else:
+            print(json.dumps({
+                'success': False,
+                'message': 'Could not recognize license plate characters from image.',
+                'detected_plate_image': detected_plate_image
+            }))
+            
+    except Exception as e:
+        print(json.dumps({'success': False, 'message': str(e)}))
 
 torch.backends.cudnn.benchmark = True
 device = select_device('cpu')

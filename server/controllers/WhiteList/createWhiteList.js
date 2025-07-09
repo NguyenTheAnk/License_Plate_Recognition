@@ -1,18 +1,23 @@
+// ===== IMPORTS & MODULES =====
 const path = require('path');
 const db = require('../../db');
 const multer = require('multer');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const sharp = require('sharp');
-const { spawn } = require('child_process');
-const { execSync } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
-// Configure multer for image uploads
+// ===== MULTER CONFIGURATION =====
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
         const uploadDir = path.join(__dirname, '../../public/uploads/whitelist/');
         try {
             await fs.mkdir(uploadDir, { recursive: true });
+            // Đảm bảo thư mục detected_plates cũng tồn tại
+            const detectedDir = path.join(__dirname, '../../public/uploads/whitelist/detected_plates/');
+            if (!fsSync.existsSync(detectedDir)) {
+                await fs.mkdir(detectedDir, { recursive: true });
+            }
             cb(null, uploadDir);
         } catch (error) {
             cb(error);
@@ -39,150 +44,159 @@ const upload = multer({
     fileFilter,
     limits: {
         fileSize: 10 * 1024 * 1024, // 10MB
-        files: 1 // Chỉ 1 file ảnh
+        files: 1
     }
 });
 
 const uploadFields = upload.fields([
     { name: 'plate_image', maxCount: 1 },
+    { name: 'image', maxCount: 1 }, // Để handle từ frontend
     { name: 'plate_image_cropped', maxCount: 1 },
     { name: 'plate_image_processed', maxCount: 1 }
 ]);
 
-const ensureWhitelistUploadDir = async () => {
-    const dir = path.join(__dirname, '../../public/uploads/whitelist/');
-    if (!fsSync.existsSync(dir)) {
-        await fs.mkdir(dir, { recursive: true });
-    }
-};
+// ===== CONTROLLERS =====
 
+/**
+ * Tạo mới whitelist entry
+ */
 const createWhitelist = async (req, res) => {
     const connection = await db.promise();
-    
     try {
-        await ensureWhitelistUploadDir();
+        // Lấy dữ liệu từ body
         const {
-            location_id,
-            plate_number,
-            vehicle_id,
-            owner_name,
-            owner_phone,
-            contact_email,
-            valid_from,
-            valid_to,
-            description,
-            approval_status = 'approved',
-            // OCR related fields
-            ocr_raw_text,
-            ocr_confidence,
-            verification_status = 'pending',
-            verified_plate_number
+            location_id, plate_number, vehicle_id, owner_name, owner_phone, contact_email,
+            valid_from, valid_to, description, approval_status = 'approved',
+            ocr_raw_text, ocr_confidence, verification_status = 'pending', verified_plate_number
         } = req.body;
 
-        // Validation: chỉ kiểm tra location_id (không kiểm tra plate_number hợp lệ)
+        // Validate các trường bắt buộc
         if (!location_id) {
-            return res.status(400).json({
-                success: false,
-                message: 'location_id là bắt buộc'
-            });
+            return res.status(400).json({ success: false, message: 'location_id là bắt buộc' });
         }
 
-        // Check if location exists and is active
+        // Kiểm tra location tồn tại
         const [locationExists] = await connection.execute(
-            'SELECT id, name, zone_type FROM locations WHERE id = ? AND is_active = 1',
-            [location_id]
+            'SELECT id FROM locations WHERE id = ? AND is_active = 1', [location_id]
         );
-
         if (locationExists.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Không tìm thấy vị trí hoặc vị trí đã bị vô hiệu hóa'
-            });
+            return res.status(404).json({ success: false, message: 'Không tìm thấy vị trí hoặc vị trí đã bị vô hiệu hóa' });
         }
 
-        // Check if vehicle exists (if vehicle_id is provided)
+        // Kiểm tra vehicle nếu có
         if (vehicle_id) {
             const [vehicleExists] = await connection.execute(
-                'SELECT id, plate_number as vehicle_plate FROM vehicles WHERE id = ? AND is_active = 1',
-                [vehicle_id]
+                'SELECT id, plate_number as vehicle_plate FROM vehicles WHERE id = ? AND is_active = 1', [vehicle_id]
             );
-
             if (vehicleExists.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Không tìm thấy phương tiện hoặc phương tiện đã bị vô hiệu hóa'
-                });
+                return res.status(404).json({ success: false, message: 'Không tìm thấy phương tiện hoặc phương tiện đã bị vô hiệu hóa' });
             }
-
-            // Check if plate numbers match
             if (vehicleExists[0].vehicle_plate !== plate_number) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Biển số không khớp với thông tin phương tiện'
-                });
+                return res.status(400).json({ success: false, message: 'Biển số không khớp với thông tin phương tiện' });
             }
         }
 
-        // Check for duplicate entry
+        // Kiểm tra duplicate
         const [duplicateEntry] = await connection.execute(
             'SELECT id FROM vehicle_whitelist WHERE location_id = ? AND plate_number = ? AND is_active = 1',
             [location_id, plate_number]
         );
-
         if (duplicateEntry.length > 0) {
-            return res.status(409).json({
-                success: false,
-                message: 'Biển số này đã có trong danh sách trắng tại vị trí này'
-            });
+            return res.status(409).json({ success: false, message: 'Biển số này đã có trong danh sách trắng tại vị trí này' });
         }
 
-        // Validate date range
+        // Validate ngày
         if (valid_from && valid_to && new Date(valid_from) > new Date(valid_to)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Ngày bắt đầu không thể sau ngày kết thúc'
-            });
+            return res.status(400).json({ success: false, message: 'Ngày bắt đầu không thể sau ngày kết thúc' });
         }
-
-        // Validate email format if provided
         if (contact_email) {
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(contact_email)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Định dạng email không hợp lệ'
-                });
+                return res.status(400).json({ success: false, message: 'Định dạng email không hợp lệ' });
             }
         }
-
-        // Validate phone format if provided (Vietnamese phone number)
         if (owner_phone) {
             const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
             if (!phoneRegex.test(owner_phone.replace(/\s+/g, ''))) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Định dạng số điện thoại không hợp lệ'
-                });
+                return res.status(400).json({ success: false, message: 'Định dạng số điện thoại không hợp lệ' });
             }
         }
 
-        // Handle uploaded image (field 'image')
+        // ===== XỬ LÝ FILE ẢNH UPLOAD =====
         let plateImagePath = null;
         let ocrText = '';
         let ocrDetails = null;
-        if (req.file) {
-            plateImagePath = '/uploads/whitelist/' + req.file.filename;
-            const imagePath = path.join(__dirname, '../../public/uploads/whitelist/', req.file.filename);
+        let detectedPlateImage = null;
+        let uploadedFile = req.file;
+        // Tìm file upload từ nhiều field
+        if (!uploadedFile && req.files) {
+            if (req.files.image && req.files.image.length > 0) {
+                uploadedFile = req.files.image[0];
+            } else if (req.files.plate_image && req.files.plate_image.length > 0) {
+                uploadedFile = req.files.plate_image[0];
+            }
+        }
+        console.log('[DEBUG] uploadedFile after fixes:', uploadedFile);
+        if (!uploadedFile) {
+            return res.status(400).json({ success: false, message: 'Không nhận được file ảnh upload từ client. Vui lòng kiểm tra lại form-data và cấu hình upload.' });
+        }
+        // Sử dụng đường dẫn file thực tế
+        const actualImagePath = uploadedFile.path;
+        plateImagePath = '/uploads/whitelist/' + uploadedFile.filename;
+        console.log('[DEBUG] actualImagePath:', actualImagePath);
+        console.log('[DEBUG] plateImagePath:', plateImagePath);
+        // Kiểm tra file tồn tại (lặp lại tối đa 10 lần, mỗi lần 200ms)
+        let fileExists = fsSync.existsSync(actualImagePath);
+        let retryCount = 0;
+        while (!fileExists && retryCount < 10) {
+            console.warn(`[DEBUG] File chưa tồn tại, thử delay 200ms lần ${retryCount + 1}:`, actualImagePath);
+            await new Promise(resolve => setTimeout(resolve, 200));
+            fileExists = fsSync.existsSync(actualImagePath);
+            retryCount++;
+        }
+        if (!fileExists) {
+            console.error('[ERROR] File vẫn không tồn tại, không thể detect:', actualImagePath);
+            detectedPlateImage = null;
+            ocrText = '';
+            ocrDetails = {
+                method: 'error',
+                message: 'File ảnh không tồn tại, không thể detect',
+                detected_plate_image: null
+            };
+        } else {
             try {
-                // Sử dụng module Python tích hợp với YOLOv5 + PaddleOCR
+                // Gọi script Python detect biển số
                 const pythonScript = path.join(__dirname, 'detect_plate.py');
-                const result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`).toString();
-                
-                // Lấy dòng JSON cuối cùng
+                const result = execSync(`python "${pythonScript}" --image "${actualImagePath}" --save-crop`).toString();
                 const lines = result.trim().split('\n');
                 const lastLine = lines[lines.length - 1];
                 const ocrResult = JSON.parse(lastLine);
-                
+                console.log('[DEBUG] ocrResult:', ocrResult);
+                detectedPlateImage = ocrResult.detected_plate_image || null;
+                // Đảm bảo đường dẫn đúng subfolder
+                if (detectedPlateImage && !detectedPlateImage.startsWith('/uploads/whitelist/detected_plates/')) {
+                    const fileName = detectedPlateImage.split('/').pop();
+                    detectedPlateImage = `/uploads/whitelist/detected_plates/${fileName}`;
+                }
+                // Nếu không có detectedPlateImage, lấy file mới nhất trong detected_plates
+                if (!detectedPlateImage) {
+                    const detectedDir = path.join(__dirname, '../../public/uploads/whitelist/detected_plates/');
+                    try {
+                        const files = fsSync.readdirSync(detectedDir)
+                            .filter(f => f.startsWith('detected_') && f.endsWith('.jpg'))
+                            .map(f => ({ name: f, time: fsSync.statSync(path.join(detectedDir, f)).mtime.getTime() }))
+                            .sort((a, b) => b.time - a.time);
+                        if (files.length > 0) {
+                            detectedPlateImage = `/uploads/whitelist/detected_plates/${files[0].name}`;
+                            console.warn('[DEBUG] Không có detected_plate_image từ script, tự động lấy file mới nhất:', detectedPlateImage);
+                        } else {
+                            console.warn('[DEBUG] Không có file detected nào trong thư mục detected_plates');
+                        }
+                    } catch (dirErr) {
+                        console.warn('[DEBUG] Lỗi khi đọc thư mục detected_plates:', dirErr.message);
+                    }
+                }
+                console.log('[DEBUG] detectedPlateImage:', detectedPlateImage);
                 if (ocrResult.success) {
                     ocrText = ocrResult.text || '';
                     ocrDetails = {
@@ -191,160 +205,91 @@ const createWhitelist = async (req, res) => {
                         bbox: ocrResult.bbox,
                         detections: ocrResult.detections || [],
                         message: ocrResult.message,
-                        detected_plate_image: ocrResult.detected_plate_image
+                        detected_plate_image: detectedPlateImage
                     };
                 } else {
                     ocrText = '';
                     ocrDetails = {
                         method: 'failed',
-                        message: ocrResult.message
+                        message: ocrResult.message,
+                        detected_plate_image: detectedPlateImage
                     };
                 }
             } catch (err) {
                 console.error('OCR error:', err);
                 ocrDetails = {
                     method: 'error',
-                    message: err.message
+                    message: err.message,
+                    detected_plate_image: null
                 };
+                detectedPlateImage = null;
             }
         }
 
-        // Create whitelist entry
+        // ===== LƯU DB =====
+        const insertFields = [
+            'location_id', 'plate_number', 'vehicle_id', 'owner_name', 'owner_phone', 'contact_email',
+            'plate_image_path', 'detected_plate_image', 'ocr_raw_text', 'verification_status', 'verified_plate_number',
+            'valid_from', 'valid_to', 'description', 'approval_status', 'created_by', 'is_active'
+        ];
+        const insertValues = [
+            location_id, plate_number, vehicle_id || null, owner_name || null, owner_phone || null, contact_email || null,
+            plateImagePath, detectedPlateImage, ocrText, verification_status || 'pending', verified_plate_number || null,
+            valid_from || null, valid_to || null, description || null, approval_status || 'approved', req.user ? req.user.userId : null, 1
+        ];
+        console.log('[DEBUG] INSERT vehicle_whitelist fields:', insertFields);
+        console.log('[DEBUG] INSERT vehicle_whitelist values:', insertValues);
+        // Cho phép tạo entry ngay cả khi không có detected image
         const [result] = await connection.execute(
-            `INSERT INTO vehicle_whitelist (
-                location_id, plate_number, vehicle_id, owner_name, owner_phone, contact_email,
-                plate_image_path, detected_plate_image, ocr_raw_text, verification_status, verified_plate_number,
-                valid_from, valid_to, description, approval_status, created_by, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                location_id,
-                plate_number,
-                vehicle_id || null,
-                owner_name || null,
-                owner_phone || null,
-                contact_email || null,
-                plateImagePath,
-                ocrDetails?.detected_plate_image || null,
-                ocrText,
-                verification_status || 'pending',
-                verified_plate_number || null,
-                valid_from || null,
-                valid_to || null,
-                description || null,
-                approval_status || 'approved',
-                req.user ? req.user.userId : null,
-                1
-            ]
+            `INSERT INTO vehicle_whitelist (${insertFields.join(', ')}) VALUES (${insertFields.map(_ => '?').join(', ')})`,
+            insertValues
         );
 
-        const whitelistId = result.insertId;
-
-        // If approval status is approved, set approved_by and approved_at
+        // Nếu approved thì cập nhật approved_by
         if (approval_status === 'approved') {
             await connection.execute(
                 'UPDATE vehicle_whitelist SET approved_by = ?, approved_at = NOW() WHERE id = ?',
-                [req.user.userId, whitelistId]
+                [req.user.userId, result.insertId]
             );
         }
 
-        // Get the created whitelist entry with related data
-        const [createdEntry] = await connection.execute(
-            `SELECT w.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
-                    l.zone_type,
-                    v.make, v.model, v.color, v.vehicle_type,
-                    u1.name as created_by_name, 
-                    u2.name as approved_by_name,
-                    CASE 
-                        WHEN w.valid_from IS NULL AND w.valid_to IS NULL THEN 'permanent'
-                        WHEN w.valid_from IS NOT NULL AND w.valid_from > CURDATE() THEN 'future'
-                        WHEN w.valid_to IS NOT NULL AND w.valid_to < CURDATE() THEN 'expired'
-                        ELSE 'valid'
-                    END as current_status
-             FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
-             LEFT JOIN vehicles v ON w.vehicle_id = v.id
-             LEFT JOIN users u1 ON w.created_by = u1.id
-             LEFT JOIN users u2 ON w.approved_by = u2.id
-             WHERE w.id = ?`,
-            [whitelistId]
-        );
-
-        // Log access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
-                                    new_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'CREATE', 'WHITELIST', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-            [
-                req.user.userId,
-                req.user.username || req.user.email,
-                whitelistId,
-                JSON.stringify(createdEntry[0]),
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
-
-        // Format valid_from, valid_to sang dd/mm/yyyy nếu có
-        const formatDate = (d) => {
-            if (!d) return null;
-            const date = new Date(d);
-            if (isNaN(date)) return null;
-            return date.toLocaleDateString('vi-VN');
-        };
-        const valid_from_text = formatDate(valid_from);
-        const valid_to_text = formatDate(valid_to);
-
+        // Trả về kết quả
         res.status(201).json({
             success: true,
-            message: 'Tạo whitelist thành công',
+            message: 'Tạo whitelist thành công' + (detectedPlateImage ? '' : ' (chưa phát hiện được biển số)'),
             data: {
                 id: result.insertId,
                 ocr_text: ocrText,
                 plate_image_path: plateImagePath,
-                detected_plate_image: ocrDetails?.detected_plate_image || null,
+                detected_plate_image: detectedPlateImage,
                 ocr_details: ocrDetails,
-                valid_from_text,
-                valid_to_text
+                valid_from_text: valid_from ? new Date(valid_from).toLocaleDateString('vi-VN') : null,
+                valid_to_text: valid_to ? new Date(valid_to).toLocaleDateString('vi-VN') : null
             }
         });
-
     } catch (error) {
         console.error('Error creating whitelist:', error);
-        
-        // Clean up uploaded files if there was an error
+        // Clean up uploaded files nếu có lỗi
         if (req.files) {
             const filesToDelete = [];
             if (req.files.plate_image) filesToDelete.push(req.files.plate_image[0].path);
+            if (req.files.image) filesToDelete.push(req.files.image[0].path);
             if (req.files.plate_image_cropped) filesToDelete.push(req.files.plate_image_cropped[0].path);
             if (req.files.plate_image_processed) filesToDelete.push(req.files.plate_image_processed[0].path);
-            
             for (const filePath of filesToDelete) {
-                try {
-                    await fs.unlink(filePath);
-                } catch (unlinkError) {
-                    console.error('Error deleting uploaded file:', unlinkError);
-                }
+                try { await fs.unlink(filePath); } catch (unlinkError) { console.error('Error deleting uploaded file:', unlinkError); }
             }
         }
-
-        // Handle duplicate key error
         if (error.code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({
-                success: false,
-                message: 'Biển số này đã có trong danh sách trắng tại vị trí này'
-            });
+            return res.status(409).json({ success: false, message: 'Biển số này đã có trong danh sách trắng tại vị trí này' });
         }
-
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi khi tạo whitelist',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
+        res.status(500).json({ success: false, message: 'Lỗi khi tạo whitelist', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
     }
 };
 
+/**
+ * Tạo nhiều whitelist entries (bulk)
+ */
 const bulkCreateWhitelist = async (req, res) => {
     const connection = await db.promise();
     
@@ -499,7 +444,7 @@ const bulkCreateWhitelist = async (req, res) => {
 
             res.status(201).json({
                 success: true,
-                message: `Bulk create hoàn thành: ${results.created.length} thành công, ${results.errors.length} lỗi, ${results.duplicates.length} trùng lặp`,
+                message: `Import CSV hoàn thành: ${results.created.length} thành công, ${results.errors.length} lỗi, ${results.duplicates.length} trùng lặp`,
                 data: results
             });
 
@@ -509,15 +454,28 @@ const bulkCreateWhitelist = async (req, res) => {
         }
 
     } catch (error) {
-        console.error('Error bulk creating whitelist entries:', error);
+        console.error('Error importing whitelist from CSV:', error);
+        
+        // Clean up uploaded file on error
+        if (req.file) {
+            try {
+                await fs.unlink(req.file.path);
+            } catch (unlinkError) {
+                console.error('Error deleting uploaded CSV file:', unlinkError);
+            }
+        }
+
         res.status(500).json({
             success: false,
-            message: 'Lỗi khi tạo nhiều whitelist entries',
+            message: 'Lỗi khi import whitelist từ CSV',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
+/**
+ * Import whitelist từ CSV
+ */
 const importWhitelistFromCSV = async (req, res) => {
     const connection = await db.promise();
     
@@ -685,6 +643,9 @@ const importWhitelistFromCSV = async (req, res) => {
     }
 };
 
+/**
+ * Cập nhật OCR data cho whitelist entry
+ */
 const updateOCRData = async (req, res) => {
     const connection = await db.promise();
     
@@ -775,86 +736,129 @@ const updateOCRData = async (req, res) => {
  * Nhận diện ký tự từ ảnh biển số xe (OCR preview, không lưu DB)
  */
 const ocrPreview = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Vui lòng upload file ảnh (image)' });
-    }
-    const imagePath = req.file.path;
-    const fs = require('fs');
-    if (!fs.existsSync(imagePath)) {
-      console.error('OCR error: File does not exist:', imagePath);
-      return res.status(500).json({ success: false, message: 'File ảnh không tồn tại trên server. Vui lòng thử lại.' });
-    }
-    let ocrText = '';
-    let ocrMessage = '';
-    let fallbackText = '';
-    let ocrResult = null;
     try {
-      const pythonScript = path.join(__dirname, 'detect_plate.py');
-      const { execSync } = require('child_process');
-      let result, stderr = '';
-      try {
-        result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-      } catch (err) {
-        stderr = err.stderr ? err.stderr.toString() : '';
-        console.error('OCR Python stderr:', stderr);
-        // Nếu có stdout, log luôn
-        if (err.stdout) console.error('OCR Python stdout:', err.stdout.toString());
-        return res.status(500).json({ success: false, message: 'Lỗi khi chạy nhận diện ký tự từ ảnh', stderr, stdout: err.stdout ? err.stdout.toString() : '' });
-      }
-      // Lấy dòng JSON cuối cùng
-      const lines = result.trim().split('\n');
-      const lastLine = lines[lines.length - 1];
-      try {
-        ocrResult = JSON.parse(lastLine);
-      } catch (parseErr) {
-        console.error('OCR JSON parse error:', lastLine);
-        // Trả về toàn bộ stdout để debug
-        return res.status(500).json({ success: false, message: 'Lỗi parse kết quả từ Python', raw: result });
-      }
-      if (ocrResult.success && ocrResult.text) {
-        ocrText = ocrResult.text;
-        // Thêm thông tin chi tiết về detection
-        ocrMessage = ocrResult.message || '';
-        if (ocrResult.method) {
-          ocrMessage += ` (Method: ${ocrResult.method})`;
+        if (!req.file) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Vui lòng upload file ảnh (image)' 
+            });
         }
-        if (ocrResult.confidence) {
-          ocrMessage += ` (Confidence: ${(ocrResult.confidence * 100).toFixed(1)}%)`;
+        
+        // FIX: Sử dụng đường dẫn file thực tế
+        const imagePath = req.file.path;
+        
+        console.log('[DEBUG OCR Preview] imagePath:', imagePath);
+        
+        if (!fsSync.existsSync(imagePath)) {
+            console.error('OCR error: File does not exist:', imagePath);
+            return res.status(500).json({ 
+                success: false, 
+                message: 'File ảnh không tồn tại trên server. Vui lòng thử lại.' 
+            });
         }
-      } else {
-        ocrMessage = ocrResult.message || 'Không phát hiện được biển số hoặc nhận diện rỗng.';
-        fallbackText = ocrResult.text || '';
-      }
-    } catch (err) {
-      console.error('OCR error:', err);
-      return res.status(500).json({ success: false, message: 'Lỗi khi nhận diện ký tự từ ảnh', error: err.message });
+        
+        let ocrText = '';
+        let ocrMessage = '';
+        let fallbackText = '';
+        let ocrResult = null;
+        
+        try {
+            const pythonScript = path.join(__dirname, 'detect_plate.py');
+            const { execSync } = require('child_process');
+            let result, stderr = '';
+            
+            try {
+                result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`, { 
+                    encoding: 'utf-8', 
+                    stdio: ['pipe', 'pipe', 'pipe'] 
+                });
+            } catch (err) {
+                stderr = err.stderr ? err.stderr.toString() : '';
+                console.error('OCR Python stderr:', stderr);
+                // Nếu có stdout, log luôn
+                if (err.stdout) console.error('OCR Python stdout:', err.stdout.toString());
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Lỗi khi chạy nhận diện ký tự từ ảnh', 
+                    stderr, 
+                    stdout: err.stdout ? err.stdout.toString() : '' 
+                });
+            }
+            
+            // Lấy dòng JSON cuối cùng
+            const lines = result.trim().split('\n');
+            const lastLine = lines[lines.length - 1];
+            try {
+                ocrResult = JSON.parse(lastLine);
+            } catch (parseErr) {
+                console.error('OCR JSON parse error:', lastLine);
+                // Trả về toàn bộ stdout để debug
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Lỗi parse kết quả từ Python', 
+                    raw: result 
+                });
+            }
+            
+            if (ocrResult.success && ocrResult.text) {
+                ocrText = ocrResult.text;
+                // Thêm thông tin chi tiết về detection
+                ocrMessage = ocrResult.message || '';
+                if (ocrResult.method) {
+                    ocrMessage += ` (Method: ${ocrResult.method})`;
+                }
+                if (ocrResult.confidence) {
+                    ocrMessage += ` (Confidence: ${(ocrResult.confidence * 100).toFixed(1)}%)`;
+                }
+            } else {
+                ocrMessage = ocrResult.message || 'Không phát hiện được biển số hoặc nhận diện rỗng.';
+                fallbackText = ocrResult.text || '';
+            }
+        } catch (err) {
+            console.error('OCR error:', err);
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Lỗi khi nhận diện ký tự từ ảnh', 
+                error: err.message 
+            });
+        }
+        
+        // FIX: Cleanup uploaded file after processing
+        try {
+            await fs.unlink(imagePath);
+            console.log('[DEBUG] Cleaned up uploaded file:', imagePath);
+        } catch (cleanupErr) {
+            console.warn('[DEBUG] Failed to cleanup uploaded file:', cleanupErr.message);
+        }
+        
+        if (ocrText && ocrText.trim()) {
+            res.json({ 
+                success: true, 
+                ocr_text: ocrText,
+                detected_plate_image: ocrResult?.detected_plate_image || null,
+                method: ocrResult?.method || 'unknown',
+                confidence: ocrResult?.confidence || null,
+                bbox: ocrResult?.bbox || null,
+                message: ocrMessage || 'Nhận diện thành công'
+            });
+        } else {
+            res.json({ 
+                success: false, 
+                ocr_text: fallbackText, 
+                detected_plate_image: ocrResult?.detected_plate_image || null,
+                method: ocrResult?.method || 'failed',
+                message: ocrMessage || 'Không nhận diện được ký tự. Hãy kiểm tra lại ảnh hoặc model.' 
+            });
+        }
+    } catch (error) {
+        console.error('OCR preview server error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Lỗi server khi nhận diện ký tự từ ảnh', 
+            error: error.message 
+        });
     }
-    if (ocrText && ocrText.trim()) {
-      res.json({ 
-        success: true, 
-        ocr_text: ocrText,
-        detected_plate_image: ocrResult?.detected_plate_image || null,
-        method: ocrResult?.method || 'unknown',
-        confidence: ocrResult?.confidence || null,
-        bbox: ocrResult?.bbox || null,
-        message: ocrMessage || 'Nhận diện thành công'
-      });
-    } else {
-      res.json({ 
-        success: false, 
-        ocr_text: fallbackText, 
-        detected_plate_image: ocrResult?.detected_plate_image || null,
-        method: ocrResult?.method || 'failed',
-        message: ocrMessage || 'Không nhận diện được ký tự. Hãy kiểm tra lại ảnh hoặc model.' 
-      });
-    }
-  } catch (error) {
-    console.error('OCR preview server error:', error);
-    res.status(500).json({ success: false, message: 'Lỗi server khi nhận diện ký tự từ ảnh', error: error.message });
-  }
 };
-
 
 module.exports = {
     createWhitelist,
