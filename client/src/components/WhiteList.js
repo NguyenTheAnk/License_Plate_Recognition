@@ -25,14 +25,14 @@ import {
   CircularProgress,
   Card,
   CardContent,
-  Tooltip,
   Tabs,
   Tab,
   Checkbox,
   Breadcrumbs,
   Avatar,
   FormHelperText,
-  InputAdornment
+  InputAdornment,
+  Snackbar
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -182,68 +182,75 @@ const WhiteList = () => {
   const [ocrResult, setOcrResult] = useState('');
   const [detectedPlateImage, setDetectedPlateImage] = useState(null);
 
-  // Error handling
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+
   const [deleteDialog, setDeleteDialog] = useState({ open: false, itemId: null, plateName: '' });
 
   // Form validation
   const [formErrors, setFormErrors] = useState({});
-  
+
+  // Thêm state cho Snackbar
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
+
+  // Thay đổi các setError, setSuccess, setOcrResult thành setSnackbar
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbar({ open: true, message, severity });
+  };
 
   // Get token from localStorage
   const getToken = () => {
     return localStorage.getItem('token');
   };
 
-  // Auto close alerts
-  useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => setError(''), 5000);
-      return () => clearTimeout(timer);
-    }
-    if (success) {
-      const timer = setTimeout(() => setSuccess(''), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [error, success]);
+
 
   // Load data
-  useEffect(() => {
-    loadWhitelist();
-    loadLocations();
-    loadStatistics();
-  }, [currentPage, itemsPerPage, filters]);
-
-  // Validate form
-  const validateForm = () => {
-    const errors = {};
-    if (!formData.location_id) {
-      errors.location_id = 'Vui lòng chọn khu vực';
-    }
-    if (!formData.plate_number) {
-      errors.plate_number = 'Vui lòng nhập biển số xe';
-    }
-    if (formData.contact_email) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(formData.contact_email)) {
-        errors.contact_email = 'Định dạng email không hợp lệ';
-      }
-    }
-    if (formData.owner_phone) {
-      const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
-      if (!phoneRegex.test(formData.owner_phone.replace(/\s+/g, ''))) {
-        errors.owner_phone = 'Định dạng số điện thoại không hợp lệ';
-      }
-    }
-    if (formData.valid_from && formData.valid_to) {
-      if (new Date(formData.valid_from) > new Date(formData.valid_to)) {
-        errors.valid_to = 'Ngày kết thúc phải sau ngày bắt đầu';
-      }
-    }
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
+ useEffect(() => {
+  const loadData = async () => {
+    await loadWhitelist();
+    await loadLocations();
+    await loadStatistics();
   };
+  loadData();
+}, [currentPage, itemsPerPage, filters]);
+
+const validateForm = () => {
+  const errors = {};
+  
+  console.log('=== VALIDATE FORM DEBUG ===');
+  console.log('formData:', formData);
+  console.log('selectedItem:', selectedItem);
+  console.log('==========================');
+  
+  if (!formData.location_id) {
+    errors.location_id = 'Vui lòng chọn khu vực';
+  }
+  if (!formData.plate_number) {
+    errors.plate_number = 'Vui lòng nhập biển số xe';
+  }
+  // SỬA: Chỉ validate email khi có giá trị
+  if (formData.contact_email && formData.contact_email.trim() !== '') {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.contact_email.trim())) {
+      errors.contact_email = 'Định dạng email không hợp lệ';
+    }
+  }
+  // SỬA: Chỉ validate phone khi có giá trị
+  if (formData.owner_phone && formData.owner_phone.trim() !== '') {
+    const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
+    if (!phoneRegex.test(formData.owner_phone.replace(/\s+/g, ''))) {
+      errors.owner_phone = 'Định dạng số điện thoại không hợp lệ';
+    }
+  }
+  if (formData.valid_from && formData.valid_to) {
+    if (new Date(formData.valid_from) > new Date(formData.valid_to)) {
+      errors.valid_to = 'Ngày kết thúc phải sau ngày bắt đầu';
+    }
+  }
+  
+  console.log('Validation errors:', errors);
+  setFormErrors(errors);
+  return Object.keys(errors).length === 0;
+};
 
   // Sửa hàm loadWhitelist để có thể force refresh
 const loadWhitelist = async (forceRefresh = false) => {
@@ -277,12 +284,12 @@ const loadWhitelist = async (forceRefresh = false) => {
               setTotalItems(response.pagination.total || 0);
           }
       } else {
-          setError(response.message || 'Lỗi khi tải danh sách whitelist');
+          showSnackbar(response.message || 'Lỗi khi tải danh sách whitelist', 'error');
       }
   } catch (error) {
       console.error('Error loading whitelist:', error);
       const errorMessage = handleErrorResponse(error);
-      setError(errorMessage);
+      showSnackbar(errorMessage, 'error');
       
       if (isUnauthorizedError(error)) {
           const token = getToken();
@@ -302,19 +309,18 @@ const loadWhitelist = async (forceRefresh = false) => {
     setLocationsLoading(true);
     try {
       const token = getToken();
-      // Gọi API /api/location với limit lớn để lấy đủ danh sách khu vực
       const response = await fetchDataFromAPI('/api/location?limit=1000&is_active=1', token);
       
       if (response.success) {
         setLocations(response.data.locations || []);
       } else {
         console.error('Failed to load locations:', response.message);
-        setError('Không thể tải danh sách khu vực: ' + response.message);
+        showSnackbar('Không thể tải danh sách khu vực: ' + response.message, 'error'); // SỬA
       }
     } catch (error) {
       console.error('Error loading locations:', error);
       const errorMessage = handleErrorResponse(error);
-      setError('Không thể tải danh sách khu vực: ' + errorMessage);
+      showSnackbar('Không thể tải danh sách khu vực: ' + errorMessage, 'error'); // SỬA
     } finally {
       setLocationsLoading(false);
     }
@@ -333,17 +339,17 @@ const loadWhitelist = async (forceRefresh = false) => {
     }
   };
 
-  const handleImageChange = async (e) => {
+ const handleImageChange = async (e) => {
     const file = e.target.files[0];
     if (file) {
       // Validate file type
       if (!file.type.startsWith('image/')) {
-        setError('Vui lòng chọn file ảnh');
+        showSnackbar('Vui lòng chọn file ảnh', 'error'); // SỬA
         return;
       }
       // Validate file size (max 10MB)
       if (file.size > 10 * 1024 * 1024) {
-        setError('Kích thước file không được vượt quá 10MB');
+        showSnackbar('Kích thước file không được vượt quá 10MB', 'error'); // SỬA
         return;
       }
       setImageFile(file);
@@ -360,11 +366,12 @@ const loadWhitelist = async (forceRefresh = false) => {
         const formDataToSend = new FormData();
         formDataToSend.append('image', file);
         const data = await uploadImage('/api/whitelist/ocr-preview', formDataToSend, token);
-        console.log('Kết quả nhận diện ký tự biển số:', data);
+        
         if (data.success && data.ocr_text) {
           setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
           setOcrResult(data.ocr_text);
-          // Lưu ảnh biển số đã phát hiện nếu có
+          showSnackbar(`Nhận diện thành công biển số: ${data.ocr_text}`, 'success'); // THÊM
+          
           if (data.detected_plate_image) {
             setDetectedPlateImage(data.detected_plate_image);
           } else {
@@ -373,20 +380,20 @@ const loadWhitelist = async (forceRefresh = false) => {
         } else if (data.message) {
           setOcrResult('');
           setDetectedPlateImage(null);
-          setError('Nhận diện ký tự thất bại: ' + data.message);
+          showSnackbar('Nhận diện ký tự thất bại: ' + data.message, 'error'); // SỬA
         } else {
           setOcrResult('');
           setDetectedPlateImage(null);
-          setError('Không nhận diện được ký tự biển số từ ảnh.');
+          showSnackbar('Không nhận diện được ký tự biển số từ ảnh.', 'error'); // SỬA
         }
       } catch (err) {
         setOcrResult('');
         if (err.response && err.response.data && err.response.data.message) {
-          setError('Lỗi nhận diện ký tự: ' + err.response.data.message);
+          showSnackbar('Lỗi nhận diện ký tự: ' + err.response.data.message, 'error'); // SỬA
         } else if (err.message) {
-          setError('Lỗi nhận diện ký tự: ' + err.message);
+          showSnackbar('Lỗi nhận diện ký tự: ' + err.message, 'error'); // SỬA
         } else {
-          setError('Lỗi không xác định khi nhận diện ký tự.');
+          showSnackbar('Lỗi không xác định khi nhận diện ký tự.', 'error'); // SỬA
         }
       }
     } else {
@@ -396,13 +403,10 @@ const loadWhitelist = async (forceRefresh = false) => {
       setDetectedPlateImage(null);
     }
   };
-
- // Sửa hàm handleSubmit
-// Sửa trong hàm handleSubmit
 const handleSubmit = async (e) => {
   e.preventDefault();
   if (!validateForm()) {
-      setError('Vui lòng kiểm tra lại thông tin nhập vào');
+      showSnackbar('Vui lòng kiểm tra lại thông tin nhập vào', 'error');
       return;
   }
   setLoading(true);
@@ -426,9 +430,13 @@ const handleSubmit = async (e) => {
       
       if (selectedItem) {
           // Update existing item
+          
+          // SỬA: Kiểm tra có ảnh mới hay không để quyết định dùng FormData hay JSON
           if (imageFile) {
-              // SỬA: Nếu có ảnh mới, dùng FormData và editData
+              // Có ảnh mới - dùng FormData
               const formDataToSend = new FormData();
+              
+              // Append tất cả fields, kể cả empty string
               const whitelistFields = [
                   'location_id',
                   'plate_number',
@@ -441,23 +449,39 @@ const handleSubmit = async (e) => {
                   'description',
                   'approval_status'
               ];
+              
               whitelistFields.forEach((key) => {
-                  if (processedFormData[key] !== null && processedFormData[key] !== undefined && processedFormData[key] !== '') {
-                      formDataToSend.append(key, processedFormData[key]);
+                  const value = processedFormData[key];
+                  // SỬA: Chỉ bỏ qua null và undefined, cho phép empty string
+                  if (value !== null && value !== undefined) {
+                      formDataToSend.append(key, value.toString());
                   }
               });
-              formDataToSend.append('plate_image', imageFile);
-              formDataToSend.append('replace_images', 'true'); // THÊM flag này
               
-              // SỬA: Sử dụng editData thay vì fetch trực tiếp
+              // Append ảnh mới
+              formDataToSend.append('plate_image', imageFile);
+              formDataToSend.append('replace_images', 'true');
+              
+              // Debug log
+              console.log('FormData being sent (with image):');
+              for (let [key, value] of formDataToSend.entries()) {
+                  console.log(key, ':', value);
+              }
+              
               response = await editData(`/api/whitelist/${selectedItem.id}`, formDataToSend, token);
           } else {
-              // Không có ảnh mới, dùng JSON
+              // THÊM: Không có ảnh mới - dùng JSON
+              console.log('JSON being sent (no image):');
+              console.log(processedFormData);
+              
               response = await editData(`/api/whitelist/${selectedItem.id}`, processedFormData, token);
           }
-          setSuccess('Cập nhật whitelist thành công');
+          
+          if (response.success) {
+              showSnackbar(`Cập nhật biển số ${formData.plate_number} thành công!`, 'success');
+          }
       } else {
-          // Create new item - giữ nguyên logic cũ
+          // Create new item
           if (imageFile) {
               const formDataToSend = new FormData();
               Object.entries(processedFormData).forEach(([key, value]) => {
@@ -470,14 +494,16 @@ const handleSubmit = async (e) => {
           } else {
               response = await postData('/api/whitelist/create', processedFormData, token);
           }
-          setSuccess('Tạo whitelist thành công');
+          
+          if (response.success) {
+              showSnackbar(`Đã thêm biển số ${formData.plate_number} vào danh sách trắng thành công!`, 'success');
+          }
       }
        
       if (response.success) {
           setOpenModal(false);
           resetForm();
           
-          // SỬA: Cập nhật OCR result và detected image từ response
           if (response.data?.ocr_text) {
             setOcrResult(response.data.ocr_text);
         }
@@ -485,37 +511,36 @@ const handleSubmit = async (e) => {
             setDetectedPlateImage(response.data.detected_plate_image);
         }
         
-        // SỬA: Reload whitelist để hiển thị ảnh mới với force refresh
         await loadWhitelist(true);
       } else {
-          setError(response.message || 'Có lỗi xảy ra');
+          showSnackbar(response.message || 'Có lỗi xảy ra', 'error');
       }
   } catch (error) {
       console.error('Error submitting form:', error);
       const errorMessage = handleErrorResponse(error);
-      setError(errorMessage);
+      showSnackbar(errorMessage, 'error');
   } finally {
       setLoading(false);
   }
 };
 
+
 const handleDelete = async (id) => {
   try {
       const token = getToken();
-      // SỬA: Đảm bảo endpoint đúng định dạng
       const response = await deleteData(`api/whitelist/${id}`, token);
 
       if (response.success) {
-          setSuccess(response.message || 'Xóa whitelist thành công!');
+          showSnackbar(response.message || 'Xóa whitelist thành công!', 'success'); // SỬA
           setSelectedItems(prev => prev.filter(itemId => itemId !== id));
           await loadWhitelist(true);
       } else {
-          setError(response.message || 'Lỗi khi xóa whitelist!');
+          showSnackbar(response.message || 'Lỗi khi xóa whitelist!', 'error'); // SỬA
       }
   } catch (error) {
       console.error('Error deleting whitelist:', error);
       const errorMessage = handleErrorResponse(error);
-      setError(errorMessage);
+      showSnackbar(errorMessage, 'error'); // SỬA
   } finally {
       setDeleteDialog({ open: false, itemId: null, plateName: '' });
   }
@@ -523,7 +548,7 @@ const handleDelete = async (id) => {
 
 const handleBulkDelete = async () => {
   if (selectedItems.length === 0) {
-      setError('Vui lòng chọn ít nhất một mục để xóa!');
+      showSnackbar('Vui lòng chọn ít nhất một mục để xóa!', 'warning'); // SỬA
       return;
   }
 
@@ -540,26 +565,16 @@ Nhấn OK để tiếp tục xóa vĩnh viễn, Cancel để hủy.`;
       try {
           const token = getToken();
           
-          console.log('Bulk delete request:', {
-              url: 'api/whitelist/bulk-delete', // SỬA: Đảm bảo URL đúng
-              data: { ids: selectedItems },
-              token: token ? 'Token exists' : 'No token',
-              selectedItems: selectedItems
-          });
-          
-          // SỬA: Đảm bảo URL endpoint chính xác
           const response = await deleteData('api/whitelist/bulk-delete', {
               ids: selectedItems
           }, token);
 
-          console.log('Bulk delete response:', response);
-
           if (response && response.success) {
-              setSuccess(response.message || `Xóa vĩnh viễn thành công ${selectedItems.length} mục!`);
+              showSnackbar(response.message || `Xóa vĩnh viễn thành công ${selectedItems.length} mục!`, 'success'); // SỬA
               setSelectedItems([]);
               await loadWhitelist(true);
           } else {
-              setError(response?.message || 'Lỗi khi xóa nhiều mục!');
+              showSnackbar(response?.message || 'Lỗi khi xóa nhiều mục!', 'error'); // SỬA
           }
       } catch (error) {
           console.error('Error bulk deleting:', error);
@@ -567,14 +582,12 @@ Nhấn OK để tiếp tục xóa vĩnh viễn, Cancel để hủy.`;
           let errorMessage = 'Lỗi khi xóa nhiều mục!';
           
           if (error.response) {
-              // Lỗi từ server
               errorMessage = error.response.data?.message || `Lỗi ${error.response.status}: ${error.response.statusText}`;
           } else if (error.message) {
-              // Lỗi network hoặc khác
               errorMessage = error.message;
           }
           
-          setError(errorMessage);
+          showSnackbar(errorMessage, 'error'); // SỬA
       }
   }
 };
@@ -602,7 +615,7 @@ const handleEdit = (item) => {
   setSelectedItem(item);
   setFormData({
     location_id: item.location_id || '',
-    plate_number: item.plate_number || '',
+    plate_number: item.plate_number || '', // Đảm bảo luôn có giá trị
     vehicle_id: item.vehicle_id || '',
     owner_name: item.owner_name || '',
     owner_phone: item.owner_phone || '',
@@ -613,23 +626,18 @@ const handleEdit = (item) => {
     approval_status: item.approval_status || 'approved'
   });
   setFormErrors({});
-  
-  // Reset image states
   setImageFile(null);
   setImagePreview(null);
   setOcrResult('');
-  
-  // SỬA: Set detected plate image từ item hiện tại
   if (item.detected_plate_image) {
     setDetectedPlateImage(item.detected_plate_image);
   } else {
     setDetectedPlateImage(null);
   }
-  
   setOpenModal(true);
 };
 
-  const handleView = async (id) => {
+ const handleView = async (id) => {
     try {
       const token = getToken();
       const response = await fetchDataFromAPI(`/api/whitelist/${id}`, token);
@@ -638,12 +646,12 @@ const handleEdit = (item) => {
         setSelectedItem(response.data);
         setOpenDetailModal(true);
       } else {
-        setError(response.message || 'Lỗi khi tải chi tiết whitelist');
+        showSnackbar(response.message || 'Lỗi khi tải chi tiết whitelist', 'error'); // SỬA
       }
     } catch (error) {
       console.error('Error viewing whitelist:', error);
       const errorMessage = handleErrorResponse(error);
-      setError(errorMessage);
+      showSnackbar(errorMessage, 'error'); // SỬA
     }
   };
 
@@ -704,30 +712,7 @@ const handleDateIconClickBackup = (field) => {
   input.click();
 };
 
-const handleDateIconClickWithFallback = (field) => {
-  try {
-    // Thử method showPicker() trước
-    if (field === 'valid_from' && validFromDateRef.current) {
-      if (validFromDateRef.current.showPicker) {
-        validFromDateRef.current.showPicker();
-      } else {
-        validFromDateRef.current.focus();
-        validFromDateRef.current.click();
-      }
-    } else if (field === 'valid_to' && validToDateRef.current) {
-      if (validToDateRef.current.showPicker) {
-        validToDateRef.current.showPicker();
-      } else {
-        validToDateRef.current.focus();
-        validToDateRef.current.click();
-      }
-    }
-  } catch (error) {
-    // Fallback nếu showPicker() không được hỗ trợ
-    console.log('showPicker() not supported, using fallback method');
-    handleDateIconClickBackup(field);
-  }
-};
+
   const handleRefresh = () => {
     setFilters({
       location_id: '',
@@ -803,13 +788,7 @@ const handleDateIconClickWithFallback = (field) => {
     validToDateRef.current.showPicker(); // Mở date picker trực tiếp
   }
 };
-const handleDateInputChange = (field, value) => {
-  if (value) {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  }
-  // Tự động ẩn date input sau khi chọn
-  setShowDateInput(prev => ({ ...prev, [field]: false }));
-};
+
 
 
   // Pagination helper
@@ -919,57 +898,41 @@ const handleDateInputChange = (field, value) => {
       </Box>
 
       {/* Enhanced Alerts */}
-      {error && (
-        <Box sx={{ px: 3, mb: 2 }}>
-          <Alert 
-            severity="error" 
-            onClose={() => setError('')}
-            sx={{ 
-              borderRadius: 3,
-              boxShadow: '0 2px 8px rgba(244, 67, 54, 0.2)',
-              '& .MuiAlert-icon': { fontSize: '1.5rem' },
-              '& .MuiAlert-message': { fontWeight: 500 }
-            }}
-          >
-            {error}
-          </Alert>
-        </Box>
-      )}
-      
-      {success && (
-        <Box sx={{ px: 3, mb: 2 }}>
-          <Alert 
-            severity="success" 
-            onClose={() => setSuccess('')}
-            sx={{ 
-              borderRadius: 3,
-              boxShadow: '0 2px 8px rgba(76, 175, 80, 0.2)',
-              '& .MuiAlert-icon': { fontSize: '1.5rem' },
-              '& .MuiAlert-message': { fontWeight: 500 }
-            }}
-          >
-            {success}
-          </Alert>
-        </Box>
-      )}
+      <Snackbar
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        sx={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          zIndex: 9999,
+          '& .MuiSnackbar-root': {
+            position: 'fixed !important'
+          }
+        }}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          sx={{ 
+            width: '100%',
+            minWidth: 300,
+            maxWidth: 500,
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+            borderRadius: 2,
+            '& .MuiAlert-message': {
+              fontSize: '0.95rem',
+              fontWeight: 500
+            }
+          }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
 
-      {/* OCR Result Alert */}
-      {ocrResult && (
-        <Box sx={{ px: 3, mb: 2 }}>
-          <Alert 
-            severity="info" 
-            onClose={() => setOcrResult('')}
-            sx={{ 
-              borderRadius: 3,
-              boxShadow: '0 2px 8px rgba(33, 150, 243, 0.2)',
-              '& .MuiAlert-icon': { fontSize: '1.5rem' },
-              '& .MuiAlert-message': { fontWeight: 500 }
-            }}
-          >
-            Kết quả nhận diện biển số từ ảnh: <strong>{ocrResult}</strong>
-          </Alert>
-        </Box>
-      )}
+      
 
       {/* Enhanced Tabs */}
       <Box sx={{ px: 3, mb: 3 }}>
@@ -1714,14 +1677,12 @@ const handleDateInputChange = (field, value) => {
                   required
                   label="Biển số xe"
                   value={formData.plate_number}
-                  onChange={(e) => setFormData({...formData, plate_number: e.target.value})} // SỬA: Cho phép edit
-                  disabled={!selectedItem && !ocrResult && !imageFile} // SỬA: Logic disable mới
+                  // Luôn disable, chỉ hiển thị kết quả OCR
+                  disabled
                   error={!!formErrors.plate_number}
-                  helperText={formErrors.plate_number || (
-                    selectedItem ? "Có thể chỉnh sửa khi upload ảnh mới" : 
-                    ocrResult ? "Đã nhận diện từ OCR" : 
-                    "Tự động điền từ OCR hoặc nhập thủ công"
-                  )}
+                  helperText={
+                    ocrResult ? "Đã nhận diện từ OCR" : "Trường này sẽ tự động điền từ ảnh biển số (OCR)"
+                  }
                   sx={{
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,

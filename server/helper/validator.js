@@ -433,75 +433,138 @@ const createWhitelistValidator = [
 ];
 
 const updateWhitelistValidator = [
-    param('id')
-        .isInt({ min: 1 })
-        .withMessage('ID không hợp lệ'),
-    
+    // SỬA: Không yêu cầu bắt buộc cho update, chỉ validate khi có giá trị
     body('location_id')
         .optional()
-        .isInt({ min: 1 })
-        .withMessage('location_id phải là số nguyên dương'),
+        .isInt({ min: 1 }).withMessage('ID khu vực phải là số nguyên dương')
+        .toInt(),
     
     body('plate_number')
         .optional()
-        .trim()
-        .isLength({ min: 6, max: 20 })
-        .withMessage('Biển số phải có độ dài từ 6-20 ký tự')
-        .matches(/^[A-Z0-9\-\.]+$/)
-        .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
+        .isLength({ min: 1, max: 20 }).withMessage('Biển số xe phải có độ dài 1-20 ký tự')
+        .matches(/^[A-Z0-9.\-]+$/i).withMessage('Biển số xe chỉ được chứa chữ cái, số, dấu chấm và dấu gạch ngang'),
     
     body('vehicle_id')
         .optional()
-        .isInt({ min: 1 })
-        .withMessage('vehicle_id phải là số nguyên dương'),
+        .custom(value => {
+            // Cho phép null, undefined, hoặc số nguyên dương
+            if (value === null || value === undefined || value === '') return true;
+            if (!Number.isInteger(Number(value)) || Number(value) < 1) {
+                throw new Error('ID phương tiện phải là số nguyên dương');
+            }
+            return true;
+        })
+        .toInt(),
     
     body('owner_name')
         .optional()
-        .trim()
-        .isLength({ max: 200 })
-        .withMessage('Tên chủ xe không được quá 200 ký tự'),
+        .isLength({ max: 255 }).withMessage('Tên chủ xe không được vượt quá 255 ký tự'),
     
     body('owner_phone')
         .optional()
-        .trim()
-        .matches(/^[0-9+\-\s\(\)]+$/)
-        .withMessage('Số điện thoại không hợp lệ')
-        .isLength({ max: 20 })
-        .withMessage('Số điện thoại không được quá 20 ký tự'),
+        .custom(value => {
+            // Chỉ validate khi có giá trị
+            if (!value || value.trim() === '') return true;
+            const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
+            if (!phoneRegex.test(value.replace(/\s+/g, ''))) {
+                throw new Error('Định dạng số điện thoại không hợp lệ');
+            }
+            return true;
+        }),
     
     body('contact_email')
         .optional()
-        .isEmail()
-        .withMessage('Email không hợp lệ')
-        .normalizeEmail(),
+        .custom(value => {
+            // Chỉ validate khi có giá trị
+            if (!value || value.trim() === '') return true;
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(value)) {
+                throw new Error('Định dạng email không hợp lệ');
+            }
+            return true;
+        }),
     
     body('valid_from')
         .optional()
-        .isISO8601()
-        .withMessage('valid_from phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+        .custom(value => {
+            // Chỉ validate khi có giá trị
+            if (!value || value.trim() === '') return true;
+            const date = new Date(value);
+            if (isNaN(date.getTime())) {
+                throw new Error('Ngày bắt đầu không hợp lệ');
+            }
+            return true;
+        }),
     
     body('valid_to')
         .optional()
-        .isISO8601()
-        .withMessage('valid_to phải có định dạng ngày hợp lệ (YYYY-MM-DD)'),
+        .custom(value => {
+            // Chỉ validate khi có giá trị
+            if (!value || value.trim() === '') return true;
+            const date = new Date(value);
+            if (isNaN(date.getTime())) {
+                throw new Error('Ngày kết thúc không hợp lệ');
+            }
+            return true;
+        }),
     
     body('description')
         .optional()
-        .trim()
-        .isLength({ max: 1000 })
-        .withMessage('Mô tả không được quá 1000 ký tự'),
+        .isLength({ max: 1000 }).withMessage('Mô tả không được vượt quá 1000 ký tự'),
     
     body('approval_status')
         .optional()
-        .isIn(['pending', 'approved', 'rejected'])
-        .withMessage('approval_status phải là: pending, approved, rejected'),
+        .isIn(['pending', 'approved', 'rejected']).withMessage('Trạng thái phê duyệt không hợp lệ'),
     
     body('is_active')
         .optional()
-        .isBoolean()
-        .withMessage('is_active phải là boolean'),
-
-    handleValidationErrors
+        .isBoolean().withMessage('Trạng thái hoạt động phải là boolean')
+        .toBoolean(),
+    
+    // OCR fields - optional
+    body('ocr_raw_text').optional(),
+    body('ocr_confidence')
+        .optional()
+        .isFloat({ min: 0, max: 1 }).withMessage('Độ tin cậy OCR phải trong khoảng 0-1'),
+    body('verification_status')
+        .optional()
+        .isIn(['pending', 'ocr_matched', 'manually_verified', 'rejected']).withMessage('Trạng thái xác minh không hợp lệ'),
+    body('verified_plate_number').optional(),
+    
+    // Image replacement option
+    body('replace_images')
+        .optional()
+        .isIn(['true', 'false']).withMessage('Tùy chọn thay thế ảnh không hợp lệ'),
+    
+    // Custom validation for date range
+    body('valid_to').custom((value, { req }) => {
+        if (value && req.body.valid_from) {
+            const fromDate = new Date(req.body.valid_from);
+            const toDate = new Date(value);
+            if (fromDate >= toDate) {
+                throw new Error('Ngày kết thúc phải sau ngày bắt đầu');
+            }
+        }
+        return true;
+    }),
+    
+    // Validation result handler
+    (req, res, next) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            console.log('Validation errors:', errors.array());
+            return res.status(400).json({
+                success: false,
+                message: 'Dữ liệu không hợp lệ',
+                errors: errors.array().map(error => ({
+                    field: error.param,
+                    message: error.msg,
+                    value: error.value
+                }))
+            });
+        }
+        next();
+    }
 ];
 
 // ========================================

@@ -68,6 +68,15 @@ const updateWhitelist = async (req, res) => {
     
     try {
         const { id } = req.params;
+        
+        // THÊM: Debug logging
+        console.log('=== UPDATE WHITELIST DEBUG ===');
+        console.log('Request params:', req.params);
+        console.log('Request body:', req.body);
+        console.log('Request files:', req.files ? Object.keys(req.files) : 'No files');
+        console.log('Content-Type:', req.get('Content-Type'));
+        console.log('===============================');
+        
         const {
             location_id,
             plate_number,
@@ -177,7 +186,7 @@ const updateWhitelist = async (req, res) => {
         }
 
         // Validate email format if provided
-        if (contact_email) {
+        if (contact_email && contact_email.trim() !== '') {
             const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
             if (!emailRegex.test(contact_email)) {
                 return res.status(400).json({
@@ -188,7 +197,7 @@ const updateWhitelist = async (req, res) => {
         }
 
         // Validate phone format if provided
-        if (owner_phone) {
+        if (owner_phone && owner_phone.trim() !== '') {
             const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
             if (!phoneRegex.test(owner_phone.replace(/\s+/g, ''))) {
                 return res.status(400).json({
@@ -197,9 +206,6 @@ const updateWhitelist = async (req, res) => {
                 });
             }
         }
-
-        // Validate plate number format if being updated
-        
 
         // Handle uploaded images
         let newImagePaths = {
@@ -212,7 +218,9 @@ const updateWhitelist = async (req, res) => {
         let oldImagesToDelete = [];
         let detectedPlateImage = currentEntry.detected_plate_image || null;
         let ocrUpdateData = null;
-        if (req.files) {
+        
+        // SỬA: Chỉ xử lý ảnh khi có files
+        if (req.files && Object.keys(req.files).length > 0) {
             if (req.files.plate_image) {
                 if (replace_images === 'true' && currentEntry.plate_image_path) {
                     oldImagesToDelete.push(currentEntry.plate_image_path);
@@ -227,7 +235,6 @@ const updateWhitelist = async (req, res) => {
                 
                 // THÊM: Detect lại biển số từ ảnh mới
                 try {
-                    // SỬA: Đường dẫn đến file Python trong cùng thư mục
                     const pythonScript = path.join(__dirname, 'detect_plate.py');
                     const imagePath = req.files.plate_image[0].path;
                     const { execSync } = require('child_process');
@@ -250,7 +257,6 @@ const updateWhitelist = async (req, res) => {
                         detectedPlateImage = `/uploads/whitelist/detected_plates/${fileName}`;
                     }
                     
-                    // SỬA: Gán giá trị cho ocrUpdateData (đã khai báo bên ngoài)
                     if (ocrResult.plate_text) {
                         ocrUpdateData = {
                             ocr_raw_text: ocrResult.plate_text,
@@ -263,8 +269,7 @@ const updateWhitelist = async (req, res) => {
                     
                 } catch (err) {
                     console.error('[UPDATE] OCR error:', err);
-                    detectedPlateImage = currentEntry.detected_plate_image; // Giữ ảnh cũ nếu lỗi
-                    // SỬA: Đảm bảo ocrUpdateData vẫn là null khi có lỗi
+                    detectedPlateImage = currentEntry.detected_plate_image;
                     ocrUpdateData = null;
                 }
             }
@@ -300,42 +305,61 @@ const updateWhitelist = async (req, res) => {
         const updateFields = [];
         const updateValues = [];
         
-        if (location_id !== undefined) {
+        // SỬA: Cho phép update field với empty string và kiểm tra các giá trị có thay đổi không
+        if (location_id !== undefined && location_id !== currentEntry.location_id) {
             updateFields.push('location_id = ?');
-            updateValues.push(location_id);
+            updateValues.push(location_id || null);
         }
-        if (plate_number !== undefined) {
+        if (plate_number !== undefined && plate_number !== currentEntry.plate_number) {
             updateFields.push('plate_number = ?');
             updateValues.push(plate_number);
         }
-        if (vehicle_id !== undefined) {
+        if (vehicle_id !== undefined && vehicle_id !== currentEntry.vehicle_id) {
             updateFields.push('vehicle_id = ?');
-            updateValues.push(vehicle_id);
+            updateValues.push(vehicle_id || null);
         }
-        if (owner_name !== undefined) {
+        if (owner_name !== undefined && owner_name !== currentEntry.owner_name) {
             updateFields.push('owner_name = ?');
-            updateValues.push(owner_name);
+            updateValues.push(owner_name || null);
         }
-        if (owner_phone !== undefined) {
-            updateFields.push('owner_phone = ?');
-            updateValues.push(owner_phone);
-        }
-        if (contact_email !== undefined) {
+        if (contact_email !== undefined && contact_email !== currentEntry.contact_email) {
             updateFields.push('contact_email = ?');
-            updateValues.push(contact_email);
+            updateValues.push(contact_email || null);
+        }
+        if (owner_phone !== undefined && owner_phone !== currentEntry.owner_phone) {
+            updateFields.push('owner_phone = ?');
+            updateValues.push(owner_phone || null);
         }
         if (valid_from !== undefined) {
-            updateFields.push('valid_from = ?');
-            updateValues.push(formatDateForMySQL(valid_from));
+            const processedValidFrom = valid_from ? formatDateForMySQL(valid_from) : null;
+            if (processedValidFrom !== currentEntry.valid_from) {
+                updateFields.push('valid_from = ?');
+                updateValues.push(processedValidFrom);
+            }
         }
         if (valid_to !== undefined) {
-            updateFields.push('valid_to = ?');
-            updateValues.push(formatDateForMySQL(valid_to));
+            const processedValidTo = valid_to ? formatDateForMySQL(valid_to) : null;
+            if (processedValidTo !== currentEntry.valid_to) {
+                updateFields.push('valid_to = ?');
+                updateValues.push(processedValidTo);
+            }
         }
-        if (description !== undefined) {
+        if (description !== undefined && description !== currentEntry.description) {
             updateFields.push('description = ?');
-            updateValues.push(description);
+            updateValues.push(description || null);
         }
+        if (approval_status !== undefined && approval_status !== currentEntry.approval_status) {
+            updateFields.push('approval_status = ?');
+            updateValues.push(approval_status);
+            
+            // If approval status is being changed to approved, set approved_by and approved_at
+            if (approval_status === 'approved' && currentEntry.approval_status !== 'approved') {
+                updateFields.push('approved_by = ?', 'approved_at = NOW()');
+                updateValues.push(req.user.userId);
+            }
+        }
+        
+        // OCR data update
         if (ocrUpdateData && ocrUpdateData.ocr_raw_text) {
             updateFields.push('ocr_raw_text = ?');
             updateValues.push(ocrUpdateData.ocr_raw_text);
@@ -344,28 +368,26 @@ const updateWhitelist = async (req, res) => {
             updateFields.push('ocr_processed_at = NOW()');
             console.log('[DEBUG] Adding OCR data to update:', ocrUpdateData);
         }
-        // OCR fields
-        if (ocr_raw_text !== undefined) {
+        
+        // Manual OCR fields
+        if (ocr_raw_text !== undefined && ocr_raw_text !== currentEntry.ocr_raw_text) {
             updateFields.push('ocr_raw_text = ?');
             updateValues.push(ocr_raw_text);
         }
-        if (ocr_confidence !== undefined) {
+        if (ocr_confidence !== undefined && ocr_confidence !== currentEntry.ocr_confidence) {
             updateFields.push('ocr_confidence = ?');
             updateValues.push(ocr_confidence);
             if (ocr_raw_text !== undefined || ocr_confidence !== undefined) {
                 updateFields.push('ocr_processed_at = NOW()');
             }
         }
-        if (verification_status !== undefined) {
-            updateFields.push('verification_status = ?');
-            updateValues.push(verification_status);
-        }
-        if (verified_plate_number !== undefined) {
+        if (verified_plate_number !== undefined && verified_plate_number !== currentEntry.verified_plate_number) {
             updateFields.push('verified_plate_number = ?');
             updateValues.push(verified_plate_number);
         }
 
-        if (req.files || replace_images === 'true') {
+        // Image updates - chỉ update khi có file mới
+        if (req.files && Object.keys(req.files).length > 0) {
             updateFields.push('plate_image_path = ?');
             updateValues.push(newImagePaths.plate_image_path);
             
@@ -378,31 +400,21 @@ const updateWhitelist = async (req, res) => {
             updateFields.push('image_metadata = ?');
             updateValues.push(JSON.stringify(newImageMetadata));
             
-            // Cập nhật detected_plate_image nếu có ảnh mới
             updateFields.push('detected_plate_image = ?');
             updateValues.push(detectedPlateImage);
         }
 
-        // Approval status handling
-        if (approval_status !== undefined) {
-            updateFields.push('approval_status = ?');
-            updateValues.push(approval_status);
-            
-            // If approval status is being changed to approved, set approved_by and approved_at
-            if (approval_status === 'approved' && currentEntry.approval_status !== 'approved') {
-                updateFields.push('approved_by = ?', 'approved_at = NOW()');
-                updateValues.push(req.user.userId);
-            }
-        }
-        if (is_active !== undefined) {
+        if (is_active !== undefined && (is_active ? 1 : 0) !== currentEntry.is_active) {
             updateFields.push('is_active = ?');
             updateValues.push(is_active ? 1 : 0);
         }
 
+        // SỬA: Kiểm tra có field nào thay đổi không
         if (updateFields.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Không có dữ liệu để cập nhật'
+            return res.status(200).json({
+                success: true,
+                message: 'Không có thay đổi nào để cập nhật',
+                data: currentEntry
             });
         }
 
@@ -487,14 +499,14 @@ const updateWhitelist = async (req, res) => {
                 id,
                 JSON.stringify({
                     ...currentEntry,
-                    // Don't log sensitive data in old_values
                     image_metadata: null
                 }),
                 JSON.stringify({
                     ...req.body,
                     has_new_images: req.files ? Object.keys(req.files).length > 0 : false,
                     replaced_images: oldImagesToDelete.length > 0,
-                    deleted_old_images_count: oldImagesToDelete.length
+                    deleted_old_images_count: oldImagesToDelete.length,
+                    updated_fields_count: updateFields.length - 1 // Subtract updated_at
                 }),
                 req.ip,
                 req.get('User-Agent')

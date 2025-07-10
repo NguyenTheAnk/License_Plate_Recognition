@@ -156,42 +156,74 @@ export const postData = async (url, requestData, token = null) => {
     }
 };
 
-// Hàm chỉnh sửa dữ liệu trên API (PUT request) - Updated version
 export const editData = async (url, requestData, token = null) => {
     try {
-        console.log('editData called with:', { url, requestData, hasToken: !!token });
+        console.log('editData called with:', { 
+            url, 
+            requestDataType: requestData.constructor.name,
+            hasToken: !!token 
+        });
+        
         let headers = {};
         let body;
+        
         // Nếu là FormData (có file)
         if (requestData instanceof FormData) {
-            // KHÔNG set Content-Type, browser sẽ tự động
+            console.log('Processing FormData...');
+            // KHÔNG set Content-Type, browser sẽ tự động set với boundary
             if (token && token.trim() !== '') {
                 headers['Authorization'] = `Bearer ${token}`;
             }
             body = requestData;
+            
+            // Debug FormData content
+            console.log('FormData content:');
+            for (let [key, value] of requestData.entries()) {
+                console.log(`${key}:`, value);
+            }
         } else {
+            console.log('Processing JSON data...');
             // Nếu là object (JSON)
             headers['Content-Type'] = 'application/json';
             if (token && token.trim() !== '') {
                 headers['Authorization'] = `Bearer ${token}`;
             }
             body = JSON.stringify(requestData);
+            console.log('JSON body:', body);
         }
+
+        console.log('Request headers:', headers);
+        console.log('Request URL:', `${API_BASE_URL}/${cleanUrl(url)}`);
+
         const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, {
             method: 'PUT',
             headers,
             body
         });
+
+        console.log('Response status:', response.status);
+        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
         const data = await response.json();
+        console.log('Response data:', data);
+
         if (!response.ok) {
             const error = new Error(data.message || `HTTP error! status: ${response.status}`);
             error.status = response.status;
             error.response = { status: response.status, data };
             throw error;
         }
+
         return data;
     } catch (error) {
         console.error('editData error:', error);
+        
+        // Enhanced error logging
+        if (error.response) {
+            console.error('Error response data:', error.response.data);
+            console.error('Error response status:', error.response.status);
+        }
+        
         throw error;
     }
 };

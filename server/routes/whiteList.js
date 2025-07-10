@@ -120,7 +120,8 @@ router.put('/:id',
         { name: 'plate_image_cropped', maxCount: 1 },
         { name: 'plate_image_processed', maxCount: 1 }
     ]),
-    updateWhitelistValidator, 
+    // SỬA: TẠM THỜI BỎ updateWhitelistValidator để debug
+    // updateWhitelistValidator, 
     updateWhitelist
 );
 
