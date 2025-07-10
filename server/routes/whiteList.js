@@ -98,6 +98,11 @@ router.post('/create/bulk',
 router.put('/:id', 
     auth, 
     //checkPermission('whitelist.update'), 
+    upload.fields([
+        { name: 'plate_image', maxCount: 1 },
+        { name: 'plate_image_cropped', maxCount: 1 },
+        { name: 'plate_image_processed', maxCount: 1 }
+    ]),
     updateWhitelistValidator, 
     updateWhitelist
 );

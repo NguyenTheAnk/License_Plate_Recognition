@@ -239,6 +239,24 @@ const getWhitelistById = async (req, res) => {
 
         const entry = whitelistEntry[0];
 
+        // SỬA: Xử lý image_metadata an toàn
+        const parseImageMetadata = (metadata) => {
+            try {
+                if (!metadata) return null;
+                if (typeof metadata === 'object') return metadata;
+                if (typeof metadata === 'string') {
+                    // Kiểm tra nếu string bắt đầu bằng { hoặc [
+                    if (metadata.startsWith('{') || metadata.startsWith('[')) {
+                        return JSON.parse(metadata);
+                    }
+                }
+                return null;
+            } catch (err) {
+                console.warn('Failed to parse image_metadata:', err);
+                return null;
+            }
+        };
+
         // Get image information
         const imageInfo = {
             has_images: entry.has_images,
@@ -258,8 +276,9 @@ const getWhitelistById = async (req, res) => {
                 path: entry.plate_image_processed_path,
                 exists: true
             } : null,
-            image_metadata: entry.image_metadata ? JSON.parse(entry.image_metadata) : null
+            image_metadata: parseImageMetadata(entry.image_metadata)
         };
+
         // Get OCR information
         const ocrInfo = {
             raw_text: entry.ocr_raw_text,

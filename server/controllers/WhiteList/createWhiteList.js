@@ -133,8 +133,8 @@ const createWhitelist = async (req, res) => {
             if (req.files.image && req.files.image.length > 0) {
                 uploadedFile = req.files.image[0];
             } else if (req.files.plate_image && req.files.plate_image.length > 0) {
-                uploadedFile = req.files.plate_image[0];
-            }
+            uploadedFile = req.files.plate_image[0];
+        }
         }
         console.log('[DEBUG] uploadedFile after fixes:', uploadedFile);
         if (!uploadedFile) {
@@ -142,7 +142,7 @@ const createWhitelist = async (req, res) => {
         }
         // Sử dụng đường dẫn file thực tế
         const actualImagePath = uploadedFile.path;
-        plateImagePath = '/uploads/whitelist/' + uploadedFile.filename;
+            plateImagePath = '/uploads/whitelist/' + uploadedFile.filename;
         console.log('[DEBUG] actualImagePath:', actualImagePath);
         console.log('[DEBUG] plateImagePath:', plateImagePath);
         // Kiểm tra file tồn tại (lặp lại tối đa 10 lần, mỗi lần 200ms)
@@ -150,37 +150,37 @@ const createWhitelist = async (req, res) => {
         let retryCount = 0;
         while (!fileExists && retryCount < 10) {
             console.warn(`[DEBUG] File chưa tồn tại, thử delay 200ms lần ${retryCount + 1}:`, actualImagePath);
-            await new Promise(resolve => setTimeout(resolve, 200));
+                await new Promise(resolve => setTimeout(resolve, 200));
             fileExists = fsSync.existsSync(actualImagePath);
             retryCount++;
-        }
-        if (!fileExists) {
+            }
+            if (!fileExists) {
             console.error('[ERROR] File vẫn không tồn tại, không thể detect:', actualImagePath);
-            detectedPlateImage = null;
-            ocrText = '';
-            ocrDetails = {
-                method: 'error',
-                message: 'File ảnh không tồn tại, không thể detect',
-                detected_plate_image: null
-            };
-        } else {
-            try {
+                detectedPlateImage = null;
+                ocrText = '';
+                ocrDetails = {
+                    method: 'error',
+                    message: 'File ảnh không tồn tại, không thể detect',
+                    detected_plate_image: null
+                };
+            } else {
+                try {
                 // Gọi script Python detect biển số
-                const pythonScript = path.join(__dirname, 'detect_plate.py');
+                    const pythonScript = path.join(__dirname, 'detect_plate.py');
                 const result = execSync(`python "${pythonScript}" --image "${actualImagePath}" --save-crop`).toString();
-                const lines = result.trim().split('\n');
-                const lastLine = lines[lines.length - 1];
-                const ocrResult = JSON.parse(lastLine);
+                    const lines = result.trim().split('\n');
+                    const lastLine = lines[lines.length - 1];
+                    const ocrResult = JSON.parse(lastLine);
                 console.log('[DEBUG] ocrResult:', ocrResult);
-                detectedPlateImage = ocrResult.detected_plate_image || null;
+                    detectedPlateImage = ocrResult.detected_plate_image || null;
                 // Đảm bảo đường dẫn đúng subfolder
-                if (detectedPlateImage && !detectedPlateImage.startsWith('/uploads/whitelist/detected_plates/')) {
-                    const fileName = detectedPlateImage.split('/').pop();
-                    detectedPlateImage = `/uploads/whitelist/detected_plates/${fileName}`;
-                }
+                    if (detectedPlateImage && !detectedPlateImage.startsWith('/uploads/whitelist/detected_plates/')) {
+                      const fileName = detectedPlateImage.split('/').pop();
+                      detectedPlateImage = `/uploads/whitelist/detected_plates/${fileName}`;
+                    }
                 // Nếu không có detectedPlateImage, lấy file mới nhất trong detected_plates
-                if (!detectedPlateImage) {
-                    const detectedDir = path.join(__dirname, '../../public/uploads/whitelist/detected_plates/');
+                    if (!detectedPlateImage) {
+                        const detectedDir = path.join(__dirname, '../../public/uploads/whitelist/detected_plates/');
                     try {
                         const files = fsSync.readdirSync(detectedDir)
                             .filter(f => f.startsWith('detected_') && f.endsWith('.jpg'))
@@ -195,35 +195,35 @@ const createWhitelist = async (req, res) => {
                     } catch (dirErr) {
                         console.warn('[DEBUG] Lỗi khi đọc thư mục detected_plates:', dirErr.message);
                     }
-                }
+                    }
                 console.log('[DEBUG] detectedPlateImage:', detectedPlateImage);
-                if (ocrResult.success) {
-                    ocrText = ocrResult.text || '';
+                    if (ocrResult.success) {
+                        ocrText = ocrResult.text || '';
+                        ocrDetails = {
+                            method: ocrResult.method,
+                            confidence: ocrResult.confidence,
+                            bbox: ocrResult.bbox,
+                            detections: ocrResult.detections || [],
+                            message: ocrResult.message,
+                            detected_plate_image: detectedPlateImage
+                        };
+                    } else {
+                        ocrText = '';
+                        ocrDetails = {
+                            method: 'failed',
+                            message: ocrResult.message,
+                            detected_plate_image: detectedPlateImage
+                        };
+                    }
+                } catch (err) {
+                    console.error('OCR error:', err);
                     ocrDetails = {
-                        method: ocrResult.method,
-                        confidence: ocrResult.confidence,
-                        bbox: ocrResult.bbox,
-                        detections: ocrResult.detections || [],
-                        message: ocrResult.message,
-                        detected_plate_image: detectedPlateImage
+                        method: 'error',
+                        message: err.message,
+                        detected_plate_image: null
                     };
-                } else {
-                    ocrText = '';
-                    ocrDetails = {
-                        method: 'failed',
-                        message: ocrResult.message,
-                        detected_plate_image: detectedPlateImage
-                    };
+                    detectedPlateImage = null;
                 }
-            } catch (err) {
-                console.error('OCR error:', err);
-                ocrDetails = {
-                    method: 'error',
-                    message: err.message,
-                    detected_plate_image: null
-                };
-                detectedPlateImage = null;
-            }
         }
 
         // ===== LƯU DB =====
@@ -250,7 +250,7 @@ const createWhitelist = async (req, res) => {
             await connection.execute(
                 'UPDATE vehicle_whitelist SET approved_by = ?, approved_at = NOW() WHERE id = ?',
                 [req.user.userId, result.insertId]
-            );
+        );
         }
 
         // Trả về kết quả
@@ -278,8 +278,8 @@ const createWhitelist = async (req, res) => {
             if (req.files.plate_image_processed) filesToDelete.push(req.files.plate_image_processed[0].path);
             for (const filePath of filesToDelete) {
                 try { await fs.unlink(filePath); } catch (unlinkError) { console.error('Error deleting uploaded file:', unlinkError); }
+                }
             }
-        }
         if (error.code === 'ER_DUP_ENTRY') {
             return res.status(409).json({ success: false, message: 'Biển số này đã có trong danh sách trắng tại vị trí này' });
         }
@@ -736,92 +736,92 @@ const updateOCRData = async (req, res) => {
  * Nhận diện ký tự từ ảnh biển số xe (OCR preview, không lưu DB)
  */
 const ocrPreview = async (req, res) => {
-    try {
-        if (!req.file) {
+  try {
+    if (!req.file) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Vui lòng upload file ảnh (image)' 
             });
-        }
+    }
         
         // FIX: Sử dụng đường dẫn file thực tế
-        const imagePath = req.file.path;
+    const imagePath = req.file.path;
         
         console.log('[DEBUG OCR Preview] imagePath:', imagePath);
         
         if (!fsSync.existsSync(imagePath)) {
-            console.error('OCR error: File does not exist:', imagePath);
+      console.error('OCR error: File does not exist:', imagePath);
             return res.status(500).json({ 
                 success: false, 
                 message: 'File ảnh không tồn tại trên server. Vui lòng thử lại.' 
             });
-        }
+    }
         
-        let ocrText = '';
-        let ocrMessage = '';
-        let fallbackText = '';
-        let ocrResult = null;
+    let ocrText = '';
+    let ocrMessage = '';
+    let fallbackText = '';
+    let ocrResult = null;
         
-        try {
-            const pythonScript = path.join(__dirname, 'detect_plate.py');
-            const { execSync } = require('child_process');
-            let result, stderr = '';
+    try {
+      const pythonScript = path.join(__dirname, 'detect_plate.py');
+      const { execSync } = require('child_process');
+      let result, stderr = '';
             
-            try {
+      try {
                 result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`, { 
                     encoding: 'utf-8', 
                     stdio: ['pipe', 'pipe', 'pipe'] 
                 });
-            } catch (err) {
-                stderr = err.stderr ? err.stderr.toString() : '';
-                console.error('OCR Python stderr:', stderr);
-                // Nếu có stdout, log luôn
-                if (err.stdout) console.error('OCR Python stdout:', err.stdout.toString());
+      } catch (err) {
+        stderr = err.stderr ? err.stderr.toString() : '';
+        console.error('OCR Python stderr:', stderr);
+        // Nếu có stdout, log luôn
+        if (err.stdout) console.error('OCR Python stdout:', err.stdout.toString());
                 return res.status(500).json({ 
                     success: false, 
                     message: 'Lỗi khi chạy nhận diện ký tự từ ảnh', 
                     stderr, 
                     stdout: err.stdout ? err.stdout.toString() : '' 
                 });
-            }
+      }
             
-            // Lấy dòng JSON cuối cùng
-            const lines = result.trim().split('\n');
-            const lastLine = lines[lines.length - 1];
-            try {
-                ocrResult = JSON.parse(lastLine);
-            } catch (parseErr) {
-                console.error('OCR JSON parse error:', lastLine);
-                // Trả về toàn bộ stdout để debug
+      // Lấy dòng JSON cuối cùng
+      const lines = result.trim().split('\n');
+      const lastLine = lines[lines.length - 1];
+      try {
+        ocrResult = JSON.parse(lastLine);
+      } catch (parseErr) {
+        console.error('OCR JSON parse error:', lastLine);
+        // Trả về toàn bộ stdout để debug
                 return res.status(500).json({ 
                     success: false, 
                     message: 'Lỗi parse kết quả từ Python', 
                     raw: result 
                 });
-            }
+      }
             
-            if (ocrResult.success && ocrResult.text) {
-                ocrText = ocrResult.text;
-                // Thêm thông tin chi tiết về detection
-                ocrMessage = ocrResult.message || '';
-                if (ocrResult.method) {
-                    ocrMessage += ` (Method: ${ocrResult.method})`;
-                }
-                if (ocrResult.confidence) {
-                    ocrMessage += ` (Confidence: ${(ocrResult.confidence * 100).toFixed(1)}%)`;
-                }
-            } else {
-                ocrMessage = ocrResult.message || 'Không phát hiện được biển số hoặc nhận diện rỗng.';
-                fallbackText = ocrResult.text || '';
-            }
-        } catch (err) {
-            console.error('OCR error:', err);
+      if (ocrResult.success && ocrResult.text) {
+        ocrText = ocrResult.text;
+        // Thêm thông tin chi tiết về detection
+        ocrMessage = ocrResult.message || '';
+        if (ocrResult.method) {
+          ocrMessage += ` (Method: ${ocrResult.method})`;
+        }
+        if (ocrResult.confidence) {
+          ocrMessage += ` (Confidence: ${(ocrResult.confidence * 100).toFixed(1)}%)`;
+        }
+      } else {
+        ocrMessage = ocrResult.message || 'Không phát hiện được biển số hoặc nhận diện rỗng.';
+        fallbackText = ocrResult.text || '';
+      }
+    } catch (err) {
+      console.error('OCR error:', err);
             return res.status(500).json({ 
                 success: false, 
                 message: 'Lỗi khi nhận diện ký tự từ ảnh', 
                 error: err.message 
             });
-        }
+    }
         
         // FIX: Cleanup uploaded file after processing
         try {
@@ -831,33 +831,33 @@ const ocrPreview = async (req, res) => {
             console.warn('[DEBUG] Failed to cleanup uploaded file:', cleanupErr.message);
         }
         
-        if (ocrText && ocrText.trim()) {
-            res.json({ 
-                success: true, 
-                ocr_text: ocrText,
-                detected_plate_image: ocrResult?.detected_plate_image || null,
-                method: ocrResult?.method || 'unknown',
-                confidence: ocrResult?.confidence || null,
-                bbox: ocrResult?.bbox || null,
-                message: ocrMessage || 'Nhận diện thành công'
-            });
-        } else {
-            res.json({ 
-                success: false, 
-                ocr_text: fallbackText, 
-                detected_plate_image: ocrResult?.detected_plate_image || null,
-                method: ocrResult?.method || 'failed',
-                message: ocrMessage || 'Không nhận diện được ký tự. Hãy kiểm tra lại ảnh hoặc model.' 
-            });
-        }
-    } catch (error) {
-        console.error('OCR preview server error:', error);
+    if (ocrText && ocrText.trim()) {
+      res.json({ 
+        success: true, 
+        ocr_text: ocrText,
+        detected_plate_image: ocrResult?.detected_plate_image || null,
+        method: ocrResult?.method || 'unknown',
+        confidence: ocrResult?.confidence || null,
+        bbox: ocrResult?.bbox || null,
+        message: ocrMessage || 'Nhận diện thành công'
+      });
+    } else {
+      res.json({ 
+        success: false, 
+        ocr_text: fallbackText, 
+        detected_plate_image: ocrResult?.detected_plate_image || null,
+        method: ocrResult?.method || 'failed',
+        message: ocrMessage || 'Không nhận diện được ký tự. Hãy kiểm tra lại ảnh hoặc model.' 
+      });
+    }
+  } catch (error) {
+    console.error('OCR preview server error:', error);
         res.status(500).json({ 
             success: false, 
             message: 'Lỗi server khi nhận diện ký tự từ ảnh', 
             error: error.message 
         });
-    }
+  }
 };
 
 module.exports = {

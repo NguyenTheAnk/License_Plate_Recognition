@@ -160,31 +160,35 @@ export const postData = async (url, requestData, token = null) => {
 export const editData = async (url, requestData, token = null) => {
     try {
         console.log('editData called with:', { url, requestData, hasToken: !!token });
-        
-        const headers = {
-            'Content-Type': 'application/json'
-        };
-        
-        // Chỉ thêm Authorization header nếu có token
-        if (token && token.trim() !== '') {
-            headers['Authorization'] = `Bearer ${token}`;
+        let headers = {};
+        let body;
+        // Nếu là FormData (có file)
+        if (requestData instanceof FormData) {
+            // KHÔNG set Content-Type, browser sẽ tự động
+            if (token && token.trim() !== '') {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            body = requestData;
+        } else {
+            // Nếu là object (JSON)
+            headers['Content-Type'] = 'application/json';
+            if (token && token.trim() !== '') {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            body = JSON.stringify(requestData);
         }
-
         const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, {
             method: 'PUT',
             headers,
-            body: JSON.stringify(requestData)
+            body
         });
-
         const data = await response.json();
-        
         if (!response.ok) {
             const error = new Error(data.message || `HTTP error! status: ${response.status}`);
             error.status = response.status;
             error.response = { status: response.status, data };
             throw error;
         }
-        
         return data;
     } catch (error) {
         console.error('editData error:', error);
@@ -193,21 +197,49 @@ export const editData = async (url, requestData, token = null) => {
 };
 
 // Hàm xóa dữ liệu trên API (DELETE request) - Updated version
-export const deleteData = async (url, token = null) => {
+export const deleteData = async (url, tokenOrData = null, token = null) => {
     try {
-        console.log('deleteData called with:', { url, hasToken: !!token });
+        // Xử lý parameters - có thể là (url, token) hoặc (url, data, token)
+        let requestData = null;
+        let authToken = null;
+        
+        if (typeof tokenOrData === 'string') {
+            // Trường hợp (url, token) - DELETE đơn giản
+            authToken = tokenOrData;
+        } else if (tokenOrData && typeof tokenOrData === 'object') {
+            // Trường hợp (url, data, token) - DELETE với body
+            requestData = tokenOrData;
+            authToken = token;
+        }
+        
+        console.log('deleteData called with:', { url, requestData, hasToken: !!authToken });
         
         const headers = {};
         
-        // Chỉ thêm Authorization header nếu có token
-        if (token && token.trim() !== '') {
-            headers['Authorization'] = `Bearer ${token}`;
+        // Thêm Content-Type nếu có data
+        if (requestData) {
+            headers['Content-Type'] = 'application/json';
+        }
+        
+        // Thêm Authorization header nếu có token
+        if (authToken && authToken.trim() !== '') {
+            headers['Authorization'] = `Bearer ${authToken}`;
         }
 
-        const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, {
+        const fetchOptions = {
             method: 'DELETE',
             headers
-        });
+        };
+
+        // Thêm body nếu có data
+        if (requestData) {
+            fetchOptions.body = JSON.stringify(requestData);
+        }
+
+        console.log('Request URL:', `${API_BASE_URL}/${cleanUrl(url)}`);
+        console.log('Request Options:', fetchOptions);
+
+        const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, fetchOptions);
 
         const data = await response.json();
         

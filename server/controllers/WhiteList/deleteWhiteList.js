@@ -31,17 +31,20 @@ const deleteWhitelist = async (req, res) => {
         const whitelistEntry = existingEntry[0];
 
         if (permanent === 'true') {
-            // Clean up image files before permanent deletion
+            // FIX: Clean up image files before permanent deletion - sửa đường dẫn
             const imagePaths = [
                 whitelistEntry.plate_image_path,
+                whitelistEntry.detected_plate_image, // Thêm detected_plate_image
                 whitelistEntry.plate_image_cropped_path,
                 whitelistEntry.plate_image_processed_path
             ].filter(path => path !== null);
 
             for (const imagePath of imagePaths) {
                 try {
-                    await fs.unlink(imagePath);
-                    console.log(`Deleted image file: ${imagePath}`);
+                    // FIX: Xây dựng đường dẫn file đúng
+                    const fullPath = path.join(__dirname, '../../public', imagePath);
+                    await fs.unlink(fullPath);
+                    console.log(`Deleted image file: ${fullPath}`);
                 } catch (unlinkError) {
                     console.warn(`Could not delete image file ${imagePath}:`, unlinkError.message);
                 }
@@ -57,7 +60,7 @@ const deleteWhitelist = async (req, res) => {
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
                                         old_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'PERMANENT_DELETE', 'WHITELIST', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                 VALUES (?, ?, 'DELETE_PERM', 'WHITELIST', ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user.userId,
                     req.user.username || req.user.email,
@@ -94,7 +97,7 @@ const deleteWhitelist = async (req, res) => {
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
                                         old_values, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'SOFT_DELETE', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                 VALUES (?, ?, 'DELETE', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 [
                     req.user.userId,
                     req.user.username || req.user.email,
@@ -152,7 +155,7 @@ const bulkDeleteWhitelist = async (req, res) => {
         const placeholders = ids.map(() => '?').join(',');
         const [existingEntries] = await connection.execute(
             `SELECT w.id, w.plate_number, w.location_id, l.name as location_name,
-                    w.plate_image_path, w.plate_image_cropped_path, w.plate_image_processed_path,
+                    w.plate_image_path, w.detected_plate_image, w.plate_image_cropped_path, w.plate_image_processed_path,
                     w.ocr_raw_text, w.verification_status
              FROM vehicle_whitelist w
              LEFT JOIN locations l ON w.location_id = l.id
@@ -175,19 +178,22 @@ const bulkDeleteWhitelist = async (req, res) => {
 
         try {
             if (permanent) {
-                // Clean up image files for permanent deletion
+                // FIX: Clean up image files for permanent deletion - sửa đường dẫn
                 for (const entry of existingEntries) {
                     const imagePaths = [
                         entry.plate_image_path,
+                        entry.detected_plate_image, // Thêm detected_plate_image
                         entry.plate_image_cropped_path,
                         entry.plate_image_processed_path
                     ].filter(path => path !== null);
 
+
                     for (const imagePath of imagePaths) {
                         try {
-                            await fs.unlink(imagePath);
-                            deletedFilesCount++;
-                            console.log(`Deleted image file: ${imagePath}`);
+                            // SỬA: Xây dựng đường dẫn file đúng
+                            const fullPath = path.join(__dirname, '../../public', imagePath);
+                            await fs.unlink(fullPath);
+                            console.log(`Deleted image file: ${fullPath}`);
                         } catch (unlinkError) {
                             console.warn(`Could not delete image file ${imagePath}:`, unlinkError.message);
                         }
@@ -199,14 +205,14 @@ const bulkDeleteWhitelist = async (req, res) => {
                     `DELETE FROM vehicle_whitelist WHERE id IN (${placeholders})`,
                     ids
                 );
-                actionType = 'BULK_PERMANENT_DELETE';
+                actionType = 'BULK_DELETE';
             } else {
                 // Soft bulk delete
                 result = await connection.execute(
                     `UPDATE vehicle_whitelist SET is_active = 0, updated_at = NOW() WHERE id IN (${placeholders})`,
                     ids
                 );
-                actionType = 'BULK_SOFT_DELETE';
+                actionType = 'BULK_DELETE';
             }
 
             await connection.commit();
@@ -219,7 +225,7 @@ const bulkDeleteWhitelist = async (req, res) => {
                 [
                     req.user.userId,
                     req.user.username || req.user.email,
-                    actionType,
+                    permanent ? 'BULK_DEL_P' : 'BULK_DEL', // Rút ngắn
                     JSON.stringify({ 
                         ids, 
                         entries: existingEntries,
@@ -254,9 +260,32 @@ const bulkDeleteWhitelist = async (req, res) => {
 
     } catch (error) {
         console.error('Error bulk deleting whitelist entries:', error);
-        res.status(500).json({
+    
+        // Rollback nếu đang trong transaction
+        try {
+            await connection.rollback();
+        } catch (rollbackError) {
+            console.error('Rollback error:', rollbackError);
+        }
+        
+        // Xử lý các loại lỗi cụ thể
+        let errorMessage = 'Lỗi khi xóa nhiều whitelist entries';
+        let statusCode = 500;
+        
+        if (error.code === 'ER_NO_REFERENCED_ROW_2') {
+            errorMessage = 'Không thể xóa: Có dữ liệu liên quan đang được sử dụng';
+            statusCode = 400;
+        } else if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+            errorMessage = 'Không thể xóa: Dữ liệu đang được tham chiếu bởi bảng khác';
+            statusCode = 400;
+        } else if (error.code === 'ENOENT') {
+            errorMessage = 'Lỗi khi xóa file ảnh: File không tồn tại';
+            statusCode = 400;
+        }
+        
+        res.status(statusCode).json({
             success: false,
-            message: 'Lỗi khi xóa nhiều whitelist entries',
+            message: errorMessage,
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -509,7 +538,7 @@ const deleteExpiredWhitelist = async (req, res) => {
                  WHERE valid_to IS NOT NULL AND valid_to < ? AND is_active = 1`,
                 [cutoffDateStr]
             );
-            actionType = 'DELETE_EXPIRED_PERMANENT';
+            actionType = 'DELETE_EXP_PERMANENT';
         } else {
             // Soft delete expired entries
             result = await connection.execute(
@@ -517,7 +546,7 @@ const deleteExpiredWhitelist = async (req, res) => {
                  WHERE valid_to IS NOT NULL AND valid_to < ? AND is_active = 1`,
                 [cutoffDateStr]
             );
-            actionType = 'DELETE_EXPIRED_SOFT';
+            actionType = 'DELETE_EXP_SOFT';
         }
 
         // Log access
@@ -528,7 +557,7 @@ const deleteExpiredWhitelist = async (req, res) => {
             [
                 req.user.userId,
                 req.user.username || req.user.email,
-                actionType,
+                permanent === 'true' ? 'DEL_EXP_P' : 'DEL_EXP_S', // Rút ngắn
                 JSON.stringify({ 
                     cutoff_date: cutoffDateStr,
                     days_expired: parseInt(days_expired),
@@ -545,7 +574,6 @@ const deleteExpiredWhitelist = async (req, res) => {
                 req.get('User-Agent')
             ]
         );
-
         res.status(200).json({
             success: true,
             message: `${permanent === 'true' ? 'Xóa vĩnh viễn' : 'Vô hiệu hóa'} thành công ${result[0].affectedRows} whitelist entries hết hạn`,
@@ -637,7 +665,7 @@ const purgeInactiveWhitelist = async (req, res) => {
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, 
                                     old_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'PURGE_INACTIVE', 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
+             VALUES (?, ?, 'PURGE', 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username || req.user.email,
