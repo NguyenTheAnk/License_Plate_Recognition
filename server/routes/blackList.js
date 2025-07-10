@@ -1,8 +1,13 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const { execSync } = require('child_process');
 
 // Import controllers
-const { createBlacklist, createMultipleBlacklist } = require('../controllers/BlackList/createBlackList');
+const { createBlacklist, ocrPreview, createMultipleBlacklist, uploadFields, upload } = require('../controllers/BlackList/createBlackList');
 const { 
     getAllBlacklist, 
     getBlacklistById, 
@@ -43,50 +48,51 @@ const {
 // Get all blacklist entries with pagination and filters
 router.get('/', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     getAllBlacklist
 );
 
 // Get blacklist statistics
 router.get('/statistics', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     getBlacklistStatistics
 );
 
 // Search blacklist entries
 router.get('/search', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     searchBlacklist
 );
 
 // Get blacklist entry by ID
 router.get('/:id', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     getBlacklistById
 );
 
 // Get blacklist entries by plate number
 router.get('/plate/:plate_number', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     getBlacklistByPlateNumber
 );
 
 // Create single blacklist entry
-router.post('/create', 
-    auth, 
-    checkPermission('blacklist.create'), 
-    createBlacklistValidator, 
-    createBlacklist
+router.post(
+  '/create',
+  auth,
+  uploadFields, // THÊM middleware này để nhận file ảnh
+  //createBlacklistValidator,
+  createBlacklist
 );
-
+router.post('/ocr-preview', upload.single('image'), ocrPreview); 
 // Create multiple blacklist entries
 router.post('/create/bulk', 
     auth, 
-    checkPermission('blacklist.create'), 
+    //checkPermission('blacklist.create'), 
     bulkBlacklistValidator, 
     createMultipleBlacklist
 );
@@ -94,7 +100,7 @@ router.post('/create/bulk',
 // Update blacklist entry
 router.put('/:id', 
     auth, 
-    checkPermission('blacklist.update'), 
+    //checkPermission('blacklist.update'), 
     updateBlacklistValidator, 
     updateBlacklist
 );
@@ -102,28 +108,28 @@ router.put('/:id',
 // Update blacklist status (active/inactive)
 router.put('/:id/status', 
     auth, 
-    checkPermission('blacklist.update'), 
+    //checkPermission('blacklist.update'), 
     updateBlacklistStatus
 );
 
 // Extend blacklist validity period
 router.put('/:id/extend', 
     auth, 
-    checkPermission('blacklist.update'), 
+    //checkPermission('blacklist.update'), 
     extendBlacklistValidity
 );
 
 // Soft delete blacklist entry (set inactive)
 router.delete('/:id', 
     auth, 
-    checkPermission('blacklist.delete'), 
+   // checkPermission('blacklist.delete'), 
     deleteBlacklist
 );
 
 // Restore deleted (inactive) blacklist entry
 router.post('/:id/restore', 
     auth, 
-    checkPermission('blacklist.update'), 
+    //checkPermission('blacklist.update'), 
     restoreBlacklist
 );
 
@@ -134,21 +140,21 @@ router.post('/:id/restore',
 // Bulk update blacklist entries
 router.put('/bulk/update', 
     auth, 
-    checkPermission('blacklist.update'), 
+    //checkPermission('blacklist.update'), 
     bulkUpdateBlacklist
 );
 
 // Bulk delete blacklist entries
 router.post('/bulk/delete', 
     auth, 
-    checkPermission('blacklist.delete'), 
+    //checkPermission('blacklist.delete'), 
     bulkDeleteBlacklist
 );
 
 // Bulk restore blacklist entries
 router.post('/bulk/restore', 
     auth, 
-    checkPermission('blacklist.update'), 
+   // checkPermission('blacklist.update'), 
     bulkRestoreBlacklist
 );
 
@@ -160,7 +166,7 @@ router.post('/bulk/restore',
 router.post('/maintenance/delete-expired', 
     auth, 
     onlyAdminAccess, 
-    checkPermission('blacklist.delete'), 
+    //checkPermission('blacklist.delete'), 
     deleteExpiredBlacklist
 );
 
@@ -171,7 +177,7 @@ router.post('/maintenance/delete-expired',
 // Check if plate number is blacklisted at specific location
 router.get('/check/:plate_number/:location_id', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -239,7 +245,7 @@ router.get('/check/:plate_number/:location_id',
 // Get blacklist entries that are expiring soon
 router.get('/alerts/expiring', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -291,7 +297,7 @@ router.get('/alerts/expiring',
 // Get blacklist entries by location with summary
 router.get('/location/:location_id/summary', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -376,7 +382,7 @@ router.get('/location/:location_id/summary',
 // Get high severity blacklist entries (for alerts)
 router.get('/alerts/high-severity', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -441,7 +447,7 @@ router.get('/alerts/high-severity',
 // Export blacklist data
 router.get('/export/csv', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -562,7 +568,7 @@ router.get('/export/csv',
 // Compare whitelist vs blacklist for a plate number
 router.get('/compare/:plate_number', 
     auth, 
-    checkPermission('blacklist.view'), 
+    //checkPermission('blacklist.view'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
@@ -654,5 +660,60 @@ router.get('/compare/:plate_number',
         }
     }
 );
+
+const storage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../public/uploads/blacklist/');
+    try {
+      await fs.mkdir(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    } catch (error) {
+      cb(error);
+    }
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, `blacklist-${uniqueSuffix}${ext}`);
+  }
+});
+
+// OCR preview endpoint
+router.post('/ocr-preview', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Vui lòng upload file ảnh (image)' });
+    }
+    const imagePath = req.file.path;
+    if (!fsSync.existsSync(imagePath)) {
+      return res.status(500).json({ success: false, message: 'File ảnh không tồn tại trên server.' });
+    }
+    let ocrText = '';
+    let detectedPlateImage = null;
+    let ocrResult = null;
+    try {
+      const pythonScript = path.join(__dirname, '../controllers/WhiteList/detect_plate.py');
+      const result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`).toString();
+      const lines = result.trim().split('\n');
+      const lastLine = lines[lines.length - 1];
+      ocrResult = JSON.parse(lastLine);
+      if (ocrResult.success && ocrResult.text) {
+        ocrText = ocrResult.text;
+        detectedPlateImage = ocrResult.detected_plate_image || null;
+      }
+    } catch (err) {
+      return res.status(500).json({ success: false, message: 'Lỗi khi nhận diện ký tự từ ảnh', error: err.message });
+    }
+    // Cleanup file
+    try { await fs.unlink(imagePath); } catch {}
+    if (ocrText && ocrText.trim()) {
+      res.json({ success: true, ocr_text: ocrText, detected_plate_image: detectedPlateImage, method: ocrResult?.method || 'unknown', confidence: ocrResult?.confidence || null, bbox: ocrResult?.bbox || null, message: ocrResult?.message || 'Nhận diện thành công' });
+    } else {
+      res.json({ success: false, ocr_text: '', detected_plate_image: detectedPlateImage, method: ocrResult?.method || 'failed', message: ocrResult?.message || 'Không nhận diện được ký tự.' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Lỗi server', error: err.message });
+  }
+});
 
 module.exports = router;

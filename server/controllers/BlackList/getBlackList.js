@@ -17,7 +17,10 @@ const getAllBlacklist = async (req, res) => {
             sort_order = 'DESC'
         } = req.query;
 
-        const offset = (page - 1) * limit;
+        // Validate and parse pagination parameters
+        const parsedPage = Math.max(1, parseInt(page) || 1);
+        const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
+        const offset = (parsedPage - 1) * parsedLimit;
         
         // Build WHERE conditions
         let whereConditions = [];
@@ -82,8 +85,8 @@ const getAllBlacklist = async (req, res) => {
         const total = countResult[0].total;
 
         // Get blacklist entries with pagination
-        const [blacklistEntries] = await connection.execute(
-            `SELECT b.*, 
+        const dataQuery = `
+            SELECT b.*, 
                     l.name as location_name, 
                     l.code as location_code,
                     v.make, v.model, v.color, v.vehicle_type,
@@ -100,9 +103,9 @@ const getAllBlacklist = async (req, res) => {
              LEFT JOIN users u ON b.created_by = u.id
              ${whereClause}
              ORDER BY ${sortBy === 'location_name' ? 'l.name' : `b.${sortBy}`} ${sortOrder}
-             LIMIT ? OFFSET ?`,
-            [...queryParams, parseInt(limit), parseInt(offset)]
-        );
+             LIMIT ${parsedLimit} OFFSET ${offset}`;
+
+        const [blacklistEntries] = await connection.execute(dataQuery, queryParams);
 
         // Log access
         await connection.execute(

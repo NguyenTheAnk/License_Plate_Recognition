@@ -115,32 +115,35 @@ export const uploadImage = async (url, formData, token) => {
 };
 
 // Hàm gửi dữ liệu lên API (POST request) - Updated version
-export const postData = async (url, requestData, token = null) => {
+// SỬA trong file auth.js, hàm postData:
+export const postData = async (url, requestData, token = null, isMultipart = false) => {
     try {
-        console.log('postData called with:', { url, requestData, hasToken: !!token });
+        console.log('postData called with:', { url, requestDataType: requestData.constructor.name, hasToken: !!token, isMultipart });
         
-        const headers = {
-            'Content-Type': 'application/json'
-        };
+        let headers = {};
+        let body;
         
-        // Luôn thêm Authorization header nếu có token
-        if (token && token.trim() !== '') {
-            headers['Authorization'] = `Bearer ${token}`;
+        if (requestData instanceof FormData || isMultipart) {
+            // KHÔNG set Content-Type cho FormData, browser sẽ tự động set với boundary
+            if (token && token.trim() !== '') {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            body = requestData;
+        } else {
+            headers['Content-Type'] = 'application/json';
+            if (token && token.trim() !== '') {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            body = JSON.stringify(requestData);
         }
-
-        console.log('Request URL:', `${API_BASE_URL}/${cleanUrl(url)}`);
-        console.log('Request Headers:', headers);
-        console.log('Request Data:', requestData);
-
+        
         const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, {
             method: 'POST',
             headers,
-            body: JSON.stringify(requestData)
+            body
         });
-
+        
         const data = await response.json();
-        console.log('Response Status:', response.status);
-        console.log('Response Data:', data);
         
         if (!response.ok) {
             const error = new Error(data.message || `HTTP error! status: ${response.status}`);
