@@ -7,7 +7,6 @@ const deleteWhitelist = async (req, res) => {
     
     try {
         const { id } = req.params;
-        const { permanent = false } = req.query;
 
         // Check if whitelist entry exists
         const [existingEntry] = await connection.execute(
@@ -30,96 +29,66 @@ const deleteWhitelist = async (req, res) => {
 
         const whitelistEntry = existingEntry[0];
 
-        if (permanent === 'true') {
-            // FIX: Clean up image files before permanent deletion - sửa đường dẫn
-            const imagePaths = [
-                whitelistEntry.plate_image_path,
-                whitelistEntry.detected_plate_image, // Thêm detected_plate_image
-                whitelistEntry.plate_image_cropped_path,
-                whitelistEntry.plate_image_processed_path
-            ].filter(path => path !== null);
+        // SỬA: Luôn xóa vĩnh viễn - Clean up image files before permanent deletion
+        const imagePaths = [
+            whitelistEntry.plate_image_path,
+            whitelistEntry.detected_plate_image,
+            whitelistEntry.plate_image_cropped_path,
+            whitelistEntry.plate_image_processed_path
+        ].filter(path => path !== null);
 
-            for (const imagePath of imagePaths) {
-                try {
-                    // FIX: Xây dựng đường dẫn file đúng
-                    const fullPath = path.join(__dirname, '../../public', imagePath);
-                    await fs.unlink(fullPath);
-                    console.log(`Deleted image file: ${fullPath}`);
-                } catch (unlinkError) {
+        for (const imagePath of imagePaths) {
+            try {
+                if (!imagePath) continue;
+                
+                const fullPath = path.join(__dirname, '../../public', imagePath);
+                
+                await fs.access(fullPath); // Kiểm tra file tồn tại
+                await fs.unlink(fullPath);
+                console.log(`Deleted image file: ${fullPath}`);
+            } catch (unlinkError) {
+                if (unlinkError.code !== 'ENOENT') {
                     console.warn(`Could not delete image file ${imagePath}:`, unlinkError.message);
                 }
             }
-
-            // Permanent delete - completely remove from database
-            await connection.execute(
-                'DELETE FROM vehicle_whitelist WHERE id = ?',
-                [id]
-            );
-
-            // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
-                                        old_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'DELETE_PERM', 'WHITELIST', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username || req.user.email,
-                    id,
-                    JSON.stringify({
-                        ...whitelistEntry,
-                        deleted_image_files: imagePaths
-                    }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
-
-            res.status(200).json({
-                success: true,
-                message: 'Xóa vĩnh viễn whitelist entry thành công',
-                data: {
-                    id: parseInt(id),
-                    plate_number: whitelistEntry.plate_number,
-                    location_name: whitelistEntry.location_name,
-                    deleted_permanently: true,
-                    deleted_files_count: imagePaths.length
-                }
-            });
-
-        } else {
-            // Soft delete - just mark as inactive
-            await connection.execute(
-                'UPDATE vehicle_whitelist SET is_active = 0, updated_at = NOW() WHERE id = ?',
-                [id]
-            );
-
-            // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
-                                        old_values, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'DELETE', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username || req.user.email,
-                    id,
-                    JSON.stringify({ is_active: whitelistEntry.is_active }),
-                    JSON.stringify({ is_active: 0 }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
-
-            res.status(200).json({
-                success: true,
-                message: 'Vô hiệu hóa whitelist entry thành công',
-                data: {
-                    id: parseInt(id),
-                    plate_number: whitelistEntry.plate_number,
-                    location_name: whitelistEntry.location_name,
-                    is_active: false
-                }
-            });
         }
+
+        // SỬA: Permanent delete - completely remove from database
+        await connection.execute(
+            'DELETE FROM vehicle_whitelist WHERE id = ?',
+            [id]
+        );
+
+        // Log access
+        await connection.execute(
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
+                                    old_values, status, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'DELETE', 'WHITELIST', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+            [
+                req.user.userId,
+                req.user.username || req.user.email,
+                id,
+                JSON.stringify({
+                    ...whitelistEntry,
+                    deleted_image_files: imagePaths,
+                    permanent: true
+                }),
+                req.ip,
+                req.get('User-Agent')
+            ]
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Xóa vĩnh viễn whitelist entry thành công',
+            data: {
+                id: parseInt(id),
+                plate_number: whitelistEntry.plate_number,
+                location_name: whitelistEntry.location_name,
+                deleted_permanently: true,
+                deleted_files_count: imagePaths.length
+            }
+        });
 
     } catch (error) {
         console.error('Error deleting whitelist entry:', error);
@@ -135,115 +104,164 @@ const bulkDeleteWhitelist = async (req, res) => {
     const connection = await db.promise();
     
     try {
-        const { ids, permanent = false } = req.body;
+        // SỬA: Thêm debug logs
+        console.log('=== BULK DELETE REQUEST ===');
+        console.log('Method:', req.method);
+        console.log('URL:', req.url);
+        console.log('Params:', req.params);
+        console.log('Body:', req.body);
+        console.log('Content-Type:', req.get('Content-Type'));
+        console.log('============================');
 
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+        const { ids } = req.body;
+
+        // SỬA: Validation chi tiết và debug
+        if (!req.body) {
+            console.log('ERROR: No request body');
             return res.status(400).json({
                 success: false,
-                message: 'Danh sách IDs không hợp lệ'
+                message: 'Không có dữ liệu trong request body'
             });
         }
 
-        if (ids.length > 100) {
+        if (!ids) {
+            console.log('ERROR: No ids in request body');
             return res.status(400).json({
                 success: false,
-                message: 'Không thể xóa quá 100 entries cùng lúc'
+                message: 'Thiếu danh sách IDs trong request'
             });
         }
 
-        // Get existing entries before deletion for logging
-        const placeholders = ids.map(() => '?').join(',');
-        const [existingEntries] = await connection.execute(
-            `SELECT w.id, w.plate_number, w.location_id, l.name as location_name,
-                    w.plate_image_path, w.detected_plate_image, w.plate_image_cropped_path, w.plate_image_processed_path,
-                    w.ocr_raw_text, w.verification_status
-             FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
-             WHERE w.id IN (${placeholders})`,
-            ids
-        );
-
-        if (existingEntries.length === 0) {
-            return res.status(404).json({
+        if (!Array.isArray(ids)) {
+            console.log('ERROR: ids is not an array:', typeof ids, ids);
+            return res.status(400).json({
                 success: false,
-                message: 'Không tìm thấy whitelist entries'
+                message: 'IDs phải là một mảng'
             });
         }
 
-        let result;
-        let actionType;
-        let deletedFilesCount = 0;
+        if (ids.length === 0) {
+            console.log('ERROR: Empty ids array');
+            return res.status(400).json({
+                success: false,
+                message: 'Danh sách IDs không được để trống'
+            });
+        }
 
+        // SỬA: Validate từng ID
+        const invalidIds = ids.filter(id => {
+            const parsed = parseInt(id);
+            return isNaN(parsed) || parsed <= 0;
+        });
+        
+        if (invalidIds.length > 0) {
+            console.log('ERROR: Invalid IDs found:', invalidIds);
+            return res.status(400).json({
+                success: false,
+                message: `IDs không hợp lệ: ${invalidIds.join(', ')}`
+            });
+        }
+
+        console.log('✓ Validation passed. Processing IDs:', ids);
+
+        // Bắt đầu transaction
         await connection.beginTransaction();
 
         try {
-            if (permanent) {
-                // FIX: Clean up image files for permanent deletion - sửa đường dẫn
-                for (const entry of existingEntries) {
-                    const imagePaths = [
-                        entry.plate_image_path,
-                        entry.detected_plate_image, // Thêm detected_plate_image
-                        entry.plate_image_cropped_path,
-                        entry.plate_image_processed_path
-                    ].filter(path => path !== null);
+            // Get existing entries before deletion for logging
+            const placeholders = ids.map(() => '?').join(',');
+            console.log('SQL placeholders:', placeholders);
+            
+            const [existingEntries] = await connection.execute(
+                `SELECT w.id, w.plate_number, w.location_id, l.name as location_name,
+                        w.plate_image_path, w.detected_plate_image, w.plate_image_cropped_path, w.plate_image_processed_path,
+                        w.ocr_raw_text, w.verification_status
+                 FROM vehicle_whitelist w
+                 LEFT JOIN locations l ON w.location_id = l.id
+                 WHERE w.id IN (${placeholders})`,
+                ids
+            );
 
+            console.log('Found entries to delete:', existingEntries.length);
 
-                    for (const imagePath of imagePaths) {
-                        try {
-                            // SỬA: Xây dựng đường dẫn file đúng
-                            const fullPath = path.join(__dirname, '../../public', imagePath);
-                            await fs.unlink(fullPath);
-                            console.log(`Deleted image file: ${fullPath}`);
-                        } catch (unlinkError) {
+            if (existingEntries.length === 0) {
+                await connection.rollback();
+                return res.status(404).json({
+                    success: false,
+                    message: 'Không tìm thấy whitelist entries nào với IDs đã cung cấp'
+                });
+            }
+
+            let deletedFilesCount = 0;
+
+            // Thực hiện permanent delete
+            console.log('Executing DELETE query...');
+            const [result] = await connection.execute(
+                `DELETE FROM vehicle_whitelist WHERE id IN (${placeholders})`,
+                ids
+            );
+
+            console.log('Database delete result:', result);
+
+            // Commit transaction trước khi xóa file
+            await connection.commit();
+            console.log('Transaction committed successfully');
+
+            // Xóa file sau khi commit database
+            for (const entry of existingEntries) {
+                const imagePaths = [
+                    entry.plate_image_path,
+                    entry.detected_plate_image,
+                    entry.plate_image_cropped_path,
+                    entry.plate_image_processed_path
+                ].filter(path => path !== null && path !== undefined && path !== '');
+
+                for (const imagePath of imagePaths) {
+                    try {
+                        const fullPath = path.join(__dirname, '../../public', imagePath);
+                        await fs.access(fullPath);
+                        await fs.unlink(fullPath);
+                        deletedFilesCount++;
+                        console.log(`Deleted image file: ${fullPath}`);
+                    } catch (unlinkError) {
+                        if (unlinkError.code !== 'ENOENT') {
                             console.warn(`Could not delete image file ${imagePath}:`, unlinkError.message);
                         }
                     }
                 }
-
-                // Permanent bulk delete
-                result = await connection.execute(
-                    `DELETE FROM vehicle_whitelist WHERE id IN (${placeholders})`,
-                    ids
-                );
-                actionType = 'BULK_DELETE';
-            } else {
-                // Soft bulk delete
-                result = await connection.execute(
-                    `UPDATE vehicle_whitelist SET is_active = 0, updated_at = NOW() WHERE id IN (${placeholders})`,
-                    ids
-                );
-                actionType = 'BULK_DELETE';
             }
 
-            await connection.commit();
-
-            // Log access
+            // Log access sau khi thành công
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, 
                                         old_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, ?, 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
+                 VALUES (?, ?, 'DELETE', 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
                 [
-                    req.user.userId,
-                    req.user.username || req.user.email,
-                    permanent ? 'BULK_DEL_P' : 'BULK_DEL', // Rút ngắn
+                    req.user?.userId || null,
+                    req.user?.username || req.user?.email || 'unknown',
                     JSON.stringify({ 
-                        ids, 
-                        entries: existingEntries,
-                        affected_rows: result[0].affectedRows,
+                        bulk_operation: true,
+                        action: 'bulk_delete_permanent',
+                        requested_ids: ids, 
+                        deleted_entries: existingEntries,
+                        affected_rows: result.affectedRows,
                         deleted_files_count: deletedFilesCount
                     }),
-                    req.ip,
-                    req.get('User-Agent')
+                    req.ip || 'unknown',
+                    req.get('User-Agent') || 'unknown'
                 ]
             );
 
+            console.log('✓ Bulk delete completed successfully');
+
             res.status(200).json({
                 success: true,
-                message: `${permanent ? 'Xóa vĩnh viễn' : 'Vô hiệu hóa'} thành công ${result[0].affectedRows} whitelist entries`,
+                message: `Xóa vĩnh viễn thành công ${result.affectedRows} whitelist entries`,
                 data: {
                     requested_count: ids.length,
-                    affected_count: result[0].affectedRows,
-                    deleted_permanently: permanent,
+                    found_count: existingEntries.length,
+                    affected_count: result.affectedRows,
+                    deleted_permanently: true,
                     deleted_files_count: deletedFilesCount,
                     deleted_entries: existingEntries.map(entry => ({
                         id: entry.id,
@@ -253,40 +271,39 @@ const bulkDeleteWhitelist = async (req, res) => {
                 }
             });
 
-        } catch (error) {
+        } catch (dbError) {
+            console.error('Database error in bulk delete:', dbError);
             await connection.rollback();
-            throw error;
+            throw dbError;
         }
 
     } catch (error) {
         console.error('Error bulk deleting whitelist entries:', error);
-    
-        // Rollback nếu đang trong transaction
-        try {
-            await connection.rollback();
-        } catch (rollbackError) {
-            console.error('Rollback error:', rollbackError);
-        }
         
-        // Xử lý các loại lỗi cụ thể
         let errorMessage = 'Lỗi khi xóa nhiều whitelist entries';
         let statusCode = 500;
         
-        if (error.code === 'ER_NO_REFERENCED_ROW_2') {
-            errorMessage = 'Không thể xóa: Có dữ liệu liên quan đang được sử dụng';
-            statusCode = 400;
-        } else if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+        if (error.code === 'ER_NO_REFERENCED_ROW_2' || error.code === 'ER_ROW_IS_REFERENCED_2') {
             errorMessage = 'Không thể xóa: Dữ liệu đang được tham chiếu bởi bảng khác';
             statusCode = 400;
         } else if (error.code === 'ENOENT') {
             errorMessage = 'Lỗi khi xóa file ảnh: File không tồn tại';
+            statusCode = 400;
+        } else if (error.code === 'ER_PARSE_ERROR') {
+            errorMessage = 'Lỗi cú pháp SQL';
             statusCode = 400;
         }
         
         res.status(statusCode).json({
             success: false,
             message: errorMessage,
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            debug_info: process.env.NODE_ENV === 'development' ? {
+                error_code: error.code,
+                sql_state: error.sqlState,
+                sql_message: error.sqlMessage,
+                requested_ids: req.body?.ids
+            } : undefined
         });
     }
 };
@@ -338,13 +355,13 @@ const restoreWhitelist = async (req, res) => {
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
                                     old_values, new_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'RESTORE', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+             VALUES (?, ?, 'UPDATE', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username || req.user.email,
                 id,
                 JSON.stringify({ is_active: 0 }),
-                JSON.stringify({ is_active: 1 }),
+                JSON.stringify({ is_active: 1, action: 'restore' }),
                 req.ip,
                 req.get('User-Agent')
             ]
@@ -438,11 +455,13 @@ const bulkRestoreWhitelist = async (req, res) => {
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, 
                                     old_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'BULK_RESTORE', 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
+             VALUES (?, ?, 'UPDATE', 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username || req.user.email,
                 JSON.stringify({ 
+                    bulk_operation: true,
+                    action: 'bulk_restore',
                     ids, 
                     restored_entries: existingEntries,
                     affected_rows: result.affectedRows 
@@ -557,8 +576,10 @@ const deleteExpiredWhitelist = async (req, res) => {
             [
                 req.user.userId,
                 req.user.username || req.user.email,
-                permanent === 'true' ? 'DEL_EXP_P' : 'DEL_EXP_S', // Rút ngắn
+                permanent === 'true' ? 'DELETE' : 'UPDATE', // SỬA: Sử dụng DELETE hoặc UPDATE
                 JSON.stringify({ 
+                    action: 'delete_expired',
+                    permanent: permanent === 'true',
                     cutoff_date: cutoffDateStr,
                     days_expired: parseInt(days_expired),
                     expired_entries: expiredEntries.map(e => ({
@@ -665,11 +686,12 @@ const purgeInactiveWhitelist = async (req, res) => {
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, 
                                     old_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'PURGE', 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
+             VALUES (?, ?, 'DELETE', 'WHITELIST', ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username || req.user.email,
                 JSON.stringify({ 
+                    action: 'purge_inactive',
                     cutoff_date: cutoffDateStr,
                     days_inactive: parseInt(days_inactive),
                     inactive_entries: inactiveEntries.map(e => ({
@@ -791,12 +813,13 @@ const deleteWhitelistImages = async (req, res) => {
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
                                     old_values, new_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'DELETE_IMAGES', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+             VALUES (?, ?, 'DELETE', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username || req.user.email,
                 id,
                 JSON.stringify({ 
+                    action: 'delete_images',
                     deleted_images: imagesToDelete,
                     image_type 
                 }),

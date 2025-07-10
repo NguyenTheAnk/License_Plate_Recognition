@@ -401,7 +401,6 @@ const loadWhitelist = async (forceRefresh = false) => {
 // Sửa trong hàm handleSubmit
 const handleSubmit = async (e) => {
   e.preventDefault();
-  await loadWhitelist(true);
   if (!validateForm()) {
       setError('Vui lòng kiểm tra lại thông tin nhập vào');
       return;
@@ -473,21 +472,21 @@ const handleSubmit = async (e) => {
           }
           setSuccess('Tạo whitelist thành công');
       }
-      
+       
       if (response.success) {
           setOpenModal(false);
           resetForm();
           
           // SỬA: Cập nhật OCR result và detected image từ response
           if (response.data?.ocr_text) {
-              setOcrResult(response.data.ocr_text);
-          }
-          if (response.data?.detected_plate_image) {
-              setDetectedPlateImage(response.data.detected_plate_image);
-          }
-          
-          // SỬA: Reload whitelist để hiển thị ảnh mới
-          await loadWhitelist();
+            setOcrResult(response.data.ocr_text);
+        }
+        if (response.data?.detected_plate_image) {
+            setDetectedPlateImage(response.data.detected_plate_image);
+        }
+        
+        // SỬA: Reload whitelist để hiển thị ảnh mới với force refresh
+        await loadWhitelist(true);
       } else {
           setError(response.message || 'Có lỗi xảy ra');
       }
@@ -500,51 +499,85 @@ const handleSubmit = async (e) => {
   }
 };
 
-  const handleDelete = async (id) => {
-    try {
+const handleDelete = async (id) => {
+  try {
       const token = getToken();
-      const response = await deleteData(`/api/whitelist/${id}`, token);
-      
+      // SỬA: Đảm bảo endpoint đúng định dạng
+      const response = await deleteData(`api/whitelist/${id}`, token);
+
       if (response.success) {
-        setSuccess('Xóa whitelist thành công');
-        setSelectedItems(prev => prev.filter(itemId => itemId !== id));
-        loadWhitelist();
+          setSuccess(response.message || 'Xóa whitelist thành công!');
+          setSelectedItems(prev => prev.filter(itemId => itemId !== id));
+          await loadWhitelist(true);
       } else {
-        setError(response.message || 'Lỗi khi xóa whitelist');
+          setError(response.message || 'Lỗi khi xóa whitelist!');
       }
-    } catch (error) {
+  } catch (error) {
       console.error('Error deleting whitelist:', error);
       const errorMessage = handleErrorResponse(error);
       setError(errorMessage);
-    } finally {
+  } finally {
       setDeleteDialog({ open: false, itemId: null, plateName: '' });
-    }
-  };
+  }
+};
 
-  const handleBulkDelete = async () => {
-    if (selectedItems.length === 0) {
+const handleBulkDelete = async () => {
+  if (selectedItems.length === 0) {
       setError('Vui lòng chọn ít nhất một mục để xóa!');
       return;
-    }
+  }
 
-    if (window.confirm(`Bạn có chắc chắn muốn xóa ${selectedItems.length} mục đã chọn?`)) {
+  const confirmMessage = `BẠN CÓ CHẮC CHẮN MUỐN XÓA VĨNH VIỄN ${selectedItems.length} MỤC ĐÃ CHỌN?
+
+⚠️ CẢNH BÁO: 
+- Dữ liệu sẽ bị XÓA VĨNH VIỄN khỏi hệ thống
+- Tất cả ảnh và file liên quan sẽ bị xóa
+- HÀNH ĐỘNG NÀY KHÔNG THỂ HOÀN TÁC
+
+Nhấn OK để tiếp tục xóa vĩnh viễn, Cancel để hủy.`;
+
+  if (window.confirm(confirmMessage)) {
       try {
-        const token = getToken();
-        // Sửa: Sử dụng postData thay vì deleteData vì backend route sử dụng POST
-        const response = await postData('/api/whitelist/bulk/delete', { ids: selectedItems }, token);
-        if (response.success) {
-          setSuccess(`Xóa thành công ${selectedItems.length} mục!`);
-          setSelectedItems([]);
-          loadWhitelist();
-        } else {
-          setError(response.message || 'Lỗi khi xóa nhiều mục!');
-        }
+          const token = getToken();
+          
+          console.log('Bulk delete request:', {
+              url: 'api/whitelist/bulk-delete', // SỬA: Đảm bảo URL đúng
+              data: { ids: selectedItems },
+              token: token ? 'Token exists' : 'No token',
+              selectedItems: selectedItems
+          });
+          
+          // SỬA: Đảm bảo URL endpoint chính xác
+          const response = await deleteData('api/whitelist/bulk-delete', {
+              ids: selectedItems
+          }, token);
+
+          console.log('Bulk delete response:', response);
+
+          if (response && response.success) {
+              setSuccess(response.message || `Xóa vĩnh viễn thành công ${selectedItems.length} mục!`);
+              setSelectedItems([]);
+              await loadWhitelist(true);
+          } else {
+              setError(response?.message || 'Lỗi khi xóa nhiều mục!');
+          }
       } catch (error) {
-        console.error('Error bulk deleting:', error);
-        setError(handleErrorResponse(error));
+          console.error('Error bulk deleting:', error);
+          
+          let errorMessage = 'Lỗi khi xóa nhiều mục!';
+          
+          if (error.response) {
+              // Lỗi từ server
+              errorMessage = error.response.data?.message || `Lỗi ${error.response.status}: ${error.response.statusText}`;
+          } else if (error.message) {
+              // Lỗi network hoặc khác
+              errorMessage = error.message;
+          }
+          
+          setError(errorMessage);
       }
-    }
-  };
+  }
+};
 useEffect(() => {
   const handleClickOutside = (event) => {
     // Kiểm tra nếu click bên ngoài date input overlay
@@ -986,24 +1019,22 @@ const handleDateInputChange = (field, value) => {
             }}>
               <CardContent>
                 <Grid container spacing={3} alignItems="center">
-                  <Grid item xs={12} sm={6} md={3}>
-                  <TextField
-                        fullWidth
-                        required
-                        label="Biển số xe"
-                        value={formData.plate_number}
-                        onChange={(e) => setFormData({...formData, plate_number: e.target.value})}
-                        disabled={!selectedItem && !ocrResult} // CHỈ disable khi tạo mới và chưa có OCR
-                        error={!!formErrors.plate_number}
-                        helperText={formErrors.plate_number || (selectedItem ? "Có thể chỉnh sửa khi cập nhật ảnh mới" : "Tự động điền từ OCR")}
-                        sx={{
-                          '& .MuiOutlinedInput-root': {
-                            borderRadius: 2,
-                            '&:hover fieldset': { borderColor: '#1976d2' },
-                            '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                          }
-                        }}
-                      />
+                <Grid item xs={12} sm={6} md={3}>
+                    <TextField
+                      fullWidth
+                      label="Biển số xe"
+                      placeholder="Nhập biển số..."
+                      value={filters.plate_number} // SỬA: Sử dụng filters thay vì formData
+                      onChange={(e) => handleFilterChange('plate_number', e.target.value)} // SỬA: Sử dụng handleFilterChange
+                      size="small"
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: 2,
+                          '&:hover fieldset': { borderColor: '#1976d2' },
+                          '&.Mui-focused fieldset': { borderColor: '#1976d2' }
+                        }
+                      }}
+                    />
                   </Grid>
                   <Grid item xs={12} sm={6} md={2}>
                     <FormControl fullWidth size="small">
@@ -1114,7 +1145,7 @@ const handleDateInputChange = (field, value) => {
                           fontWeight: 600
                         }}
                       >
-                        Xóa ({selectedItems.length})
+                        Xóa vĩnh viễn ({selectedItems.length})
                       </Button>
                     )}
                   </Grid>
@@ -1683,9 +1714,14 @@ const handleDateInputChange = (field, value) => {
                   required
                   label="Biển số xe"
                   value={formData.plate_number}
-                  disabled
+                  onChange={(e) => setFormData({...formData, plate_number: e.target.value})} // SỬA: Cho phép edit
+                  disabled={!selectedItem && !ocrResult && !imageFile} // SỬA: Logic disable mới
                   error={!!formErrors.plate_number}
-                  helperText={formErrors.plate_number}
+                  helperText={formErrors.plate_number || (
+                    selectedItem ? "Có thể chỉnh sửa khi upload ảnh mới" : 
+                    ocrResult ? "Đã nhận diện từ OCR" : 
+                    "Tự động điền từ OCR hoặc nhập thủ công"
+                  )}
                   sx={{
                     '& .MuiOutlinedInput-root': {
                       borderRadius: 2,
@@ -2626,21 +2662,23 @@ const handleDateInputChange = (field, value) => {
           fontSize: 20
         }}>
           <Box display="flex" alignItems="center">
-            <BiSolidTrashAlt style={{ marginRight: 12, fontSize: '1.5rem', color: '#888' }} />
-            <Typography variant="h6" sx={{ fontWeight: 600, color: '#222' }}>
-              Xác nhận xóa
+            <BiSolidTrashAlt style={{ marginRight: 12, fontSize: '1.5rem', color: '#f44336' }} />
+            <Typography variant="h6" sx={{ fontWeight: 600, color: '#f44336' }}>
+              Xác nhận xóa vĩnh viễn
             </Typography>
           </Box>
         </DialogTitle>
         <DialogContent sx={{ p: 3 }}>
           <Typography variant="body1" sx={{ mb: 2, color: '#222' }}>
-            Bạn có chắc chắn muốn xóa whitelist với biển số <strong>"{deleteDialog.plateName}"</strong>?
+            Bạn có chắc chắn muốn <strong>XÓA VĨNH VIỄN</strong> whitelist với biển số <strong>"{deleteDialog.plateName}"</strong>?
           </Typography>
-          <Alert severity="warning" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 2 }}>
             <Typography variant="body2">
-              • Whitelist này sẽ bị xóa vĩnh viễn<br/>
+              <strong>CẢNH BÁO:</strong><br/>
+              • Whitelist này sẽ bị <strong>XÓA VĨNH VIỄN</strong> khỏi hệ thống<br/>
+              • Tất cả ảnh và dữ liệu liên quan sẽ bị xóa<br/>
               • Phương tiện sẽ không được phép ra vào tự động<br/>
-              • Hành động này không thể hoàn tác
+              • <strong>Hành động này KHÔNG THỂ HOÀN TÁC</strong>
             </Typography>
           </Alert>
         </DialogContent>
@@ -2673,13 +2711,13 @@ const handleDateInputChange = (field, value) => {
               py: 1.5,
               textTransform: 'none',
               fontWeight: 600,
-              backgroundColor: '#e53935',
+              backgroundColor: '#d32f2f',
               color: 'white',
               '&:hover': { backgroundColor: '#b71c1c' }
             }}
           >
             <FaTrash style={{ marginRight: 8 }} />
-            Xóa
+            Xóa vĩnh viễn
           </Button>
         </DialogActions>
       </Dialog>

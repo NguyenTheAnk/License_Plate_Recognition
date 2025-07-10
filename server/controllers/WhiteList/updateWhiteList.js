@@ -587,13 +587,13 @@ const updateWhitelistStatus = async (req, res) => {
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
                                     old_values, new_values, status, ip_address, user_agent, created_at)
-             VALUES (?, ?, 'UPDATE_STATUS', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+             VALUES (?, ?, 'UPDATE', 'WHITELIST', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
             [
                 req.user.userId,
                 req.user.username || req.user.email,
                 id,
                 JSON.stringify({ is_active: currentEntry.is_active }),
-                JSON.stringify({ is_active }),
+                JSON.stringify({ is_active, action: 'update_status' }),
                 req.ip,
                 req.get('User-Agent')
             ]

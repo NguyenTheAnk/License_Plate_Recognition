@@ -1,3 +1,4 @@
+
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -40,42 +41,50 @@ const {
 } = require('../helper/validator');
 
 // ========================================
-// WHITELIST CRUD ROUTES
+// WHITELIST CRUD ROUTES - THỨ TỰ ĐÃ SỬA
 // ========================================
 
 // Get all whitelist entries with pagination and filters
 router.get('/', 
     auth, 
-    // checkPermission('whitelist.view'), 
     getAllWhitelist
 );
 
 // Get whitelist statistics
 router.get('/statistics', 
     auth, 
-    //checkPermission('whitelist.view'), 
     getWhitelistStatistics
 );
 
 // Search whitelist entries
 router.get('/search', 
     auth, 
-    //checkPermission('whitelist.view'), 
     searchWhitelist
 );
 
-// Get whitelist entry by ID
-router.get('/:id', 
+// OCR preview endpoint
+router.post('/ocr-preview', auth, upload.single('image'), ocrPreview);
+
+// ========================================
+// BULK OPERATIONS - ĐẶT TRƯỚC CÁC ROUTE ĐỘNG /:id
+// ========================================
+
+// SỬA: Bulk delete - ĐẶT TRƯỚC route /:id
+router.delete('/bulk-delete', 
     auth, 
-    //checkPermission('whitelist.view'), 
-    getWhitelistById
+    bulkDeleteWhitelist
 );
 
-// Get whitelist entries by plate number
-router.get('/plate/:plate_number', 
+// Bulk update whitelist entries
+router.put('/bulk/update', 
     auth, 
-    //checkPermission('whitelist.view'), 
-    getWhitelistByPlateNumber
+    bulkUpdateWhitelist
+);
+
+// Bulk restore whitelist entries
+router.post('/bulk/restore', 
+    auth, 
+    bulkRestoreWhitelist
 );
 
 // Create single whitelist entry
@@ -89,15 +98,23 @@ router.post('/create',
 // Create multiple whitelist entries
 router.post('/create/bulk', 
     auth, 
-    //checkPermission('whitelist.create'), 
     bulkWhitelistValidator, 
     bulkCreateWhitelist
+);
+
+// ========================================
+// SINGLE OPERATIONS - ĐẶT SAU BULK OPERATIONS
+// ========================================
+
+// Get whitelist entry by ID
+router.get('/:id', 
+    auth, 
+    getWhitelistById
 );
 
 // Update whitelist entry
 router.put('/:id', 
     auth, 
-    //checkPermission('whitelist.update'), 
     upload.fields([
         { name: 'plate_image', maxCount: 1 },
         { name: 'plate_image_cropped', maxCount: 1 },
@@ -110,61 +127,37 @@ router.put('/:id',
 // Update whitelist status (active/inactive)
 router.put('/:id/status', 
     auth, 
-    //checkPermission('whitelist.update'), 
     updateWhitelistStatus
 );
 
 // Update whitelist approval status
 router.put('/:id/approval', 
     auth, 
-    //checkPermission('whitelist.update'), 
     updateWhitelistApproval
 );
 
 // Extend whitelist validity period
 router.put('/:id/extend', 
     auth, 
-    //checkPermission('whitelist.update'), 
     extendWhitelistValidity
 );
 
-// Soft delete whitelist entry (set inactive)
+// Single delete whitelist entry
 router.delete('/:id', 
     auth, 
-    //checkPermission('whitelist.delete'), 
     deleteWhitelist
 );
 
 // Restore deleted (inactive) whitelist entry
 router.post('/:id/restore', 
     auth, 
-    //checkPermission('whitelist.update'), 
     restoreWhitelist
 );
 
-// ========================================
-// BULK OPERATIONS
-// ========================================
-
-// Bulk update whitelist entries
-router.put('/bulk/update', 
+// Get whitelist entries by plate number
+router.get('/plate/:plate_number', 
     auth, 
-    //checkPermission('whitelist.update'), 
-    bulkUpdateWhitelist
-);
-
-// Bulk delete whitelist entries
-router.post('/bulk/delete', 
-    auth, 
-    //checkPermission('whitelist.delete'), 
-    bulkDeleteWhitelist
-);
-
-// Bulk restore whitelist entries
-router.post('/bulk/restore', 
-    auth, 
-    //checkPermission('whitelist.update'), 
-    bulkRestoreWhitelist
+    getWhitelistByPlateNumber
 );
 
 // ========================================
@@ -175,7 +168,6 @@ router.post('/bulk/restore',
 router.post('/maintenance/delete-expired', 
     auth, 
     onlyAdminAccess, 
-    //checkPermission('whitelist.delete'), 
     deleteExpiredWhitelist
 );
 

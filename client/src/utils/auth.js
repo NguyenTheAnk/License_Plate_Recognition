@@ -196,7 +196,7 @@ export const editData = async (url, requestData, token = null) => {
     }
 };
 
-// Hàm xóa dữ liệu trên API (DELETE request) - Updated version
+// Hàm xóa dữ liệu trên API (DELETE request) - FIXED VERSION
 export const deleteData = async (url, tokenOrData = null, token = null) => {
     try {
         // Xử lý parameters - có thể là (url, token) hoặc (url, data, token)
@@ -212,7 +212,12 @@ export const deleteData = async (url, tokenOrData = null, token = null) => {
             authToken = token;
         }
         
-        console.log('deleteData called with:', { url, requestData, hasToken: !!authToken });
+        console.log('deleteData called with:', { 
+            url, 
+            requestData, 
+            hasToken: !!authToken,
+            tokenLength: authToken ? authToken.length : 0
+        });
         
         const headers = {};
         
@@ -234,14 +239,43 @@ export const deleteData = async (url, tokenOrData = null, token = null) => {
         // Thêm body nếu có data
         if (requestData) {
             fetchOptions.body = JSON.stringify(requestData);
+            console.log('Request body:', fetchOptions.body);
         }
 
-        console.log('Request URL:', `${API_BASE_URL}/${cleanUrl(url)}`);
-        console.log('Request Options:', fetchOptions);
+        // SỬA: Xử lý URL để tránh double slash và đảm bảo format đúng
+        let fullUrl = `${API_BASE_URL}/${cleanUrl(url)}`;
+        
+        console.log('DELETE Request Details:', {
+            url: fullUrl,
+            method: 'DELETE',
+            headers: headers,
+            hasBody: !!requestData,
+            bodyContent: requestData
+        });
 
-        const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, fetchOptions);
+        const response = await fetch(fullUrl, fetchOptions);
+        
+        console.log('DELETE Response Status:', response.status);
+        console.log('DELETE Response Headers:', response.headers);
 
-        const data = await response.json();
+        // SỬA: Kiểm tra response content type trước khi parse JSON
+        const contentType = response.headers.get('content-type');
+        let data;
+        
+        if (contentType && contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            // Nếu không phải JSON, lấy text
+            const textResponse = await response.text();
+            console.log('Non-JSON response:', textResponse);
+            data = { 
+                success: false, 
+                message: 'Server trả về response không phải JSON',
+                raw_response: textResponse 
+            };
+        }
+        
+        console.log('DELETE Response Data:', data);
         
         if (!response.ok) {
             const error = new Error(data.message || `HTTP error! status: ${response.status}`);
@@ -252,7 +286,12 @@ export const deleteData = async (url, tokenOrData = null, token = null) => {
         
         return data;
     } catch (error) {
-        console.error('deleteData error:', error);
+        console.error('deleteData error details:', {
+            message: error.message,
+            status: error.status,
+            response: error.response,
+            stack: error.stack
+        });
         throw error;
     }
 };
