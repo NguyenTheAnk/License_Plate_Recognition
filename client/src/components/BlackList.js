@@ -10,7 +10,7 @@ import {
 import {
    CalendarToday as CalendarIcon, 
   LocationOn as LocationIcon, Person as PersonIcon, Phone as PhoneIcon, 
-  DirectionsCar as CarIcon,  
+  DirectionsCar as CarIcon,
   Home as HomeIcon, ExpandMore as ExpandMoreIcon, Description as DescriptionIcon, 
    Image as ImageIcon, Warning as WarningIcon, 
   Block as BlockIcon, Visibility as VisibilityIcon, Edit as EditIcon, 
@@ -451,9 +451,9 @@ const validateForm = () => {
 // Trong file BlackList.js, sửa function loadBlacklist
 
 const loadBlacklist = async (forceRefresh = false) => {
-  setLoading(true);
-  try {
-    const token = getToken();
+    setLoading(true);
+    try {
+      const token = getToken();
     console.log('Loading blacklist with token:', token ? 'Token exists' : 'No token');
     
     const params = new URLSearchParams();
@@ -534,25 +534,25 @@ const loadBlacklist = async (forceRefresh = false) => {
         }, 100);
       }
       
-    } else {
+      } else {
       showSnackbar(data.message || 'Lỗi khi tải danh sách blacklist', 'error');
-    }
-  } catch (error) {
-    console.error('Error loading blacklist:', error);
-    const errorMessage = handleErrorResponse(error);
+      }
+    } catch (error) {
+      console.error('Error loading blacklist:', error);
+      const errorMessage = handleErrorResponse(error);
     showSnackbar(errorMessage, 'error');
-    
-    if (isUnauthorizedError(error)) {
+      
+      if (isUnauthorizedError(error)) {
       const token = getToken();
       if (!token || token.trim() === '') {
         localStorage.removeItem('token');
         window.location.href = '/login';
       }
+      }
+    } finally {
+      setLoading(false);
     }
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const loadLocations = async () => {
     setLocationsLoading(true);
@@ -658,19 +658,19 @@ const loadBlacklist = async (forceRefresh = false) => {
     setImagePreviewDialog({ open: true, src, title });
   };
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
   
   if (!validateForm()) {
     showSnackbar('Vui lòng kiểm tra lại thông tin nhập vào', 'error');
     return;
   }
 
-  setLoading(true);
+    setLoading(true);
   
-  try {
-    const token = getToken();
-    let response;
+    try {
+      const token = getToken();
+      let response;
     
     const processedFormData = {
   // QUAN TRỌNG: Luôn gửi tất cả các field, không skip field nào
@@ -715,7 +715,7 @@ console.log('Sending update data:', processedFormData);
 
     console.log('Processed form data:', processedFormData);
 
-   if (selectedItem) {
+      if (selectedItem) {
   // ===== UPDATE EXISTING ITEM =====
   console.log('=== UPDATE EXISTING BLACKLIST ===');
   
@@ -767,8 +767,8 @@ console.log('Sending update data:', processedFormData);
   
   // Send update request
   response = await editData(`api/blacklist/${selectedItem.id}`, formDataToSend, token);
-  
-  if (response.success) {
+
+      if (response.success) {
     console.log('[DEBUG FRONTEND] Update response:', response.data);
     
     // SỬA: Kiểm tra và log detected image info
@@ -783,11 +783,11 @@ console.log('Sending update data:', processedFormData);
     showSnackbar(`Cập nhật blacklist ${processedFormData.plate_number} thành công!`, 'success');
     
     // Clear states
-    setOpenModal(false);
+        setOpenModal(false);
     setImageFile(null);
     setImagePreview(null);
     setOcrResult('');
-    resetForm();
+        resetForm();
     
     // SỬA: Enhanced refresh với debug logging
     setTimeout(async () => {
@@ -860,13 +860,13 @@ console.log('Sending update data:', processedFormData);
   }
     }
     
-  } catch (error) {
-    console.error('Error submitting form:', error);
+    } catch (error) {
+      console.error('Error submitting form:', error);
     showSnackbar(handleErrorResponse(error), 'error');
-  } finally {
-    setLoading(false);
-  }
-};
+    } finally {
+      setLoading(false);
+    }
+  };
 const handleDateChange = (field, value) => {
   console.log(`[DEBUG] handleDateChange - Field: ${field}, Value: ${value}`);
   
@@ -907,9 +907,9 @@ const handleDateIconClick = (field) => {
   } else if (field === 'valid_to' && validToDateRef.current) {
     validToDateRef.current.value = dateValue;
     validToDateRef.current.showPicker();
-  }
-};
-  
+    }
+  };
+
   const handleDelete = async (id) => {
     try {
       const token = getToken();
@@ -951,13 +951,13 @@ const handleDateIconClick = (field) => {
   };
 
 // SỬA: Thay thế hàm handleEdit hiện tại
-const handleEdit = (item) => {
+  const handleEdit = (item) => {
   console.log('=== EDIT DEBUG ===');
   console.log('Original item:', item);
   console.log('item.valid_from raw:', item.valid_from, typeof item.valid_from);
   console.log('item.valid_to raw:', item.valid_to, typeof item.valid_to);
   
-  setSelectedItem(item);
+    setSelectedItem(item);
   
   // SỬA: Debug việc format ngày tháng
   let formattedValidFrom = '';
@@ -975,19 +975,19 @@ const handleEdit = (item) => {
     console.log('valid_to conversion:', item.valid_to, '->', formattedValidTo);
   }
   
-  setFormData({
-    location_id: item.location_id || '',
-    plate_number: item.plate_number || '',
-    vehicle_id: item.vehicle_id || '',
-    violation_type: item.violation_type || 'unauthorized',
-    reason: item.reason || '',
-    severity: item.severity || 'medium',
-    owner_name: item.owner_name || '',
-    owner_phone: item.owner_phone || '',
+    setFormData({
+      location_id: item.location_id || '',
+      plate_number: item.plate_number || '',
+      vehicle_id: item.vehicle_id || '',
+      violation_type: item.violation_type || 'unauthorized',
+      reason: item.reason || '',
+      severity: item.severity || 'medium',
+      owner_name: item.owner_name || '',
+      owner_phone: item.owner_phone || '',
     valid_from: formattedValidFrom,
     valid_to: formattedValidTo,
-    description: item.description || ''
-  });
+      description: item.description || ''
+    });
   
   console.log('Final form data dates:');
   console.log('- valid_from:', formattedValidFrom);
@@ -1003,8 +1003,8 @@ const handleEdit = (item) => {
   setOcrResult(item.plate_number || '');
   setDetectedPlateImage(item.detected_plate_image || null);
   setFormErrors({});
-  setOpenModal(true);
-};
+    setOpenModal(true);
+  };
 
   const handleView = async (id) => {
     try {
@@ -1222,7 +1222,7 @@ const handleEdit = (item) => {
           autoHideDuration={5000}
           anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
           onClose={() => setSnackbar({ ...snackbar, open: false })}
-          sx={{
+            sx={{ 
             position: 'fixed',
             top: 24,
             right: 24,
@@ -1535,7 +1535,7 @@ const handleEdit = (item) => {
                           <TableCell>
                             {getSeverityChip(item.severity)}
                           </TableCell>
-                         <TableCell>
+                          <TableCell>
                             {item.valid_from && (
                               <Typography variant="caption" display="block">
                                 Từ: {formatDateForDisplay(item.valid_from)}
@@ -2026,9 +2026,9 @@ const handleEdit = (item) => {
 
 <Grid item xs={12} sm={6}>
   <Box position="relative">
-    <TextField
-      fullWidth
-      label="Có hiệu lực từ"
+                <TextField
+                  fullWidth
+                  label="Có hiệu lực từ"
       placeholder="dd/MM/yyyy"
       value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
       onChange={(e) => {
@@ -2069,7 +2069,7 @@ const handleEdit = (item) => {
     {/* Date Input ẩn - SỬA: Không bind value trực tiếp */}
     <input
       ref={validFromDateRef}
-      type="date"
+                  type="date"
       onChange={(e) => handleDateChange('valid_from', e.target.value)}
       style={{
         position: 'absolute',
@@ -2083,12 +2083,12 @@ const handleEdit = (item) => {
       }}
     />
   </Box>
-</Grid>
+              </Grid>
 <Grid item xs={12} sm={6}>
   <Box position="relative">
-    <TextField
-      fullWidth
-      label="Có hiệu lực đến"
+                <TextField
+                  fullWidth
+                  label="Có hiệu lực đến"
       placeholder="dd/MM/yyyy"
       value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
       onChange={(e) => {
@@ -2129,7 +2129,7 @@ const handleEdit = (item) => {
     {/* Date Input ẩn - SỬA: Không bind value trực tiếp */}
     <input
       ref={validToDateRef}
-      type="date"
+                  type="date"
       onChange={(e) => handleDateChange('valid_to', e.target.value)}
       style={{
         position: 'absolute',
@@ -2143,7 +2143,7 @@ const handleEdit = (item) => {
       }}
     />
   </Box>
-</Grid>
+              </Grid>
                 </Grid>
               </Grid>
               
@@ -2288,7 +2288,7 @@ const handleEdit = (item) => {
                   {/* Left Info */}
                   <Grid item xs={12} md={8}>
                     <Grid container spacing={3}>
-                      <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={6}>
                         <Card sx={{ height: '100%', borderRadius: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', border: '1px solid #e0e0e0' }}>
                           <CardContent sx={{ p: 2.5 }}>
                             <Box display="flex" alignItems="center" gap={1} mb={2}>
@@ -2310,8 +2310,8 @@ const handleEdit = (item) => {
                             </Box>
                           </CardContent>
                         </Card>
-                      </Grid>
-                      <Grid item xs={12} md={6}>
+              </Grid>
+              <Grid item xs={12} md={6}>
                         <Card sx={{ height: '100%', borderRadius: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', border: '1px solid #e0e0e0' }}>
                           <CardContent sx={{ p: 2.5 }}>
                             <Box display="flex" alignItems="center" gap={1} mb={2}>
@@ -2342,7 +2342,7 @@ const handleEdit = (item) => {
                             </Box>
                           </CardContent>
                         </Card>
-                      </Grid>
+              </Grid>
                       <Grid item xs={12} md={12}>
                         <Card sx={{ height: '100%', borderRadius: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', border: '1px solid #e0e0e0' }}>
                           <CardContent sx={{ p: 2.5 }}>
@@ -2350,14 +2350,14 @@ const handleEdit = (item) => {
                               <CalendarIcon sx={{ color: '#d32f2f', fontSize: '1.2rem' }} />
                               <Typography variant="h6" sx={{ color: '#d32f2f', fontWeight: 600 }}>
                                 Thời gian hiệu lực
-                              </Typography>
+                </Typography>
                             </Box>
                             <Box sx={{ pl: 0.5 }}>
                               <Box display="flex" alignItems="center" gap={1} mb={1}>
                                 <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#d32f2f' }} />
                                 <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
                                   Từ:
-                                </Typography>
+                </Typography>
                                 <Typography variant="body2" sx={{ fontWeight: 500 }}>
                                   {selectedItem.valid_from ? formatDateForDisplay(selectedItem.valid_from) : 'Vĩnh viễn'}
                                 </Typography>
@@ -2464,7 +2464,7 @@ const handleEdit = (item) => {
                         </Box>
                       </CardContent>
                     </Card>
-                    {selectedItem.description && (
+                {selectedItem.description && (
                       <Card sx={{ borderRadius: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', border: '1px solid #e0e0e0' }}>
                         <CardContent sx={{ p: 2.5 }}>
                           <Box display="flex" alignItems="center" gap={1} mb={2}>
@@ -2480,9 +2480,9 @@ const handleEdit = (item) => {
                           </Box>
                         </CardContent>
                       </Card>
-                    )}
-                  </Grid>
-                </Grid>
+                )}
+              </Grid>
+            </Grid>
               </Box>
             </Box>
           )}

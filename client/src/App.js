@@ -12,6 +12,7 @@ import User from './pages/User/User';
 import UserDetail from './pages/User/UserDetail';
 import Roles from './pages/Roles';
 import Permissions from './pages/Permissions';
+import Search from './pages/Search';
 import axios from 'axios';
 import WhiteList from './components/WhiteList';
 import BlackList from './components/BlackList';
@@ -175,6 +176,7 @@ function AppContent() {
                   <Route path="/whitelist" element={<WhiteList />} />
                   <Route path="/blacklist" element={<BlackList />} />
                   <Route path="/roles" element={<Roles />} />
+                  <Route path="/search" element={<Search />} />
                   <Route path="/permissions" element={<Permissions />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

@@ -22,35 +22,35 @@ const deleteBlacklist = async (req, res) => {
         const blacklistEntry = existingEntry[0];
 
         // Hard delete - completely remove from database
-        await connection.execute(
-            'DELETE FROM vehicle_blacklist WHERE id = ?',
-            [id]
-        );
+            await connection.execute(
+                'DELETE FROM vehicle_blacklist WHERE id = ?',
+                [id]
+            );
 
-        // Log access
-        await connection.execute(
-            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
-                                    old_values, status, ip_address, user_agent, created_at)
+            // Log access
+            await connection.execute(
+                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
+                                        old_values, status, ip_address, user_agent, created_at)
              VALUES (?, ?, 'DELETE', 'BLACKLIST', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-            [
-                req.user.userId,
-                req.user.username || req.user.email,
-                id,
-                JSON.stringify(blacklistEntry),
-                req.ip,
-                req.get('User-Agent')
-            ]
-        );
+                [
+                    req.user.userId,
+                    req.user.username || req.user.email,
+                    id,
+                    JSON.stringify(blacklistEntry),
+                    req.ip,
+                    req.get('User-Agent')
+                ]
+            );
 
-        res.status(200).json({
-            success: true,
+            res.status(200).json({
+                success: true,
             message: 'Xóa blacklist entry thành công',
-            data: {
-                id: parseInt(id),
-                plate_number: blacklistEntry.plate_number,
-                deleted_permanently: true
-            }
-        });
+                data: {
+                    id: parseInt(id),
+                    plate_number: blacklistEntry.plate_number,
+                    deleted_permanently: true
+                }
+            });
 
     } catch (error) {
         console.error('Error deleting blacklist entry:', error);
@@ -91,9 +91,9 @@ const bulkDeleteBlacklist = async (req, res) => {
 
         // Hard bulk delete
         const result = await connection.execute(
-            `DELETE FROM vehicle_blacklist WHERE id IN (${placeholders})`,
-            ids
-        );
+                `DELETE FROM vehicle_blacklist WHERE id IN (${placeholders})`,
+                ids
+            );
 
         // Log access
         await connection.execute(
@@ -166,10 +166,10 @@ const deleteExpiredBlacklist = async (req, res) => {
 
         // Hard delete expired entries
         const result = await connection.execute(
-            `DELETE FROM vehicle_blacklist 
-             WHERE valid_to IS NOT NULL AND valid_to < ? AND is_active = 1`,
-            [cutoffDateStr]
-        );
+                `DELETE FROM vehicle_blacklist 
+                 WHERE valid_to IS NOT NULL AND valid_to < ? AND is_active = 1`,
+                [cutoffDateStr]
+            );
 
         // Log access
         await connection.execute(
