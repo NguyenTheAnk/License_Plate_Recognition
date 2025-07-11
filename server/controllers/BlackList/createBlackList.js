@@ -230,8 +230,8 @@ const createBlacklist = async (req, res) => {
             };
         } else {
             try {
-                // Gọi script Python detect biển số - sử dụng cùng script với whitelist
-                const pythonScript = path.join(__dirname, '../WhiteList/detect_plate.py');
+                // Gọi script Python detect biển số - sử dụng script riêng cho blacklist
+                const pythonScript = path.join(__dirname, './detect_plate.py');
                 const result = execSync(`python "${pythonScript}" --image "${actualImagePath}" --save-crop`).toString();
                 const lines = result.trim().split('\n');
                 const lastLine = lines[lines.length - 1];
@@ -668,8 +668,8 @@ const ocrPreview = async (req, res) => {
         let ocrResult = null;
         
         try {
-            // Sử dụng cùng script Python với whitelist
-            const pythonScript = path.join(__dirname, '../WhiteList/detect_plate.py');
+            // Sử dụng script Python riêng cho blacklist
+            const pythonScript = path.join(__dirname, './detect_plate.py');
             const { execSync } = require('child_process');
             let result, stderr = '';
             

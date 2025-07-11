@@ -1,13 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Box, Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Typography, Grid, FormControl, InputLabel, Select, MenuItem, Chip, Alert, CircularProgress, Card, CardContent, Tooltip, Tabs, Tab, Checkbox, Breadcrumbs, Avatar, FormHelperText, InputAdornment, Snackbar, Pagination, Divider
+  Box, Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, 
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
+  IconButton, Typography, Grid, FormControl, InputLabel, Select, MenuItem, 
+  Chip, Alert, CircularProgress, Card, CardContent, Tooltip, Tabs, Tab, 
+  Checkbox, Breadcrumbs, Avatar, FormHelperText, InputAdornment, Snackbar, 
+  Pagination, Divider, Paper, Stack
 } from '@mui/material';
 import {
-  Add as AddIcon, CheckCircle as CheckIcon, CalendarToday as CalendarIcon, LocationOn as LocationIcon, Person as PersonIcon, Phone as PhoneIcon, DirectionsCar as CarIcon, CheckCircleOutline as CheckCircleOutlineIcon, Home as HomeIcon, ExpandMore as ExpandMoreIcon, Description as DescriptionIcon, Schedule as ScheduleIcon, Image as ImageIcon, Warning as WarningIcon, Block as BlockIcon, Visibility as VisibilityIcon, Edit as EditIcon, Delete as DeleteIcon
+  Add as AddIcon, CheckCircle as CheckIcon, CalendarToday as CalendarIcon, 
+  LocationOn as LocationIcon, Person as PersonIcon, Phone as PhoneIcon, 
+  DirectionsCar as CarIcon, CheckCircleOutline as CheckCircleOutlineIcon, 
+  Home as HomeIcon, ExpandMore as ExpandMoreIcon, Description as DescriptionIcon, 
+  Schedule as ScheduleIcon, Image as ImageIcon, Warning as WarningIcon, 
+  Block as BlockIcon, Visibility as VisibilityIcon, Edit as EditIcon, 
+  Delete as DeleteIcon, PhotoCamera as PhotoCameraIcon, Close as CloseIcon,
+  ZoomIn as ZoomInIcon, Download as DownloadIcon
 } from '@mui/icons-material';
 import { FaUpload, FaEye, FaEdit, FaTrash, FaPlus, FaTimes, FaExclamationTriangle, FaShieldAlt, FaClock, FaSave } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
-import { fetchDataFromAPI, postData, editData, deleteData, handleErrorResponse, isUnauthorizedError } from '../utils/auth';
+
+// Import các hàm từ auth.js
+import { 
+  fetchDataFromAPI,
+  postData,
+  editData,
+  deleteData,
+  uploadImage,
+  handleErrorResponse,
+  isUnauthorizedError
+} from '../utils/auth';
 
 // Styled Breadcrumb component
 const StyledBreadcrumb = ({ component, href, label, icon, onClick, ...props }) => (
@@ -30,6 +52,112 @@ const StyledBreadcrumb = ({ component, href, label, icon, onClick, ...props }) =
   />
 );
 
+// Image Preview Dialog Component
+const ImagePreviewDialog = ({ open, onClose, src, title = "Xem ảnh" }) => (
+  <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Typography variant="h6">{title}</Typography>
+      <Box>
+        <IconButton 
+          onClick={() => window.open(src, '_blank')} 
+          title="Tải về"
+          sx={{ mr: 1 }}
+        >
+          <DownloadIcon />
+        </IconButton>
+        <IconButton onClick={onClose} title="Đóng">
+          <CloseIcon />
+        </IconButton>
+      </Box>
+    </DialogTitle>
+    <DialogContent sx={{ p: 2, textAlign: 'center' }}>
+      {src ? (
+        <img 
+          src={src} 
+          alt={title}
+          style={{ 
+            maxWidth: '100%', 
+            maxHeight: '70vh', 
+            objectFit: 'contain',
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+          }} 
+        />
+      ) : (
+        <Typography color="text.secondary">Không có ảnh</Typography>
+      )}
+    </DialogContent>
+  </Dialog>
+);
+
+// Plate Image Component - Updated to match WhiteList style
+const PlateImageCell = ({ item, onImageClick }) => (
+  <TableCell sx={{ width: 120 }}>
+    {item.detected_plate_image ? (
+      <Box
+        component="img"
+        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`}
+        alt="Ảnh biển số đã phát hiện"
+        sx={{
+          width: 80,
+          height: 50,
+          objectFit: 'cover',
+          borderRadius: 1,
+          border: '2px solid #d32f2f',
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease',
+          '&:hover': {
+            transform: 'scale(1.1)',
+            boxShadow: '0 4px 12px rgba(211, 47, 47, 0.3)'
+          }
+        }}
+        onClick={() => {
+          window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`, '_blank');
+        }}
+        title="Ảnh biển số đã phát hiện (click để xem lớn)"
+      />
+    ) : item.plate_image_path ? (
+      <Box
+        component="img"
+        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`}
+        alt="Ảnh gốc"
+        sx={{
+          width: 80,
+          height: 50,
+          objectFit: 'cover',
+          borderRadius: 1,
+          border: '1px solid #e0e0e0',
+          cursor: 'pointer',
+          transition: 'transform 0.2s ease',
+          '&:hover': {
+            transform: 'scale(1.1)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+          }
+        }}
+        onClick={() => {
+          window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`, '_blank');
+        }}
+        title="Ảnh gốc (click để xem lớn)"
+      />
+    ) : (
+      <Box
+        sx={{
+          width: 80,
+          height: 50,
+          backgroundColor: '#f5f5f5',
+          borderRadius: 1,
+          border: '1px solid #e0e0e0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}
+      >
+        <ImageIcon sx={{ fontSize: 20, color: '#ccc' }} />
+      </Box>
+    )}
+  </TableCell>
+);
+
 const BlackList = () => {
   // States
   const [blacklist, setBlacklist] = useState([]);
@@ -45,38 +173,46 @@ const BlackList = () => {
   const [showDateInput, setShowDateInput] = useState({ valid_from: false, valid_to: false });
   const validFromDateRef = useRef(null);
   const validToDateRef = useRef(null);
+  
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  
   // Filters
   const [filters, setFilters] = useState({
     location_id: '', plate_number: '', violation_type: '', severity: '', is_active: '', valid_status: ''
   });
+  
   // Form data
   const [formData, setFormData] = useState({
-    location_id: '', plate_number: '', vehicle_id: '', violation_type: 'unauthorized', reason: '', severity: 'medium', owner_name: '', owner_phone: '', valid_from: '', valid_to: '', description: ''
+    location_id: '', plate_number: '', vehicle_id: '', violation_type: 'unauthorized', 
+    reason: '', severity: 'medium', owner_name: '', owner_phone: '', 
+    valid_from: '', valid_to: '', description: ''
   });
+  
   // Error handling
   const [formErrors, setFormErrors] = useState({});
   const [deleteDialog, setDeleteDialog] = useState({ open: false, itemId: null, plateName: '' });
+  
   // Snackbar
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
   const showSnackbar = (message, severity = 'info') => setSnackbar({ open: true, message, severity });
 
-  // Thêm state cho upload ảnh và OCR
+  // Image states
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [ocrResult, setOcrResult] = useState('');
   const [detectedPlateImage, setDetectedPlateImage] = useState(null);
-
-  // Thêm state cho ảnh gốc và ảnh biển số đã detect khi xem chi tiết/chỉnh sửa
   const [detailImage, setDetailImage] = useState(null);
   const [detailDetectedPlateImage, setDetailDetectedPlateImage] = useState(null);
 
+  // Image preview dialog
+  const [imagePreviewDialog, setImagePreviewDialog] = useState({ open: false, src: '', title: '' });
+
   // Get token from localStorage
-  const getToken = () => localStorage.getItem('token');
+  const getToken = () => localStorage.getItem('token') || 'mock-token';
 
   // Auto close alerts
   useEffect(() => {
@@ -88,48 +224,59 @@ const BlackList = () => {
 
   // Load data
   useEffect(() => {
-    loadBlacklist();
-    loadLocations();
-    loadStatistics();
+    const loadData = async () => {
+      await loadBlacklist();
+      await loadLocations();
+      await loadStatistics();
+    };
+    loadData();
   }, [currentPage, itemsPerPage, filters]);
 
   // Validate form
- // SỬA trong BlackList.js, hàm validateForm:
-const validateForm = () => {
-  const errors = {};
-  if (!formData.location_id) errors.location_id = 'Vui lòng chọn khu vực';
-  
-  // SỬA: Kiểm tra plate_number từ OCR
-  if (!formData.plate_number && !ocrResult) {
+  const validateForm = () => {
+    const errors = {};
+    if (!formData.location_id) errors.location_id = 'Vui lòng chọn khu vực';
+    
+    if (!formData.plate_number && !ocrResult) {
       errors.plate_number = 'Vui lòng upload ảnh biển số để nhận diện tự động';
-  }
-  
-  if (!formData.reason) errors.reason = 'Vui lòng nhập lý do cấm';
-  if (!formData.severity) errors.severity = 'Vui lòng chọn mức độ';
-  
-  // SỬA: Kiểm tra ảnh khi tạo mới
-  if (!selectedItem && !imageFile) {
+    }
+    
+    if (!formData.reason) errors.reason = 'Vui lòng nhập lý do cấm';
+    if (!formData.severity) errors.severity = 'Vui lòng chọn mức độ';
+    
+    if (!selectedItem && !imageFile) {
       errors.image = 'Vui lòng upload ảnh biển số xe';
-  }
-  
-  // Validation khác...
-  setFormErrors(errors);
-  return Object.keys(errors).length === 0;
-};
+    }
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
-  // CRUD & Data
+  // CRUD & Data functions
   const loadBlacklist = async (forceRefresh = false) => {
     setLoading(true);
     try {
       const token = getToken();
+      console.log('Loading blacklist with token:', token ? 'Token exists' : 'No token');
+      
       const params = new URLSearchParams();
       params.append('page', currentPage.toString());
       params.append('limit', itemsPerPage.toString());
-      if (forceRefresh) params.append('_t', Date.now().toString());
+      
+      // THÊM: Force refresh bằng cách thêm timestamp
+      if (forceRefresh) {
+        params.append('_t', Date.now().toString());
+      }
+      
+      // Add filters to params
       Object.entries(filters).forEach(([key, value]) => {
-        if (value !== '' && value !== null && value !== undefined) params.append(key, value);
+        if (value !== '' && value !== null && value !== undefined) {
+          params.append(key, value);
+        }
       });
+
       const response = await fetchDataFromAPI(`/api/blacklist?${params.toString()}`, token);
+
       if (response.success) {
         setBlacklist(response.data || []);
         if (response.pagination) {
@@ -140,7 +287,17 @@ const validateForm = () => {
         showSnackbar(response.message || 'Lỗi khi tải danh sách blacklist', 'error');
       }
     } catch (error) {
-      showSnackbar(handleErrorResponse(error), 'error');
+      console.error('Error loading blacklist:', error);
+      const errorMessage = handleErrorResponse(error);
+      showSnackbar(errorMessage, 'error');
+      
+      if (isUnauthorizedError(error)) {
+        const token = getToken();
+        if (!token || token.trim() === '') {
+          localStorage.removeItem('token');
+          window.location.href = '/login';
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -151,13 +308,17 @@ const validateForm = () => {
     try {
       const token = getToken();
       const response = await fetchDataFromAPI('/api/location?limit=1000&is_active=1', token);
+      
       if (response.success) {
         setLocations(response.data.locations || []);
       } else {
+        console.error('Failed to load locations:', response.message);
         showSnackbar('Không thể tải danh sách khu vực: ' + response.message, 'error');
       }
     } catch (error) {
-      showSnackbar('Không thể tải danh sách khu vực: ' + handleErrorResponse(error), 'error');
+      console.error('Error loading locations:', error);
+      const errorMessage = handleErrorResponse(error);
+      showSnackbar('Không thể tải danh sách khu vực: ' + errorMessage, 'error');
     } finally {
       setLocationsLoading(false);
     }
@@ -167,50 +328,72 @@ const validateForm = () => {
     try {
       const token = getToken();
       const response = await fetchDataFromAPI('/api/blacklist/statistics', token);
+      
       if (response.success) {
         setStatistics(response.data?.general_statistics || {});
       }
     } catch (error) {
-      // ignore
+      console.error('Error loading statistics:', error);
     }
   };
 
-  // Hàm xử lý upload ảnh và OCR
+  // Image handling
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Validate file type
       if (!file.type.startsWith('image/')) {
         showSnackbar('Vui lòng chọn file ảnh', 'error');
         return;
       }
+      // Validate file size (max 10MB)
       if (file.size > 10 * 1024 * 1024) {
         showSnackbar('Kích thước file không được vượt quá 10MB', 'error');
         return;
       }
       setImageFile(file);
+      // Create preview
       const reader = new FileReader();
-      reader.onload = (ev) => setImagePreview(ev.target.result);
+      reader.onload = (ev) => {
+        setImagePreview(ev.target.result);
+      };
       reader.readAsDataURL(file);
+
+      // Gửi ảnh lên backend để nhận diện OCR ngay khi chọn ảnh
       try {
         const token = getToken();
         const formDataToSend = new FormData();
         formDataToSend.append('image', file);
-        const data = await postData('/api/blacklist/ocr-preview', formDataToSend, token, true);
+        const data = await uploadImage('/api/blacklist/ocr-preview', formDataToSend, token);
+        
         if (data.success && data.ocr_text) {
           setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
           setOcrResult(data.ocr_text);
           showSnackbar(`Nhận diện thành công biển số: ${data.ocr_text}`, 'success');
-          if (data.detected_plate_image) setDetectedPlateImage(data.detected_plate_image);
-          else setDetectedPlateImage(null);
+          
+          if (data.detected_plate_image) {
+            setDetectedPlateImage(data.detected_plate_image);
+          } else {
+            setDetectedPlateImage(null);
+          }
+        } else if (data.message) {
+          setOcrResult('');
+          setDetectedPlateImage(null);
+          showSnackbar('Nhận diện ký tự thất bại: ' + data.message, 'error');
         } else {
           setOcrResult('');
           setDetectedPlateImage(null);
-          showSnackbar('Nhận diện ký tự thất bại: ' + (data.message || ''), 'error');
+          showSnackbar('Không nhận diện được ký tự biển số từ ảnh.', 'error');
         }
       } catch (err) {
         setOcrResult('');
-        setDetectedPlateImage(null);
-        showSnackbar('Lỗi nhận diện ký tự: ' + (err.message || ''), 'error');
+        if (err.response && err.response.data && err.response.data.message) {
+          showSnackbar('Lỗi nhận diện ký tự: ' + err.response.data.message, 'error');
+        } else if (err.message) {
+          showSnackbar('Lỗi nhận diện ký tự: ' + err.message, 'error');
+        } else {
+          showSnackbar('Lỗi không xác định khi nhận diện ký tự.', 'error');
+        }
       }
     } else {
       setImageFile(null);
@@ -220,91 +403,143 @@ const validateForm = () => {
     }
   };
 
-// SỬA hàm handleSubmit trong BlackList.js:
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  if (!validateForm()) {
+  const handleImagePreviewClick = (src, title) => {
+    setImagePreviewDialog({ open: true, src, title });
+  };
+
+  // Form submission
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validateForm()) {
       showSnackbar('Vui lòng kiểm tra lại thông tin nhập vào', 'error');
       return;
-  }
-  setLoading(true);
-  try {
+    }
+    setLoading(true);
+    try {
       const token = getToken();
       let response;
       
+      // THÊM LOGIC XỬ LÝ NGÀY TRƯỚC KHI GỬI:
+      const processedFormData = {
+        ...formData,
+        // Chuyển đổi ngày về định dạng YYYY-MM-DD
+        valid_from: formData.valid_from ? 
+          (formData.valid_from.includes('T') ? 
+            new Date(formData.valid_from).toISOString().split('T')[0] : 
+            formData.valid_from) : '',
+        valid_to: formData.valid_to ? 
+          (formData.valid_to.includes('T') ? 
+            new Date(formData.valid_to).toISOString().split('T')[0] : 
+            formData.valid_to) : ''
+      };
+      
       if (selectedItem) {
-          // Update existing item
-          if (imageFile) {
-              // Có ảnh mới - dùng FormData
-              const formDataToSend = new FormData();
-              
-              // Append tất cả fields
-              Object.entries(formData).forEach(([key, value]) => {
-                  if (value !== null && value !== undefined) {
-                      formDataToSend.append(key, value.toString());
-                  }
-              });
-              
-              // SỬA: Sử dụng 'image' thay vì 'plate_image'
-              formDataToSend.append('image', imageFile);
-              formDataToSend.append('replace_images', 'true');
-              
-              response = await editData(`/api/blacklist/${selectedItem.id}`, formDataToSend, token);
-          } else {
-              // Không có ảnh mới - dùng JSON
-              response = await editData(`/api/blacklist/${selectedItem.id}`, formData, token);
+        // Update existing item
+        
+        // SỬA: Kiểm tra có ảnh mới hay không để quyết định dùng FormData hay JSON
+        if (imageFile) {
+          // Có ảnh mới - dùng FormData
+          const formDataToSend = new FormData();
+          
+          // Append tất cả fields, kể cả empty string
+          const blacklistFields = [
+            'location_id',
+            'plate_number',
+            'vehicle_id',
+            'violation_type',
+            'reason',
+            'severity',
+            'owner_name',
+            'owner_phone',
+            'valid_from',
+            'valid_to',
+            'description'
+          ];
+          
+          blacklistFields.forEach((key) => {
+            const value = processedFormData[key];
+            // SỬA: Chỉ bỏ qua null và undefined, cho phép empty string
+            if (value !== null && value !== undefined) {
+              formDataToSend.append(key, value.toString());
+            }
+          });
+          
+          // Append ảnh mới
+          formDataToSend.append('plate_image', imageFile);
+          formDataToSend.append('replace_images', 'true');
+          
+          // Debug log
+          console.log('FormData being sent (with image):');
+          for (let [key, value] of formDataToSend.entries()) {
+            console.log(key, ':', value);
           }
           
-          if (response.success) {
-              showSnackbar(`Cập nhật blacklist ${formData.plate_number} thành công!`, 'success');
-          }
+          response = await editData(`/api/blacklist/${selectedItem.id}`, formDataToSend, token);
+        } else {
+          // THÊM: Không có ảnh mới - dùng JSON
+          console.log('JSON being sent (no image):');
+          console.log(processedFormData);
+          
+          response = await editData(`/api/blacklist/${selectedItem.id}`, processedFormData, token);
+        }
+        
+        if (response.success) {
+          showSnackbar(`Cập nhật blacklist ${formData.plate_number} thành công!`, 'success');
+        }
       } else {
-          // Create new item
-          if (imageFile) {
-              const formDataToSend = new FormData();
-              Object.entries(formData).forEach(([key, value]) => {
-                  if (value !== null && value !== undefined && value !== '') {
-                      formDataToSend.append(key, value);
-                  }
-              });
-              // SỬA: Sử dụng 'image' thay vì 'plate_image'
-              formDataToSend.append('image', imageFile);
-              response = await postData('/api/blacklist/create', formDataToSend, token, true); // SỬA: Thêm flag multipart
-          } else {
-              response = await postData('/api/blacklist/create', formData, token);
-          }
-          
-          if (response.success) {
-              showSnackbar(`Đã thêm blacklist ${formData.plate_number} thành công!`, 'success');
-          }
+        // Create new item
+        if (imageFile) {
+          const formDataToSend = new FormData();
+          Object.entries(processedFormData).forEach(([key, value]) => {
+            if (value !== null && value !== undefined && value !== '') {
+              formDataToSend.append(key, value);
+            }
+          });
+          formDataToSend.append('image', imageFile);
+          response = await uploadImage('/api/blacklist/create', formDataToSend, token);
+        } else {
+          response = await postData('/api/blacklist/create', processedFormData, token);
+        }
+        
+        if (response.success) {
+          showSnackbar(`Đã thêm blacklist ${formData.plate_number} thành công!`, 'success');
+        }
       }
        
       if (response.success) {
-          setOpenModal(false);
-          resetForm();
-          setImageFile(null);
-          setImagePreview(null);
-          setOcrResult('');
-          setDetectedPlateImage(null);
-          await loadBlacklist(true);
+        setOpenModal(false);
+        resetForm();
+        setImageFile(null);
+        setImagePreview(null);
+        setOcrResult('');
+        setDetectedPlateImage(null);
+        
+        if (response.data?.ocr_text) {
+          setOcrResult(response.data.ocr_text);
+        }
+        if (response.data?.detected_plate_image) {
+          setDetectedPlateImage(response.data.detected_plate_image);
+        }
+        
+        await loadBlacklist(true);
       } else {
-          showSnackbar(response.message || 'Có lỗi xảy ra', 'error');
+        showSnackbar(response.message || 'Có lỗi xảy ra', 'error');
       }
-  } catch (error) {
+    } catch (error) {
       console.error('Error submitting form:', error);
       const errorMessage = handleErrorResponse(error);
       showSnackbar(errorMessage, 'error');
-  } finally {
+    } finally {
       setLoading(false);
-  }
-};
+    }
+  };
 
   const handleDelete = async (id) => {
     try {
       const token = getToken();
-      const response = await deleteData(`/api/blacklist/${id}`, token);
+      const response = await deleteData(`api/blacklist/${id}`, token);
       if (response.success) {
-        showSnackbar('Xóa blacklist thành công!', 'success');
+        showSnackbar(response.message || 'Xóa blacklist thành công!', 'success');
         setSelectedItems(prev => prev.filter(itemId => itemId !== id));
         await loadBlacklist(true);
       } else {
@@ -325,9 +560,9 @@ const handleSubmit = async (e) => {
     if (window.confirm(`Bạn có chắc chắn muốn xóa ${selectedItems.length} mục đã chọn?`)) {
       try {
         const token = getToken();
-        const response = await postData('/api/blacklist/bulk/delete', { ids: selectedItems }, token);
+        const response = await postData('api/blacklist/bulk/delete', { ids: selectedItems }, token);
         if (response.success) {
-          showSnackbar(`Xóa thành công ${selectedItems.length} mục!`, 'success');
+          showSnackbar(response.message || `Xóa thành công ${selectedItems.length} mục!`, 'success');
           setSelectedItems([]);
           await loadBlacklist(true);
         } else {
@@ -355,7 +590,7 @@ const handleSubmit = async (e) => {
       description: item.description || ''
     });
     setImageFile(null);
-    setImagePreview(item.plate_image_path ? `${item.plate_image_path}` : null);
+    setImagePreview(item.plate_image_path || null);
     setOcrResult(item.plate_number || '');
     setDetectedPlateImage(item.detected_plate_image || null);
     setFormErrors({});
@@ -365,14 +600,16 @@ const handleSubmit = async (e) => {
   const handleView = async (id) => {
     try {
       const token = getToken();
-      const response = await fetchDataFromAPI(`/api/blacklist/${id}`, token);
+      const response = await fetchDataFromAPI(`api/blacklist/${id}`, token);
+      
       if (response.success) {
-        setSelectedItem(response.data);
-        setDetailImage(response.data.plate_image_path || (response.data.evidence_files && JSON.parse(response.data.evidence_files)[0]?.path) || null);
-        setDetailDetectedPlateImage(response.data.detected_plate_image || (response.data.evidence_files && JSON.parse(response.data.evidence_files)[0]?.detected_plate_image) || null);
+        const item = response.data;
+        setSelectedItem(item);
+        setDetailImage(item.plate_image_path || null);
+        setDetailDetectedPlateImage(item.detected_plate_image || null);
         setOpenDetailModal(true);
       } else {
-        showSnackbar(response.message || 'Lỗi khi tải chi tiết blacklist', 'error');
+        showSnackbar(response.message || 'Không tìm thấy blacklist', 'error');
       }
     } catch (error) {
       showSnackbar(handleErrorResponse(error), 'error');
@@ -381,7 +618,9 @@ const handleSubmit = async (e) => {
 
   const resetForm = () => {
     setFormData({
-      location_id: '', plate_number: '', vehicle_id: '', violation_type: 'unauthorized', reason: '', severity: 'medium', owner_name: '', owner_phone: '', valid_from: '', valid_to: '', description: ''
+      location_id: '', plate_number: '', vehicle_id: '', violation_type: 'unauthorized', 
+      reason: '', severity: 'medium', owner_name: '', owner_phone: '', 
+      valid_from: '', valid_to: '', description: ''
     });
     setSelectedItem(null);
     setFormErrors({});
@@ -391,7 +630,7 @@ const handleSubmit = async (e) => {
     setFilters({ location_id: '', plate_number: '', violation_type: '', severity: '', is_active: '', valid_status: '' });
     setCurrentPage(1);
     setSelectedItems([]);
-    loadBlacklist();
+    loadBlacklist(true);
   };
 
   const handleFilterChange = (key, value) => {
@@ -411,6 +650,7 @@ const handleSubmit = async (e) => {
     }
   };
 
+  // Status and chip components
   const getStatusChip = (status) => {
     const statusConfig = {
       'active': { color: 'error', label: 'Đang chặn' },
@@ -448,33 +688,6 @@ const handleSubmit = async (e) => {
   const handlePageChange = (event, page) => {
     setCurrentPage(page);
   };
-
-  // Pagination helper
-  function getPaginationItems(current, total) {
-    const delta = 1;
-    const range = [];
-    const rangeWithDots = [];
-    let l;
-
-    for (let i = 1; i <= total; i++) {
-      if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
-        range.push(i);
-      }
-    }
-
-    for (let i of range) {
-      if (l) {
-        if (i - l === 2) {
-          rangeWithDots.push(l + 1);
-        } else if (i - l > 2) {
-          rangeWithDots.push('...');
-        }
-      }
-      rangeWithDots.push(i);
-      l = i;
-    }
-    return rangeWithDots;
-  }
 
   return (
     <Box sx={{ 
@@ -663,9 +876,6 @@ const handleSubmit = async (e) => {
                           ))
                         )}
                       </Select>
-                      {formErrors.location_id && (
-                        <FormHelperText error>{formErrors.location_id}</FormHelperText>
-                      )}
                     </FormControl>
                   </Grid>
                   <Grid item xs={12} sm={6} md={2}>
@@ -685,9 +895,6 @@ const handleSubmit = async (e) => {
                         <MenuItem value="suspicious">Đáng ngờ</MenuItem>
                         <MenuItem value="other">Khác</MenuItem>
                       </Select>
-                      {formErrors.violation_type && (
-                        <FormHelperText error>{formErrors.violation_type}</FormHelperText>
-                      )}
                     </FormControl>
                   </Grid>
                   <Grid item xs={12} sm={6} md={2}>
@@ -705,9 +912,6 @@ const handleSubmit = async (e) => {
                         <MenuItem value="high">Cao</MenuItem>
                         <MenuItem value="critical">Nghiêm trọng</MenuItem>
                       </Select>
-                      {formErrors.severity && (
-                        <FormHelperText error>{formErrors.severity}</FormHelperText>
-                      )}
                     </FormControl>
                   </Grid>
                   <Grid item xs={12} sm={6} md={1.5}>
@@ -753,7 +957,7 @@ const handleSubmit = async (e) => {
             </Card>
           </Box>
 
-          {/* Enhanced Table (WhiteList style) */}
+          {/* Enhanced Table with Image Column */}
           <Box sx={{ px: 3 }}>
             <Card sx={{ 
               background: 'white',
@@ -788,6 +992,7 @@ const handleSubmit = async (e) => {
                         />
                       </TableCell>
                       <TableCell>Biển số</TableCell>
+                      <TableCell sx={{ width: 120 }}>Ảnh biển số</TableCell>
                       <TableCell>Khu vực</TableCell>
                       <TableCell>Loại vi phạm</TableCell>
                       <TableCell>Mức độ</TableCell>
@@ -799,7 +1004,7 @@ const handleSubmit = async (e) => {
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
                           <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
                             <CircularProgress />
                             <Typography variant="body2" color="text.secondary">
@@ -810,7 +1015,7 @@ const handleSubmit = async (e) => {
                       </TableRow>
                     ) : blacklist.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                           <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
                             <CarIcon sx={{ fontSize: 48, color: '#ccc' }} />
                             <Typography variant="h6" color="text.secondary">
@@ -840,6 +1045,7 @@ const handleSubmit = async (e) => {
                               sx={{ '&.Mui-checked': { color: '#d32f2f' } }}
                             />
                           </TableCell>
+                          
                           <TableCell>
                             <Typography variant="subtitle2" fontWeight="bold">
                               {item.plate_number}
@@ -850,6 +1056,12 @@ const handleSubmit = async (e) => {
                               </Typography>
                             )}
                           </TableCell>
+                          
+                          {/* Image Column */}
+                          <PlateImageCell 
+                            item={item} 
+                            onImageClick={handleImagePreviewClick}
+                          />
                           <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
                               <LocationIcon sx={{ fontSize: 16, mr: 0.5 }} />
@@ -884,48 +1096,55 @@ const handleSubmit = async (e) => {
                           </TableCell>
                           <TableCell align="center">
                             <Box display="flex" justifyContent="center" gap={1}>
-                              <IconButton
-                                size="small"
-                                color="info"
-                                onClick={() => handleView(item.id)}
-                                title="Xem chi tiết"
-                                sx={{
-                                  color: '#1976d2',
-                                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                                  '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.2)' },
-                                  transition: 'background-color 0.2s ease'
-                                }}
-                              >
-                                <VisibilityIcon />
-                              </IconButton>
-                              <IconButton
-                                size="small"
-                                color="warning"
-                                onClick={() => handleEdit(item)}
-                                title="Chỉnh sửa"
-                                sx={{
-                                  color: '#ff9800',
-                                  backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                                  '&:hover': { backgroundColor: 'rgba(255, 152, 0, 0.2)' },
-                                  transition: 'background-color 0.2s ease'
-                                }}
-                              >
-                                <EditIcon />
-                              </IconButton>
-                              <IconButton
-                                size="small"
-                                color="error"
-                                onClick={() => handleDelete(item.id)}
-                                title="Xóa"
-                                sx={{
-                                  color: '#f44336',
-                                  backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                                  '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.2)' },
-                                  transition: 'background-color 0.2s ease'
-                                }}
-                              >
-                                <DeleteIcon />
-                              </IconButton>
+                              <Tooltip title="Xem chi tiết">
+                                <IconButton
+                                  size="small"
+                                  color="info"
+                                  onClick={() => handleView(item.id)}
+                                  sx={{
+                                    color: '#1976d2',
+                                    backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                    '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.2)' },
+                                    transition: 'background-color 0.2s ease'
+                                  }}
+                                >
+                                  <VisibilityIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Chỉnh sửa">
+                                <IconButton
+                                  size="small"
+                                  color="warning"
+                                  onClick={() => handleEdit(item)}
+                                  sx={{
+                                    color: '#ff9800',
+                                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                                    '&:hover': { backgroundColor: 'rgba(255, 152, 0, 0.2)' },
+                                    transition: 'background-color 0.2s ease'
+                                  }}
+                                >
+                                  <EditIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Xóa">
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => setDeleteDialog({ 
+                                    open: true, 
+                                    itemId: item.id, 
+                                    plateName: item.plate_number 
+                                  })}
+                                  sx={{
+                                    color: '#f44336',
+                                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                                    '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.2)' },
+                                    transition: 'background-color 0.2s ease'
+                                  }}
+                                >
+                                  <DeleteIcon />
+                                </IconButton>
+                              </Tooltip>
                             </Box>
                           </TableCell>
                         </TableRow>
@@ -1021,227 +1240,364 @@ const handleSubmit = async (e) => {
         </>
       )}
 
+      {/* Statistics Tab */}
       {activeTab === 1 && (
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={3}>
-            <Card className="text-center">
-              <CardContent>
-                <BlockIcon color="error" sx={{ fontSize: 40, mb: 1 }} />
-                <Typography variant="h4" color="error.main">
-                  {statistics.total_entries || 0}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Tổng số bản ghi
-                </Typography>
-              </CardContent>
-            </Card>
+        <Box sx={{ px: 3 }}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={3}>
+              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+                <CardContent>
+                  <BlockIcon color="error" sx={{ fontSize: 40, mb: 1 }} />
+                  <Typography variant="h4" color="error.main">
+                    {statistics.total_entries || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Tổng số bản ghi
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+                <CardContent>
+                  <FaShieldAlt color="red" size={40} style={{ marginBottom: 8 }} />
+                  <Typography variant="h4" color="error.main">
+                    {statistics.active_entries || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Đang hoạt động
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+                <CardContent>
+                  <FaExclamationTriangle color="orange" size={40} style={{ marginBottom: 8 }} />
+                  <Typography variant="h4" color="warning.main">
+                    {statistics.high_severity || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Mức độ cao
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+                <CardContent>
+                  <FaClock color="gray" size={40} style={{ marginBottom: 8 }} />
+                  <Typography variant="h4" color="text.secondary">
+                    {statistics.expired_entries || 0}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Hết hạn
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
-          <Grid item xs={12} md={3}>
-            <Card className="text-center">
-              <CardContent>
-                <FaShieldAlt color="red" size={40} style={{ marginBottom: 8 }} />
-                <Typography variant="h4" color="error.main">
-                  {statistics.active_entries || 0}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Đang hoạt động
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Card className="text-center">
-              <CardContent>
-                <FaExclamationTriangle color="orange" size={40} style={{ marginBottom: 8 }} />
-                <Typography variant="h4" color="warning.main">
-                  {statistics.high_severity || 0}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Mức độ cao
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Card className="text-center">
-              <CardContent>
-                <FaClock color="gray" size={40} style={{ marginBottom: 8 }} />
-                <Typography variant="h4" color="text.secondary">
-                  {statistics.expired_entries || 0}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Hết hạn
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+        </Box>
       )}
 
       {/* Create/Edit Modal */}
-      <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
+      <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="lg" fullWidth>
+        <DialogTitle sx={{ 
+          borderBottom: '1px solid #e0e0e0', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 2 
+        }}>
+          <BlockIcon color="error" />
           {selectedItem ? 'Chỉnh sửa Blacklist' : 'Thêm Blacklist mới'}
         </DialogTitle>
         <form onSubmit={handleSubmit}>
-          <DialogContent>
-            <Grid container spacing={2}>
+          <DialogContent sx={{ p: 3 }}>
+            <Grid container spacing={3}>
+              {/* Image Upload Section */}
               <Grid item xs={12} md={6}>
-                <FormControl fullWidth required error={!!formErrors.location_id}>
-                  <InputLabel>Khu vực</InputLabel>
-                  <Select
-                    value={formData.location_id}
-                    label="Khu vực"
-                    onChange={(e) => setFormData({...formData, location_id: e.target.value})}
-                  >
-                    {locationsLoading ? (
-                      <MenuItem value="" disabled>Đang tải...</MenuItem>
-                    ) : (
-                      locations.map(location => (
-                        <MenuItem key={location.id} value={location.id}>
-                          {location.name}
-                        </MenuItem>
-                      ))
-                    )}
-                  </Select>
-                  {formErrors.location_id && (
-                    <FormHelperText error>{formErrors.location_id}</FormHelperText>
-                  )}
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
+                  <PhotoCameraIcon sx={{ mr: 1 }} />
+                  Ảnh biển số xe
+                </Typography>
+                
                 <Button
                   variant="outlined"
                   component="label"
                   startIcon={<ImageIcon />}
                   fullWidth
-                  sx={{ borderRadius: 2, mb: 1 }}
+                  sx={{ 
+                    borderRadius: 2, 
+                    mb: 2, 
+                    py: 1.5,
+                    borderStyle: 'dashed',
+                    borderWidth: 2,
+                    '&:hover': { borderStyle: 'dashed' }
+                  }}
                 >
                   {imageFile ? 'Đổi ảnh biển số' : 'Upload ảnh biển số'}
                   <input type="file" accept="image/*" hidden onChange={handleImageChange} />
                 </Button>
-                {/* Preview ảnh gốc */}
-                {(imagePreview || (selectedItem && selectedItem.plate_image_path)) && (
-                  <Box mt={1} mb={1}>
-                    <Typography variant="caption">Ảnh gốc:</Typography>
-                    <img src={imagePreview || selectedItem.plate_image_path} alt="preview" style={{ maxWidth: '100%', maxHeight: 120, borderRadius: 8, border: '1px solid #eee' }} />
-                  </Box>
+                
+                {formErrors.image && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {formErrors.image}
+                  </Alert>
                 )}
-                {/* Preview ảnh biển số đã detect */}
-                {(detectedPlateImage || (selectedItem && selectedItem.detected_plate_image)) && (
-                  <Box mt={1} mb={1}>
-                    <Typography variant="caption">Ảnh biển số đã detect:</Typography>
-                    <img src={detectedPlateImage || selectedItem.detected_plate_image} alt="detected" style={{ maxWidth: '100%', maxHeight: 80, borderRadius: 8, border: '1px solid #eee' }} />
-                  </Box>
-                )}
-                {ocrResult && (
-                  <Alert severity="success" sx={{ mt: 1, mb: 1 }}>Biển số nhận diện: <b>{ocrResult}</b></Alert>
-                )}
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  required
-                  label="Biển số xe"
-                  value={formData.plate_number}
-                  disabled
-                  error={!!formErrors.plate_number}
-                  helperText={ocrResult ? "Đã nhận diện từ OCR" : "Trường này sẽ tự động điền từ ảnh biển số (OCR)"}
-                />
-                {formErrors.plate_number && (
-                  <FormHelperText error>{formErrors.plate_number}</FormHelperText>
-                )}
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth required error={!!formErrors.violation_type}>
-                  <InputLabel>Loại vi phạm</InputLabel>
-                  <Select
-                    value={formData.violation_type}
-                    label="Loại vi phạm"
-                    onChange={(e) => setFormData({...formData, violation_type: e.target.value})}
-                  >
-                    <MenuItem value="unauthorized">Không được phép</MenuItem>
-                    <MenuItem value="security_threat">Đe dọa an ninh</MenuItem>
-                    <MenuItem value="unpaid_fine">Chưa nộp phạt</MenuItem>
-                    <MenuItem value="banned">Bị cấm</MenuItem>
-                    <MenuItem value="suspicious">Đáng ngờ</MenuItem>
-                    <MenuItem value="other">Khác</MenuItem>
-                  </Select>
-                  {formErrors.violation_type && (
-                    <FormHelperText error>{formErrors.violation_type}</FormHelperText>
+                
+                {/* Image Previews */}
+                <Stack spacing={2}>
+                  {/* Ảnh gốc preview */}
+                  {(imagePreview || (selectedItem && selectedItem.plate_image_path)) && (
+                    <Box>
+                      <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block' }}>
+                        Ảnh gốc:
+                      </Typography>
+                      <Paper elevation={2} sx={{ p: 1, borderRadius: 2 }}>
+                        <img 
+                          src={imagePreview || `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.plate_image_path}`} 
+                          alt="preview" 
+                          style={{ 
+                            width: '100%', 
+                            maxHeight: 200, 
+                            objectFit: 'contain',
+                            borderRadius: 8 
+                          }} 
+                        />
+                      </Paper>
+                    </Box>
                   )}
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth required error={!!formErrors.severity}>
-                  <InputLabel>Mức độ</InputLabel>
-                  <Select
-                    value={formData.severity}
-                    label="Mức độ"
-                    onChange={(e) => setFormData({...formData, severity: e.target.value})}
-                  >
-                    <MenuItem value="low">Thấp</MenuItem>
-                    <MenuItem value="medium">Trung bình</MenuItem>
-                    <MenuItem value="high">Cao</MenuItem>
-                    <MenuItem value="critical">Nghiêm trọng</MenuItem>
-                  </Select>
-                  {formErrors.severity && (
-                    <FormHelperText error>{formErrors.severity}</FormHelperText>
+                  
+                  {/* Ảnh biển số đã detect preview */}
+                  {(detectedPlateImage || (selectedItem && selectedItem.detected_plate_image)) && (
+                    <Box>
+                      <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block', color: 'success.main' }}>
+                        Biển số đã nhận diện:
+                      </Typography>
+                      <Paper elevation={2} sx={{ p: 1, borderRadius: 2, border: '2px solid #4caf50' }}>
+                        <img 
+                          src={detectedPlateImage || `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.detected_plate_image}`} 
+                          alt="detected" 
+                          style={{ 
+                            width: '100%', 
+                            maxHeight: 100, 
+                            objectFit: 'contain',
+                            borderRadius: 6 
+                          }} 
+                        />
+                      </Paper>
+                    </Box>
                   )}
-                </FormControl>
+                  
+                  {/* OCR Result */}
+                  {ocrResult && (
+                    <Alert severity="success" sx={{ fontWeight: 600 }}>
+                      <Typography variant="body2">
+                        Biển số nhận diện: <strong style={{ fontSize: '1.1em' }}>{ocrResult}</strong>
+                      </Typography>
+                    </Alert>
+                  )}
+                </Stack>
               </Grid>
+
+              {/* Form Fields */}
               <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Tên chủ xe"
-                  placeholder="Nhập tên chủ xe"
-                  value={formData.owner_name}
-                  onChange={(e) => setFormData({...formData, owner_name: e.target.value})}
-                />
+                <Typography variant="h6" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
+                  <DescriptionIcon sx={{ mr: 1 }} />
+                  Thông tin chi tiết
+                </Typography>
+                
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <FormControl fullWidth required error={!!formErrors.location_id}>
+                      <InputLabel>Khu vực</InputLabel>
+                      <Select
+                        value={formData.location_id}
+                        label="Khu vực"
+                        onChange={(e) => setFormData({...formData, location_id: e.target.value})}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        {locationsLoading ? (
+                          <MenuItem value="" disabled>Đang tải...</MenuItem>
+                        ) : (
+                          locations.map(location => (
+                            <MenuItem key={location.id} value={location.id}>
+                              <LocationIcon sx={{ mr: 1, fontSize: 16 }} />
+                              {location.name}
+                            </MenuItem>
+                          ))
+                        )}
+                      </Select>
+                      {formErrors.location_id && (
+                        <FormHelperText error>{formErrors.location_id}</FormHelperText>
+                      )}
+                    </FormControl>
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      required
+                      label="Biển số xe"
+                      value={formData.plate_number}
+                      disabled
+                      error={!!formErrors.plate_number}
+                      helperText={ocrResult ? "Đã nhận diện từ OCR" : "Trường này sẽ tự động điền từ ảnh biển số (OCR)"}
+                      sx={{
+                        '& .MuiOutlinedInput-root': { borderRadius: 2 }
+                      }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <CarIcon />
+                          </InputAdornment>
+                        )
+                      }}
+                    />
+                    {formErrors.plate_number && (
+                      <FormHelperText error>{formErrors.plate_number}</FormHelperText>
+                    )}
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth required error={!!formErrors.violation_type}>
+                      <InputLabel>Loại vi phạm</InputLabel>
+                      <Select
+                        value={formData.violation_type}
+                        label="Loại vi phạm"
+                        onChange={(e) => setFormData({...formData, violation_type: e.target.value})}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        <MenuItem value="unauthorized">
+                          <WarningIcon sx={{ mr: 1, fontSize: 16 }} />
+                          Không được phép
+                        </MenuItem>
+                        <MenuItem value="security_threat">
+                          <FaShieldAlt style={{ marginRight: 8, fontSize: 14 }} />
+                          Đe dọa an ninh
+                        </MenuItem>
+                        <MenuItem value="unpaid_fine">Chưa nộp phạt</MenuItem>
+                        <MenuItem value="banned">Bị cấm</MenuItem>
+                        <MenuItem value="suspicious">Đáng ngờ</MenuItem>
+                        <MenuItem value="other">Khác</MenuItem>
+                      </Select>
+                      {formErrors.violation_type && (
+                        <FormHelperText error>{formErrors.violation_type}</FormHelperText>
+                      )}
+                    </FormControl>
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth required error={!!formErrors.severity}>
+                      <InputLabel>Mức độ</InputLabel>
+                      <Select
+                        value={formData.severity}
+                        label="Mức độ"
+                        onChange={(e) => setFormData({...formData, severity: e.target.value})}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        <MenuItem value="low">Thấp</MenuItem>
+                        <MenuItem value="medium">Trung bình</MenuItem>
+                        <MenuItem value="high">Cao</MenuItem>
+                        <MenuItem value="critical">Nghiêm trọng</MenuItem>
+                      </Select>
+                      {formErrors.severity && (
+                        <FormHelperText error>{formErrors.severity}</FormHelperText>
+                      )}
+                    </FormControl>
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Tên chủ xe"
+                      placeholder="Nhập tên chủ xe"
+                      value={formData.owner_name}
+                      onChange={(e) => setFormData({...formData, owner_name: e.target.value})}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <PersonIcon />
+                          </InputAdornment>
+                        )
+                      }}
+                    />
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Số điện thoại"
+                      placeholder="Nhập số điện thoại"
+                      value={formData.owner_phone}
+                      onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
+                      error={!!formErrors.owner_phone}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <PhoneIcon />
+                          </InputAdornment>
+                        )
+                      }}
+                    />
+                    {formErrors.owner_phone && (
+                      <FormHelperText error>{formErrors.owner_phone}</FormHelperText>
+                    )}
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Có hiệu lực từ"
+                      type="date"
+                      InputLabelProps={{ shrink: true }}
+                      value={formData.valid_from}
+                      onChange={(e) => setFormData({...formData, valid_from: e.target.value})}
+                      error={!!formErrors.valid_from}
+                      inputRef={validFromDateRef}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <CalendarIcon />
+                          </InputAdornment>
+                        )
+                      }}
+                    />
+                    {formErrors.valid_from && (
+                      <FormHelperText error>{formErrors.valid_from}</FormHelperText>
+                    )}
+                  </Grid>
+                  
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Có hiệu lực đến"
+                      type="date"
+                      InputLabelProps={{ shrink: true }}
+                      value={formData.valid_to}
+                      onChange={(e) => setFormData({...formData, valid_to: e.target.value})}
+                      error={!!formErrors.valid_to}
+                      inputRef={validToDateRef}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <CalendarIcon />
+                          </InputAdornment>
+                        )
+                      }}
+                    />
+                    {formErrors.valid_to && (
+                      <FormHelperText error>{formErrors.valid_to}</FormHelperText>
+                    )}
+                  </Grid>
+                </Grid>
               </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Số điện thoại"
-                  placeholder="Nhập số điện thoại"
-                  value={formData.owner_phone}
-                  onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
-                  error={!!formErrors.owner_phone}
-                />
-                {formErrors.owner_phone && (
-                  <FormHelperText error>{formErrors.owner_phone}</FormHelperText>
-                )}
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Có hiệu lực từ"
-                  type="date"
-                  InputLabelProps={{ shrink: true }}
-                  value={formData.valid_from}
-                  onChange={(e) => setFormData({...formData, valid_from: e.target.value})}
-                  error={!!formErrors.valid_from}
-                  inputRef={validFromDateRef}
-                />
-                {formErrors.valid_from && (
-                  <FormHelperText error>{formErrors.valid_from}</FormHelperText>
-                )}
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Có hiệu lực đến"
-                  type="date"
-                  InputLabelProps={{ shrink: true }}
-                  value={formData.valid_to}
-                  onChange={(e) => setFormData({...formData, valid_to: e.target.value})}
-                  error={!!formErrors.valid_to}
-                  inputRef={validToDateRef}
-                />
-                {formErrors.valid_to && (
-                  <FormHelperText error>{formErrors.valid_to}</FormHelperText>
-                )}
-              </Grid>
+              
+              {/* Full width fields */}
               <Grid item xs={12}>
                 <TextField
                   fullWidth
@@ -1253,11 +1609,13 @@ const handleSubmit = async (e) => {
                   value={formData.reason}
                   onChange={(e) => setFormData({...formData, reason: e.target.value})}
                   error={!!formErrors.reason}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                 />
                 {formErrors.reason && (
                   <FormHelperText error>{formErrors.reason}</FormHelperText>
                 )}
               </Grid>
+              
               <Grid item xs={12}>
                 <TextField
                   fullWidth
@@ -1267,74 +1625,288 @@ const handleSubmit = async (e) => {
                   placeholder="Nhập ghi chú chi tiết..."
                   value={formData.description}
                   onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                 />
               </Grid>
             </Grid>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setOpenModal(false)}>Hủy</Button>
-            <Button type="submit" variant="contained" color="error" disabled={loading}>
-              {loading ? <CircularProgress size={20} /> : (selectedItem ? 'Cập nhật' : 'Tạo mới')}
+          <DialogActions sx={{ 
+            p: 3, 
+            borderTop: '1px solid #e0e0e0',
+            gap: 2 
+          }}>
+            <Button 
+              onClick={() => setOpenModal(false)}
+              sx={{ 
+                borderRadius: 2, 
+                px: 3, 
+                py: 1.5,
+                textTransform: 'none',
+                fontWeight: 600 
+              }}
+            >
+              Hủy
+            </Button>
+            <Button 
+              type="submit" 
+              variant="contained" 
+              color="error" 
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={20} /> : <FaSave />}
+              sx={{ 
+                borderRadius: 2, 
+                px: 3, 
+                py: 1.5,
+                textTransform: 'none',
+                fontWeight: 600,
+                boxShadow: '0 2px 8px rgba(211, 47, 47, 0.3)',
+                '&:hover': {
+                  boxShadow: '0 4px 12px rgba(211, 47, 47, 0.4)'
+                }
+              }}
+            >
+              {selectedItem ? 'Cập nhật' : 'Tạo mới'}
             </Button>
           </DialogActions>
         </form>
       </Dialog>
 
       {/* Detail Modal */}
-      <Dialog open={openDetailModal} onClose={() => setOpenDetailModal(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Chi tiết Blacklist</DialogTitle>
-        <DialogContent>
+      <Dialog open={openDetailModal} onClose={() => setOpenDetailModal(false)} maxWidth="lg" fullWidth>
+        <DialogTitle sx={{ 
+          borderBottom: '1px solid #e0e0e0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2
+        }}>
+          <VisibilityIcon color="primary" />
+          Chi tiết Blacklist - {selectedItem?.plate_number}
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
           {selectedItem && (
-            <Grid container spacing={2}>
+            <Grid container spacing={3}>
+              {/* Images Section */}
               <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom>Thông tin cơ bản</Typography>
-                <Typography><strong>Biển số:</strong> {selectedItem.plate_number}</Typography>
-                <Typography><strong>Khu vực:</strong> {selectedItem.location_name}</Typography>
-                <Typography><strong>Loại vi phạm:</strong> {getViolationTypeChip(selectedItem.violation_type)}</Typography>
-                <Typography><strong>Mức độ:</strong> {getSeverityChip(selectedItem.severity)}</Typography>
-                <Typography><strong>Trạng thái:</strong> {getStatusChip(selectedItem.current_status)}</Typography>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                  <PhotoCameraIcon sx={{ mr: 1 }} />
+                  Hình ảnh
+                </Typography>
+                
+                <Stack spacing={2}>
+                  {detailImage && (
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                        Ảnh gốc:
+                      </Typography>
+                      <Paper 
+                        elevation={3} 
+                        sx={{ 
+                          p: 1, 
+                          borderRadius: 2,
+                          cursor: 'pointer',
+                          '&:hover': { elevation: 6 }
+                        }}
+                        onClick={() => handleImagePreviewClick(detailImage, 'Ảnh gốc - ' + selectedItem.plate_number)}
+                      >
+                        <img 
+                          src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detailImage}`} 
+                          alt="original" 
+                          style={{ 
+                            width: '100%', 
+                            maxHeight: 200, 
+                            objectFit: 'contain',
+                            borderRadius: 8 
+                          }} 
+                        />
+                      </Paper>
+                    </Box>
+                  )}
+                  
+                  {detailDetectedPlateImage && (
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: 'success.main' }}>
+                        Biển số đã nhận diện:
+                      </Typography>
+                      <Paper 
+                        elevation={3} 
+                        sx={{ 
+                          p: 1, 
+                          borderRadius: 2,
+                          border: '2px solid #4caf50',
+                          cursor: 'pointer',
+                          '&:hover': { elevation: 6 }
+                        }}
+                        onClick={() => handleImagePreviewClick(detailDetectedPlateImage, 'Biển số nhận diện - ' + selectedItem.plate_number)}
+                      >
+                        <img 
+                          src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detailDetectedPlateImage}`} 
+                          alt="detected" 
+                          style={{ 
+                            width: '100%', 
+                            maxHeight: 120, 
+                            objectFit: 'contain',
+                            borderRadius: 6 
+                          }} 
+                        />
+                      </Paper>
+                    </Box>
+                  )}
+                  
+                  {!detailImage && !detailDetectedPlateImage && (
+                    <Alert severity="info">
+                      Không có hình ảnh cho blacklist này
+                    </Alert>
+                  )}
+                </Stack>
               </Grid>
+
+              {/* Information Section */}
               <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom>Thông tin chủ xe</Typography>
-                <Typography><strong>Tên:</strong> {selectedItem.owner_name || 'N/A'}</Typography>
-                <Typography><strong>SĐT:</strong> {selectedItem.owner_phone || 'N/A'}</Typography>
-                <Typography><strong>Lý do cấm:</strong></Typography>
-                <Typography color="error.main">{selectedItem.reason}</Typography>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                  <DescriptionIcon sx={{ mr: 1 }} />
+                  Thông tin chi tiết
+                </Typography>
+                
+                <Stack spacing={2}>
+                  <Box>
+                    <Typography variant="subtitle2" color="text.secondary">Biển số:</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>{selectedItem.plate_number}</Typography>
+                  </Box>
+                  
+                  <Box>
+                    <Typography variant="subtitle2" color="text.secondary">Khu vực:</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                      <LocationIcon sx={{ fontSize: 16, mr: 0.5 }} />
+                      <Typography>{selectedItem.location_name}</Typography>
+                    </Box>
+                  </Box>
+                  
+                  <Box>
+                    <Typography variant="subtitle2" color="text.secondary">Loại vi phạm:</Typography>
+                    <Box sx={{ mt: 0.5 }}>
+                      {getViolationTypeChip(selectedItem.violation_type)}
+                    </Box>
+                  </Box>
+                  
+                  <Box>
+                    <Typography variant="subtitle2" color="text.secondary">Mức độ:</Typography>
+                    <Box sx={{ mt: 0.5 }}>
+                      {getSeverityChip(selectedItem.severity)}
+                    </Box>
+                  </Box>
+                  
+                  <Box>
+                    <Typography variant="subtitle2" color="text.secondary">Trạng thái:</Typography>
+                    <Box sx={{ mt: 0.5 }}>
+                      {getStatusChip(selectedItem.current_status)}
+                    </Box>
+                  </Box>
+                </Stack>
               </Grid>
+              
+              {/* Owner Information */}
+              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                  <PersonIcon sx={{ mr: 1 }} />
+                  Thông tin chủ xe
+                </Typography>
+                
+                <Stack spacing={1.5}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <PersonIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
+                    <Typography><strong>Tên:</strong> {selectedItem.owner_name || 'N/A'}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <PhoneIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
+                    <Typography><strong>SĐT:</strong> {selectedItem.owner_phone || 'N/A'}</Typography>
+                  </Box>
+                </Stack>
+              </Grid>
+              
+              {/* Validity Period */}
+              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                  <CalendarIcon sx={{ mr: 1 }} />
+                  Thời gian hiệu lực
+                </Typography>
+                
+                <Stack spacing={1.5}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <CalendarIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
+                    <Typography>
+                      <strong>Từ:</strong> {selectedItem.valid_from ? new Date(selectedItem.valid_from).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <CalendarIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
+                    <Typography>
+                      <strong>Đến:</strong> {selectedItem.valid_to ? new Date(selectedItem.valid_to).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Grid>
+              
+              {/* Reason and Description */}
               <Grid item xs={12}>
                 <Divider sx={{ my: 2 }} />
-                <Typography variant="h6" gutterBottom>Thời gian hiệu lực</Typography>
-                <Typography>
-                  <strong>Từ:</strong> {selectedItem.valid_from ? new Date(selectedItem.valid_from).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
+                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                  <WarningIcon sx={{ mr: 1 }} />
+                  Lý do cấm
                 </Typography>
-                <Typography>
-                  <strong>Đến:</strong> {selectedItem.valid_to ? new Date(selectedItem.valid_to).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
-                </Typography>
+                <Paper elevation={1} sx={{ p: 2, backgroundColor: '#fef7f0', borderLeft: '4px solid #ff9800' }}>
+                  <Typography color="error.main" sx={{ fontWeight: 500 }}>
+                    {selectedItem.reason}
+                  </Typography>
+                </Paper>
+                
                 {selectedItem.description && (
                   <>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="h6" gutterBottom>Ghi chú chi tiết</Typography>
-                    <Typography>{selectedItem.description}</Typography>
+                    <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2, mt: 3 }}>
+                      Ghi chú chi tiết
+                    </Typography>
+                    <Paper elevation={1} sx={{ p: 2, backgroundColor: '#f5f5f5' }}>
+                      <Typography>{selectedItem.description}</Typography>
+                    </Paper>
                   </>
                 )}
               </Grid>
-              {detailImage && (
-                <Box mt={2} mb={2}>
-                  <Typography variant="caption">Ảnh gốc:</Typography>
-                  <img src={detailImage} alt="original" style={{ maxWidth: '100%', maxHeight: 120, borderRadius: 8, border: '1px solid #eee' }} />
-                </Box>
-              )}
-              {detailDetectedPlateImage && (
-                <Box mt={1} mb={2}>
-                  <Typography variant="caption">Ảnh biển số đã detect:</Typography>
-                  <img src={detailDetectedPlateImage} alt="detected" style={{ maxWidth: '100%', maxHeight: 80, borderRadius: 8, border: '1px solid #eee' }} />
-                </Box>
-              )}
             </Grid>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDetailModal(false)}>Đóng</Button>
+        <DialogActions sx={{ 
+          p: 3, 
+          borderTop: '1px solid #e0e0e0' 
+        }}>
+          <Button 
+            onClick={() => setOpenDetailModal(false)}
+            sx={{ 
+              borderRadius: 2, 
+              px: 3, 
+              py: 1.5,
+              textTransform: 'none',
+              fontWeight: 600 
+            }}
+          >
+            Đóng
+          </Button>
+          <Button 
+            variant="contained" 
+            color="warning"
+            startIcon={<EditIcon />}
+            onClick={() => {
+              setOpenDetailModal(false);
+              handleEdit(selectedItem);
+            }}
+            sx={{ 
+              borderRadius: 2, 
+              px: 3, 
+              py: 1.5,
+              textTransform: 'none',
+              fontWeight: 600 
+            }}
+          >
+            Chỉnh sửa
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -1362,7 +1934,7 @@ const handleSubmit = async (e) => {
           fontSize: 20
         }}>
           <Box display="flex" alignItems="center">
-            <BiSolidTrashAlt style={{ marginRight: 12, fontSize: '1.5rem', color: '#888' }} />
+            <BiSolidTrashAlt style={{ marginRight: 12, fontSize: '1.5rem', color: '#f44336' }} />
             <Typography variant="h6" sx={{ fontWeight: 600, color: '#222' }}>
               Xác nhận xóa
             </Typography>
@@ -1419,8 +1991,16 @@ const handleSubmit = async (e) => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Image Preview Dialog */}
+      <ImagePreviewDialog
+        open={imagePreviewDialog.open}
+        onClose={() => setImagePreviewDialog({ open: false, src: '', title: '' })}
+        src={imagePreviewDialog.src}
+        title={imagePreviewDialog.title}
+      />
     </Box>
   );
 };
 
-export default BlackList; 
+export default BlackList;
