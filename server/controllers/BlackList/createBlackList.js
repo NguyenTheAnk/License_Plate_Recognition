@@ -47,8 +47,8 @@ const upload = multer({
 });
 
 
-const uploadFields = upload.fields([
-    { name: 'image', maxCount: 1 }, // Thay đổi từ 'plate_image' thành 'image'
+const uploadField1s = upload.fields([
+    { name: 'image', maxCount: 1 }, // CHÍNH FIELD NÀY
     { name: 'plate_image', maxCount: 1 },
     { name: 'plate_image_cropped', maxCount: 1 },
     { name: 'plate_image_processed', maxCount: 1 }
@@ -184,7 +184,7 @@ const createBlacklist = async (req, res) => {
         let detectedPlateImage = null;
         let uploadedFile = req.file;
 
-        // Tìm file upload từ nhiều field
+        // SỬA: Tìm file upload từ nhiều field và ưu tiên 'image'
         if (!uploadedFile && req.files) {
             if (req.files.image && req.files.image.length > 0) {
                 uploadedFile = req.files.image[0];
@@ -192,13 +192,13 @@ const createBlacklist = async (req, res) => {
                 uploadedFile = req.files.plate_image[0];
             }
         }
-        
+
         console.log('[DEBUG] uploadedFile after fixes:', uploadedFile);
 
         if (!uploadedFile) {
             return res.status(400).json({
                 success: false,
-                message: 'Không nhận được file ảnh upload từ client. Vui lòng kiểm tra lại form-data và cấu hình upload.'
+                message: 'Vui lòng upload ảnh biển số xe'
             });
         }
 
@@ -769,7 +769,7 @@ const ocrPreview = async (req, res) => {
 module.exports = {
     createBlacklist,
     createMultipleBlacklist,
-    uploadFields,
+    uploadField1s,
     ocrPreview,
     upload // THÊM export instance upload
 };

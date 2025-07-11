@@ -114,15 +114,20 @@ export const uploadImage = async (url, formData, token) => {
     }
 };
 
-// Hàm gửi dữ liệu lên API (POST request) - Updated version
-// SỬA trong file auth.js, hàm postData:
+// SỬA: Kiểm tra chính xác hơn cho FormData
 export const postData = async (url, requestData, token = null, isMultipart = false) => {
     try {
-        console.log('postData called with:', { url, requestDataType: requestData.constructor.name, hasToken: !!token, isMultipart });
+        console.log('postData called with:', { 
+            url, 
+            requestDataType: requestData.constructor.name, 
+            hasToken: !!token, 
+            isMultipart: isMultipart || requestData instanceof FormData 
+        });
         
         let headers = {};
         let body;
         
+        // SỬA: Kiểm tra FormData hoặc isMultipart flag
         if (requestData instanceof FormData || isMultipart) {
             // KHÔNG set Content-Type cho FormData, browser sẽ tự động set với boundary
             if (token && token.trim() !== '') {

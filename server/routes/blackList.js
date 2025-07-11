@@ -7,7 +7,7 @@ const fsSync = require('fs');
 const { execSync } = require('child_process');
 
 // Import controllers
-const { createBlacklist, ocrPreview, createMultipleBlacklist, uploadFields, upload } = require('../controllers/BlackList/createBlackList');
+const { createBlacklist, ocrPreview, createMultipleBlacklist,uploadField1s, upload } = require('../controllers/BlackList/createBlackList');
 const { 
     getAllBlacklist, 
     getBlacklistById, 
@@ -17,6 +17,7 @@ const {
 } = require('../controllers/BlackList/getBlackList');
 const { 
     updateBlacklist, 
+    uploadFields,
     updateBlacklistStatus, 
     bulkUpdateBlacklist,
     extendBlacklistValidity 
@@ -82,11 +83,11 @@ router.get('/plate/:plate_number',
 router.post(
   '/create',
   auth,
-  uploadFields, // THÊM middleware này để nhận file ảnh
-  //createBlacklistValidator,
+  uploadField1s, // Sử dụng uploadFields từ createBlackList.js
+  //createBlacklistValidator, // Tạm comment để test
   createBlacklist
 );
-router.post('/ocr-preview', upload.single('image'), ocrPreview); 
+router.post('/ocr-preview', auth, upload.single('image'), ocrPreview);
 // Create multiple blacklist entries
 router.post('/create/bulk', 
     auth, 
@@ -100,6 +101,7 @@ router.put('/:id',
     auth, 
     //checkPermission('blacklist.update'), 
     updateBlacklistValidator, 
+    uploadFields,
     updateBlacklist
 );
 
@@ -645,59 +647,5 @@ router.get('/compare/:plate_number',
     }
 );
 
-const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../public/uploads/blacklist/');
-    try {
-      await fs.mkdir(uploadDir, { recursive: true });
-      cb(null, uploadDir);
-    } catch (error) {
-      cb(error);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `blacklist-${uniqueSuffix}${ext}`);
-  }
-});
-
-// OCR preview endpoint
-router.post('/ocr-preview', upload.single('image'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Vui lòng upload file ảnh (image)' });
-    }
-    const imagePath = req.file.path;
-    if (!fsSync.existsSync(imagePath)) {
-      return res.status(500).json({ success: false, message: 'File ảnh không tồn tại trên server.' });
-    }
-    let ocrText = '';
-    let detectedPlateImage = null;
-    let ocrResult = null;
-    try {
-      const pythonScript = path.join(__dirname, '../controllers/WhiteList/detect_plate.py');
-      const result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`).toString();
-      const lines = result.trim().split('\n');
-      const lastLine = lines[lines.length - 1];
-      ocrResult = JSON.parse(lastLine);
-      if (ocrResult.success && ocrResult.text) {
-        ocrText = ocrResult.text;
-        detectedPlateImage = ocrResult.detected_plate_image || null;
-      }
-    } catch (err) {
-      return res.status(500).json({ success: false, message: 'Lỗi khi nhận diện ký tự từ ảnh', error: err.message });
-    }
-    // Cleanup file
-    try { await fs.unlink(imagePath); } catch {}
-    if (ocrText && ocrText.trim()) {
-      res.json({ success: true, ocr_text: ocrText, detected_plate_image: detectedPlateImage, method: ocrResult?.method || 'unknown', confidence: ocrResult?.confidence || null, bbox: ocrResult?.bbox || null, message: ocrResult?.message || 'Nhận diện thành công' });
-    } else {
-      res.json({ success: false, ocr_text: '', detected_plate_image: detectedPlateImage, method: ocrResult?.method || 'failed', message: ocrResult?.message || 'Không nhận diện được ký tự.' });
-    }
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Lỗi server', error: err.message });
-  }
-});
 
 module.exports = router;

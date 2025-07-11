@@ -32,7 +32,8 @@ import {
   Avatar,
   FormHelperText,
   InputAdornment,
-  Snackbar
+  Snackbar,
+  Stack
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -1596,20 +1597,7 @@ const handleDateIconClickBackup = (field) => {
       )}
 
       {/* Enhanced Create/Edit Modal */}
-      <Dialog 
-        open={openModal} 
-        onClose={() => setOpenModal(false)} 
-        maxWidth="md" 
-        fullWidth
-        PaperProps={{
-          sx: { 
-            borderRadius: 3,
-            background: 'white',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
-            border: '1px solid #e0e0e0'
-          }
-        }}
-      >
+      <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="md" fullWidth>
         <DialogTitle sx={{ 
           background: '#1976d2',
           color: 'white',
@@ -1626,479 +1614,171 @@ const handleDateIconClickBackup = (field) => {
         <form onSubmit={handleSubmit}>
           <DialogContent sx={{ p: 3 }}>
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth required error={!!formErrors.location_id}>
-                  <InputLabel>Khu vực</InputLabel>
-                  <Select
-                    value={formData.location_id}
-                    label="Khu vực"
-                    onChange={(e) => setFormData({...formData, location_id: e.target.value})}
-                    disabled={locationsLoading}
-                    sx={{ borderRadius: 2 }}
+              {/* Left: Upload & Preview */}
+              <Grid item xs={12} md={5}>
+                <Card sx={{ p: 2, borderRadius: 2, boxShadow: 2, mb: 2 }}>
+                  <Button
+                    variant="outlined"
+                    component="label"
+                    fullWidth
+                    startIcon={<FaUpload />}
+                    sx={{ mb: 2, borderRadius: 2, py: 1.5, textTransform: 'none', fontWeight: 600 }}
                   >
-                    {locationsLoading ? (
-                      <MenuItem disabled>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <CircularProgress size={16} />
-                          <Typography variant="body2">Đang tải khu vực...</Typography>
-                        </Box>
-                      </MenuItem>
-                    ) : locations.length === 0 ? (
-                      <MenuItem disabled>
-                        <Typography variant="body2" color="text.secondary">
-                          Không có khu vực nào
-                        </Typography>
-                      </MenuItem>
-                    ) : (
-                      locations.map(location => (
-                        <MenuItem key={location.id} value={location.id}>
-                          <Box display="flex" flexDirection="column">
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                              {location.name}
-                            </Typography>
-                            {location.code && (
-                              <Typography variant="caption" color="text.secondary">
-                                {location.code}
-                              </Typography>
-                            )}
+                    {imageFile ? 'Đổi ảnh biển số' : 'Tải ảnh biển số xe'}
+                    <input type="file" accept="image/*" hidden onChange={handleImageChange} />
+                  </Button>
+                  {imagePreview && (
+                    <Box mt={1} display="flex" flexDirection="column" alignItems="center">
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+                        Ảnh mới upload:
+                      </Typography>
+                      <img 
+                        src={imagePreview} 
+                        alt="preview" 
+                        style={{ maxWidth: '100%', maxHeight: 180, borderRadius: 8, border: '1px solid #eee' }} 
+                      />
+                      <Button size="small" color="error" onClick={() => { setImageFile(null); setImagePreview(null); setOcrResult(''); setDetectedPlateImage(null); }} sx={{ mt: 1 }}>
+                        Xóa ảnh mới
+                      </Button>
+                    </Box>
+                  )}
+                  {ocrResult && imagePreview && (
+                    <Box mt={2} p={2} sx={{ backgroundColor: '#f8f9fa', borderRadius: 2, border: '1px solid #e9ecef' }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+                        Kết quả nhận diện biển số:
+                      </Typography>
+                      <Typography variant="body2" sx={{ backgroundColor: '#e3f2fd', p: 1, borderRadius: 1, fontWeight: 600, color: '#1565c0' }}>
+                        {ocrResult}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#666', mt: 1, display: 'block' }}>
+                        * Hệ thống đã được cải thiện để nhận diện dấu chấm (.) trong biển số
+                      </Typography>
+                    </Box>
+                  )}
+                  {detectedPlateImage && imagePreview && (
+                    <Box mt={2} p={2} sx={{ backgroundColor: '#f8f9fa', borderRadius: 2, border: '1px solid #e9ecef' }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
+                        Ảnh biển số đã phát hiện (mới):
+                      </Typography>
+                      <Box
+                        component="img"
+                        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`}
+                        alt="Ảnh biển số phát hiện mới"
+                        sx={{ maxWidth: '100%', maxHeight: 120, borderRadius: 2, border: '2px solid #1976d2', cursor: 'pointer', transition: 'transform 0.2s', '&:hover': { transform: 'scale(1.05)' } }}
+                        onClick={() => { window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`, '_blank'); }}
+                      />
+                    </Box>
+                  )}
+                </Card>
+              </Grid>
+              {/* Right: Form Fields */}
+              <Grid item xs={12} md={7}>
+                <Stack spacing={2}>
+                  <FormControl fullWidth required error={!!formErrors.location_id}>
+                    <InputLabel>Khu vực</InputLabel>
+                    <Select
+                      value={formData.location_id}
+                      label="Khu vực"
+                      onChange={(e) => setFormData({...formData, location_id: e.target.value})}
+                      disabled={locationsLoading}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      {locationsLoading ? (
+                        <MenuItem disabled>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <CircularProgress size={16} />
+                            <Typography variant="body2">Đang tải khu vực...</Typography>
                           </Box>
                         </MenuItem>
-                      ))
+                      ) : (
+                        locations.map(location => (
+                          <MenuItem key={location.id} value={location.id}>
+                            <LocationIcon sx={{ mr: 1, fontSize: 16 }} />
+                            {location.name}
+                          </MenuItem>
+                        ))
+                      )}
+                    </Select>
+                    {formErrors.location_id && (
+                      <FormHelperText error>{formErrors.location_id}</FormHelperText>
                     )}
-                  </Select>
-                  {formErrors.location_id && (
-                    <FormHelperText>{formErrors.location_id}</FormHelperText>
-                  )}
-                </FormControl>
+                  </FormControl>
+                  <TextField
+                    fullWidth
+                    required
+                    label="Biển số xe"
+                    value={formData.plate_number}
+                    disabled
+                    error={!!formErrors.plate_number}
+                    helperText={ocrResult ? "Đã nhận diện từ OCR" : "Trường này sẽ tự động điền từ ảnh biển số (OCR)"}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <TextField
+                    fullWidth
+                    label="Tên chủ xe"
+                    placeholder="Nhập tên chủ xe"
+                    value={formData.owner_name}
+                    onChange={(e) => setFormData({...formData, owner_name: e.target.value})}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <TextField
+                    fullWidth
+                    label="Số điện thoại"
+                    placeholder="Nhập số điện thoại"
+                    value={formData.owner_phone}
+                    onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
+                    error={!!formErrors.owner_phone}
+                    helperText={formErrors.owner_phone}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <TextField
+                    fullWidth
+                    label="Email liên hệ"
+                    placeholder="Nhập email liên hệ"
+                    value={formData.contact_email}
+                    onChange={(e) => setFormData({...formData, contact_email: e.target.value})}
+                    error={!!formErrors.contact_email}
+                    helperText={formErrors.contact_email}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <Box display="flex" gap={2}>
+                    <TextField
+                      fullWidth
+                      label="Có hiệu lực từ"
+                      placeholder="yyyy-MM-dd"
+                      value={formData.valid_from}
+                      onChange={(e) => setFormData({...formData, valid_from: e.target.value})}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                    />
+                    <TextField
+                      fullWidth
+                      label="Có hiệu lực đến"
+                      placeholder="yyyy-MM-dd"
+                      value={formData.valid_to}
+                      onChange={(e) => setFormData({...formData, valid_to: e.target.value})}
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                    />
+                  </Box>
+                  <TextField
+                    fullWidth
+                    label="Ghi chú"
+                    multiline
+                    rows={3}
+                    placeholder="Nhập ghi chú..."
+                    value={formData.description}
+                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                </Stack>
               </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  required
-                  label="Biển số xe"
-                  value={formData.plate_number}
-                  // Luôn disable, chỉ hiển thị kết quả OCR
-                  disabled
-                  error={!!formErrors.plate_number}
-                  helperText={
-                    ocrResult ? "Đã nhận diện từ OCR" : "Trường này sẽ tự động điền từ ảnh biển số (OCR)"
-                  }
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      '&:hover fieldset': { borderColor: '#1976d2' },
-                      '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Tên chủ xe"
-                  placeholder="Nhập tên chủ xe"
-                  value={formData.owner_name}
-                  onChange={(e) => setFormData({...formData, owner_name: e.target.value})}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      '&:hover fieldset': { borderColor: '#1976d2' },
-                      '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Số điện thoại"
-                  placeholder="Nhập số điện thoại"
-                  value={formData.owner_phone}
-                  onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
-                  error={!!formErrors.owner_phone}
-                  helperText={formErrors.owner_phone}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      '&:hover fieldset': { borderColor: '#1976d2' },
-                      '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Email liên hệ"
-                  type="email"
-                  placeholder="Nhập email"
-                  value={formData.contact_email}
-                  onChange={(e) => setFormData({...formData, contact_email: e.target.value})}
-                  error={!!formErrors.contact_email}
-                  helperText={formErrors.contact_email}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      '&:hover fieldset': { borderColor: '#1976d2' },
-                      '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Trạng thái phê duyệt</InputLabel>
-                  <Select
-                    value={formData.approval_status}
-                    label="Trạng thái phê duyệt"
-                    onChange={(e) => setFormData({...formData, approval_status: e.target.value})}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    <MenuItem value="approved">Đã phê duyệt</MenuItem>
-                    <MenuItem value="pending">Chờ phê duyệt</MenuItem>
-                    <MenuItem value="rejected">Từ chối</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-                <Grid item xs={12} md={6}>
-  <Box position="relative">
-    <TextField
-      fullWidth
-      label="Có hiệu lực từ"
-      placeholder="dd/MM/yyyy"
-      value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
-      onChange={(e) => {
-        const value = e.target.value;
-        if (value === '' || validateDateFormat(value)) {
-          const formattedValue = formatDateForInput(value);
-          setFormData({...formData, valid_from: formattedValue});
-        }
-      }}
-      InputProps={{
-        endAdornment: (
-          <InputAdornment position="end">
-            <IconButton
-              onClick={() => handleDateIconClick('valid_from')}
-              sx={{ 
-                color: '#1976d2',
-                '&:hover': { 
-                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                  transform: 'scale(1.1)'
-                },
-                transition: 'all 0.2s ease'
-              }}
-              title="Chọn ngày"
-            >
-              <CalendarIcon />
-            </IconButton>
-          </InputAdornment>
-        ),
-      }}
-      sx={{
-        '& .MuiOutlinedInput-root': {
-          borderRadius: 2,
-          '&:hover fieldset': { borderColor: '#1976d2' },
-          '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-        }
-      }}
-    />
-    
-    {/* Date Input ẩn */}
-    <input
-      ref={validFromDateRef}
-      type="date"
-      value={formData.valid_from || ''}
-      onChange={(e) => handleDateChange('valid_from', e.target.value)}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        opacity: 0,
-        pointerEvents: 'none',
-        zIndex: -1
-      }}
-    />
-  </Box>
-</Grid>
-                <Grid item xs={12} md={6}>
-  <Box position="relative">
-    <TextField
-      fullWidth
-      label="Có hiệu lực đến"
-      placeholder="dd/MM/yyyy"
-      value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
-      onChange={(e) => {
-        const value = e.target.value;
-        if (value === '' || validateDateFormat(value)) {
-          const formattedValue = formatDateForInput(value);
-          setFormData({...formData, valid_to: formattedValue});
-        }
-      }}
-      error={!!formErrors.valid_to}
-      helperText={formErrors.valid_to}
-      InputProps={{
-        endAdornment: (
-          <InputAdornment position="end">
-            <IconButton
-              onClick={() => handleDateIconClick('valid_to')}
-              sx={{ 
-                color: '#1976d2',
-                '&:hover': { 
-                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                  transform: 'scale(1.1)'
-                },
-                transition: 'all 0.2s ease'
-              }}
-              title="Chọn ngày"
-            >
-              <CalendarIcon />
-            </IconButton>
-          </InputAdornment>
-        ),
-      }}
-      sx={{
-        '& .MuiOutlinedInput-root': {
-          borderRadius: 2,
-          '&:hover fieldset': { borderColor: '#1976d2' },
-          '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-        }
-      }}
-    />
-    
-    {/* Date Input ẩn */}
-    <input
-      ref={validToDateRef}
-      type="date"
-      value={formData.valid_to || ''}
-      onChange={(e) => handleDateChange('valid_to', e.target.value)}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        opacity: 0,
-        pointerEvents: 'none',
-        zIndex: -1
-      }}
-    />
-  </Box>
-</Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Ghi chú"
-                  multiline
-                  rows={3}
-                  placeholder="Nhập ghi chú..."
-                  value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      borderRadius: 2,
-                      '&:hover fieldset': { borderColor: '#1976d2' },
-                      '&.Mui-focused fieldset': { borderColor: '#1976d2' }
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12}>
-  <Box display="flex" gap={3}>
-    {/* Cột upload ảnh */}
-    <Box flex={1}>
-      <Button
-        variant="outlined"
-        component="label"
-        fullWidth
-        startIcon={<FaUpload />}
-        sx={{ 
-          mb: 2,
-          borderRadius: 2,
-          py: 1.5,
-          textTransform: 'none',
-          fontWeight: 600
-        }}
-      >
-        Tải ảnh biển số xe
-        <input
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={handleImageChange}
-        />
-      </Button>
-      
-      {/* Hiển thị ảnh preview mới upload */}
-      {imagePreview && (
-        <Box mt={1} display="flex" flexDirection="column" alignItems="center">
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
-            Ảnh mới upload:
-          </Typography>
-          <img 
-            src={imagePreview} 
-            alt="preview" 
-            style={{ 
-              maxWidth: '100%', 
-              maxHeight: 200, 
-              borderRadius: 8, 
-              border: '1px solid #eee' 
-            }} 
-          />
-          <Button
-            size="small"
-            color="error"
-            onClick={() => {
-              setImageFile(null);
-              setImagePreview(null);
-              setOcrResult('');
-              setDetectedPlateImage(null);
-            }}
-            sx={{ mt: 1 }}
-          >
-            Xóa ảnh mới
-          </Button>
-        </Box>
-      )}
-      
-      {/* Hiển thị thông tin OCR và ảnh phát hiện khi upload ảnh mới */}
-      {ocrResult && imagePreview && (
-        <Box mt={2} p={2} sx={{ 
-          backgroundColor: '#f8f9fa', 
-          borderRadius: 2, 
-          border: '1px solid #e9ecef' 
-        }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
-            Kết quả nhận diện biển số:
-          </Typography>
-          <Typography variant="body2" sx={{ 
-            backgroundColor: '#e3f2fd', 
-            p: 1, 
-            borderRadius: 1, 
-            fontWeight: 600,
-            color: '#1565c0'
-          }}>
-            {ocrResult}
-          </Typography>
-          <Typography variant="caption" sx={{ color: '#666', mt: 1, display: 'block' }}>
-            * Hệ thống đã được cải thiện để nhận diện dấu chấm (.) trong biển số
-          </Typography>
-        </Box>
-      )}
-    </Box>
-    
-    {/* Cột hiển thị ảnh hiện tại - MỚI THÊM */}
-    {!imagePreview && detectedPlateImage && (
-      <Box flex={1}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
-          Ảnh biển số hiện tại:
-        </Typography>
-        <Box display="flex" flexDirection="column" alignItems="center" p={2} sx={{ 
-          backgroundColor: '#f8f9fc', 
-          borderRadius: 2, 
-          border: '1px solid #e0e0e0' 
-        }}>
-          <Box
-            component="img"
-            src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`}
-            alt="Ảnh biển số hiện tại"
-            sx={{
-              maxWidth: '100%',
-              maxHeight: 150,
-              borderRadius: 2,
-              border: '2px solid #1976d2',
-              cursor: 'pointer',
-              transition: 'transform 0.2s ease',
-              '&:hover': {
-                transform: 'scale(1.05)',
-                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
-              }
-            }}
-            onClick={() => {
-              window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`, '_blank');
-            }}
-          />
-          <Typography variant="caption" sx={{ color: '#666', mt: 1, textAlign: 'center' }}>
-            Ảnh biển số đã phát hiện
-            <br />
-            (Click để xem lớn)
-          </Typography>
-        </Box>
-      </Box>
-    )}
-  </Box>
-  
-  {/* Hiển thị ảnh detected từ OCR mới */}
-  {detectedPlateImage && imagePreview && (
-    <Box mt={2} p={2} sx={{ 
-      backgroundColor: '#f8f9fa', 
-      borderRadius: 2, 
-      border: '1px solid #e9ecef' 
-    }}>
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: '#1976d2' }}>
-        Ảnh biển số đã phát hiện (mới):
-      </Typography>
-      <Box
-        component="img"
-        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`}
-        alt="Ảnh biển số phát hiện mới"
-        sx={{
-          maxWidth: '100%',
-          maxHeight: 150,
-          borderRadius: 4,
-          border: '2px solid #1976d2',
-          cursor: 'pointer',
-          transition: 'transform 0.2s ease',
-          '&:hover': {
-            transform: 'scale(1.05)',
-            boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
-          }
-        }}
-        onClick={() => {
-          window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`, '_blank');
-        }}
-      />
-    </Box>
-  )}
-</Grid>
             </Grid>
           </DialogContent>
-          <DialogActions sx={{ 
-            p: 3, 
-            borderTop: '1px solid #e0e0e0',
-            background: '#fafafa'
-          }}>
-            <Button 
-              onClick={() => setOpenModal(false)}
-              sx={{
-                borderRadius: 2,
-                px: 3,
-                py: 1.5,
-                textTransform: 'none',
-                fontWeight: 600,
-                backgroundColor: '#f5f5f5',
-                color: '#222',
-                '&:hover': { backgroundColor: '#ededed' }
-              }}
-            >
+          <DialogActions sx={{ p: 3, borderTop: '1px solid #e0e0e0', background: '#fafafa' }}>
+            <Button onClick={() => setOpenModal(false)} sx={{ borderRadius: 2, px: 3, py: 1.5, textTransform: 'none', fontWeight: 600, backgroundColor: '#f5f5f5', color: '#222', '&:hover': { backgroundColor: '#ededed' } }}>
               <FaTimes style={{ marginRight: 8 }} />
               Hủy
             </Button>
-            <Button 
-              type="submit" 
-              variant="contained" 
-              disabled={loading}
-              sx={{
-                borderRadius: 2,
-                px: 3,
-                py: 1.5,
-                textTransform: 'none',
-                fontWeight: 600,
-                backgroundColor: loading ? '#ccc' : '#1976d2',
-                '&:hover': { backgroundColor: loading ? '#ccc' : '#1565c0' }
-              }}
-            >
+            <Button type="submit" variant="contained" disabled={loading} sx={{ borderRadius: 2, px: 3, py: 1.5, textTransform: 'none', fontWeight: 600, backgroundColor: loading ? '#ccc' : '#1976d2', '&:hover': { backgroundColor: loading ? '#ccc' : '#1565c0' } }}>
               <FaSave style={{ marginRight: 8 }} />
               {loading ? 'Đang xử lý...' : (selectedItem ? 'Cập nhật' : 'Tạo mới')}
             </Button>

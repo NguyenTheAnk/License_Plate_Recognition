@@ -377,10 +377,10 @@ const createWhitelistValidator = [
         .notEmpty()
         .withMessage('Biển số là bắt buộc'),
     
-    body('vehicle_id')
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage('vehicle_id phải là số nguyên dương'),
+    // body('vehicle_id')
+    //     .optional()
+    //     .isInt({ min: 1 })
+    //     .withMessage('vehicle_id phải là số nguyên dương'),
     
     body('owner_name')
         .optional()
@@ -583,10 +583,10 @@ const createBlacklistValidator = [
         .matches(/^[A-Z0-9\-\.]+$/)
         .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
     
-    body('vehicle_id')
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage('vehicle_id phải là số nguyên dương'),
+    // body('vehicle_id')
+    //     .optional()
+    //     .isInt({ min: 1 })
+    //     .withMessage('vehicle_id phải là số nguyên dương'),
     
     body('violation_type')
         .optional()
@@ -678,10 +678,10 @@ const updateBlacklistValidator = [
         .matches(/^[A-Z0-9\-\.]+$/)
         .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
     
-    body('vehicle_id')
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage('vehicle_id phải là số nguyên dương'),
+    // body('vehicle_id')
+    //     .optional()
+    //     .isInt({ min: 1 })
+    //     .withMessage('vehicle_id phải là số nguyên dương'),
     
     body('violation_type')
         .optional()
@@ -777,10 +777,10 @@ const bulkWhitelistValidator = [
         .matches(/^[A-Z0-9\-\.]+$/)
         .withMessage('Biển số chỉ được chứa chữ hoa, số, dấu gạch ngang và dấu chấm'),
     
-    body('entries.*.vehicle_id')
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage('vehicle_id phải là số nguyên dương'),
+    // body('entries.*.vehicle_id')
+    //     .optional()
+    //     .isInt({ min: 1 })
+    //     .withMessage('vehicle_id phải là số nguyên dương'),
     
     body('entries.*.owner_name')
         .optional()

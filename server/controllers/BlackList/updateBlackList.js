@@ -40,7 +40,6 @@ const storage = multer.diskStorage({
     }
 });
 
-// SỬA: Thay thế hàm formatDateForMySQL trong updateBlackList.js
 const formatDateForMySQL = (dateString) => {
     if (!dateString) return null;
     
@@ -52,27 +51,24 @@ const formatDateForMySQL = (dateString) => {
         return dateString;
     }
     
-    // SỬA: Xử lý string date mà không dùng Date constructor để tránh timezone
     let year, month, day;
     
-    if (dateString.includes('-')) {
-        // YYYY-MM-DD format
-        [year, month, day] = dateString.split('-').map(num => parseInt(num));
-    } else if (dateString.includes('/')) {
-        // Frontend gửi format YYYY-MM-DD đã convert từ dd/MM/yyyy
-        // Nhưng nếu vẫn nhận dd/MM/yyyy thì xử lý
+    if (dateString.includes('/')) {
+        // Frontend gửi format dd/MM/yyyy
         const parts = dateString.split('/');
         if (parts.length === 3) {
-            // Assume dd/MM/yyyy format từ frontend
             day = parseInt(parts[0]);
             month = parseInt(parts[1]);
             year = parseInt(parts[2]);
         }
+    } else if (dateString.includes('-')) {
+        // YYYY-MM-DD format
+        [year, month, day] = dateString.split('-').map(num => parseInt(num));
     } else if (dateString.includes('T')) {
         // ISO string - chỉ lấy phần date
         const datePart = dateString.split('T')[0];
         console.log('[BACKEND] ISO string date part:', datePart);
-        return datePart; // Đã là YYYY-MM-DD
+        return datePart;
     }
     
     // Validate components
@@ -110,13 +106,46 @@ const updateBlacklist = async (req, res) => {
     try {
         const { id } = req.params;
         
-        // THÊM: Debug logging
+        // THÊM: Debug logging chi tiết hơn
         console.log('=== UPDATE BLACKLIST DEBUG ===');
         console.log('Request params:', req.params);
-        console.log('Request body:', req.body);
+        console.log('Request body raw:', req.body);
         console.log('Request files:', req.files ? Object.keys(req.files) : 'No files');
         console.log('Content-Type:', req.get('Content-Type'));
-        console.log('===============================');
+        
+        // SỬA: Xử lý FormData duplicates và convert types
+        const processFormData = (body) => {
+            const processed = {};
+            
+            Object.keys(body).forEach(key => {
+                let value = body[key];
+                
+                // Xử lý array values (từ FormData duplicates)
+                if (Array.isArray(value)) {
+                    // Lấy giá trị cuối cùng (thường là giá trị mới nhất)
+                    value = value[value.length - 1];
+                    console.log(`[PROCESS] Array detected for ${key}:`, body[key], '-> taking last value:', value);
+                }
+                
+                // Convert to string nếu cần và xử lý null/undefined
+                if (value !== null && value !== undefined) {
+                    processed[key] = String(value).trim();
+                } else {
+                    processed[key] = '';
+                }
+                
+                // Convert empty string to null for certain fields
+                if (processed[key] === '' && ['vehicle_id', 'owner_name', 'owner_phone', 'description', 'valid_from', 'valid_to'].includes(key)) {
+                    processed[key] = null;
+                }
+            });
+            
+            return processed;
+        };
+        
+        // Process form data
+        const cleanedBody = processFormData(req.body);
+        console.log('Cleaned body:', cleanedBody);
         
         const {
             location_id,
@@ -139,7 +168,7 @@ const updateBlacklist = async (req, res) => {
             verified_plate_number,
             // Image replacement options
             replace_images = 'false'
-        } = req.body;
+        } = cleanedBody;
 
         // Check if blacklist entry exists
         const [existingEntry] = await connection.execute(
@@ -160,107 +189,159 @@ const updateBlacklist = async (req, res) => {
 
         const currentEntry = existingEntry[0];
 
-        // Check if location exists (if location_id is being updated)
-        if (location_id && location_id !== currentEntry.location_id) {
-            const [locationExists] = await connection.execute(
-                'SELECT id FROM locations WHERE id = ? AND is_active = 1',
-                [location_id]
-            );
+        // SỬA: Logic kiểm tra thay đổi an toàn với type checking
+        const safeCompare = (newVal, oldVal) => {
+            // Convert both values to string safely
+            const newStr = (newVal === null || newVal === undefined) ? '' : String(newVal).trim();
+            const oldStr = (oldVal === null || oldVal === undefined) ? '' : String(oldVal).trim();
+            
+            return newStr !== oldStr;
+        };
 
-            if (locationExists.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Không tìm thấy vị trí'
-                });
-            }
-        }
-
-        // Check if vehicle exists (if vehicle_id is being updated)
-        if (vehicle_id && vehicle_id !== currentEntry.vehicle_id) {
-            const [vehicleExists] = await connection.execute(
-                'SELECT id, plate_number FROM vehicles WHERE id = ? AND is_active = 1',
-                [vehicle_id]
-            );
-
-            if (vehicleExists.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Không tìm thấy phương tiện'
-                });
-            }
-
-            // Check if plate numbers match
-            const newPlateNumber = plate_number || currentEntry.plate_number;
-            if (vehicleExists[0].plate_number !== newPlateNumber) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Biển số không khớp với thông tin phương tiện'
-                });
-            }
-        }
-
-        // Check for duplicate entry if plate_number or location_id is being changed
-        const newPlateNumber = plate_number || currentEntry.plate_number;
-        const newLocationId = location_id || currentEntry.location_id;
-
-        if (plate_number !== currentEntry.plate_number || location_id !== currentEntry.location_id) {
-            const [duplicateEntry] = await connection.execute(
-                'SELECT id FROM vehicle_blacklist WHERE location_id = ? AND plate_number = ? AND id != ? AND is_active = 1',
-                [newLocationId, newPlateNumber, id]
-            );
-
-            if (duplicateEntry.length > 0) {
-                return res.status(409).json({
-                    success: false,
-                    message: 'Biển số này đã có trong danh sách đen tại vị trí này'
-                });
-            }
-        }
-
-        // Validate violation type and severity
-        if (violation_type) {
-            const validViolationTypes = ['unauthorized', 'security_threat', 'unpaid_fine', 'banned', 'suspicious', 'other'];
-            if (!validViolationTypes.includes(violation_type)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Loại vi phạm không hợp lệ'
-                });
-            }
-        }
-
-        if (severity) {
-            const validSeverities = ['low', 'medium', 'high', 'critical'];
-            if (!validSeverities.includes(severity)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Mức độ nghiêm trọng không hợp lệ'
-                });
-            }
-        }
-
-        // Validate date range
-        const newValidFrom = valid_from || currentEntry.valid_from;
-        const newValidTo = valid_to || currentEntry.valid_to;
-        
-        if (newValidFrom && newValidTo && new Date(newValidFrom) > new Date(newValidTo)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Ngày bắt đầu không thể sau ngày kết thúc'
-            });
-        }
-
-        // Validate phone format if provided
-        if (owner_phone && owner_phone.trim() !== '') {
+        // SỬA: Validate phone với type checking an toàn
+        const validatePhone = (phone) => {
+            if (!phone) return true; // Empty phone is valid
+            
+            // Ensure phone is string
+            const phoneStr = String(phone).trim();
+            if (phoneStr === '') return true;
+            
             const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
-            if (!phoneRegex.test(owner_phone.replace(/\s+/g, ''))) {
+            return phoneRegex.test(phoneStr.replace(/\s+/g, ''));
+        };
+
+        // Prepare update data
+        const updateFields = [];
+        const updateValues = [];
+        
+        // Location ID
+        if (location_id !== undefined && safeCompare(location_id, currentEntry.location_id)) {
+            updateFields.push('location_id = ?');
+            updateValues.push(location_id || null);
+            console.log('[UPDATE] location_id:', currentEntry.location_id, '->', location_id);
+        }
+
+        // Plate Number
+        if (plate_number !== undefined && safeCompare(plate_number, currentEntry.plate_number)) {
+            updateFields.push('plate_number = ?');
+            updateValues.push(plate_number);
+            console.log('[UPDATE] plate_number:', currentEntry.plate_number, '->', plate_number);
+        }
+
+        // Vehicle ID - convert to number if needed
+        if (vehicle_id !== undefined && safeCompare(vehicle_id, currentEntry.vehicle_id)) {
+            const vehicleIdNum = vehicle_id && vehicle_id !== '' ? parseInt(vehicle_id) : null;
+            updateFields.push('vehicle_id = ?');
+            updateValues.push(vehicleIdNum);
+            console.log('[UPDATE] vehicle_id:', currentEntry.vehicle_id, '->', vehicleIdNum);
+        }
+
+        // Violation Type
+        if (violation_type !== undefined && safeCompare(violation_type, currentEntry.violation_type)) {
+            updateFields.push('violation_type = ?');
+            updateValues.push(violation_type);
+            console.log('[UPDATE] violation_type:', currentEntry.violation_type, '->', violation_type);
+        }
+
+        // Reason
+        if (reason !== undefined && safeCompare(reason, currentEntry.reason)) {
+            updateFields.push('reason = ?');
+            updateValues.push(reason);
+            console.log('[UPDATE] reason:', currentEntry.reason, '->', reason);
+        }
+
+        // Severity
+        if (severity !== undefined && safeCompare(severity, currentEntry.severity)) {
+            updateFields.push('severity = ?');
+            updateValues.push(severity);
+            console.log('[UPDATE] severity:', currentEntry.severity, '->', severity);
+        }
+
+        // Owner Name
+        if (owner_name !== undefined && safeCompare(owner_name, currentEntry.owner_name)) {
+            updateFields.push('owner_name = ?');
+            updateValues.push(owner_name || null);
+            console.log('[UPDATE] owner_name:', currentEntry.owner_name, '->', owner_name);
+        }
+
+        // Owner Phone with safe validation
+        if (owner_phone !== undefined && safeCompare(owner_phone, currentEntry.owner_phone)) {
+            // SỬA: Validate phone với type checking an toàn
+            if (!validatePhone(owner_phone)) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Định dạng số điện thoại không hợp lệ'
+                    message: 'Định dạng số điện thoại không hợp lệ',
+                    errors: [`Số điện thoại "${owner_phone}" không đúng định dạng`]
                 });
+            }
+            
+            updateFields.push('owner_phone = ?');
+            updateValues.push(owner_phone || null);
+            console.log('[UPDATE] owner_phone:', currentEntry.owner_phone, '->', owner_phone);
+        }
+
+        // Valid From Date
+        if (valid_from !== undefined) {
+            const processedValidFrom = valid_from ? formatDateForMySQL(valid_from) : null;
+            
+            let currentDbValidFrom = null;
+            if (currentEntry.valid_from) {
+                if (currentEntry.valid_from instanceof Date) {
+                    currentDbValidFrom = currentEntry.valid_from.toISOString().split('T')[0];
+                } else {
+                    currentDbValidFrom = currentEntry.valid_from;
+                }
+            }
+            
+            console.log('[BACKEND] Comparing valid_from:', processedValidFrom, 'vs', currentDbValidFrom);
+            
+            if (processedValidFrom !== currentDbValidFrom) {
+                updateFields.push('valid_from = ?');
+                updateValues.push(processedValidFrom);
+                console.log('[UPDATE] valid_from:', currentDbValidFrom, '->', processedValidFrom);
             }
         }
 
-        // Handle uploaded images
+        // Valid To Date
+        if (valid_to !== undefined) {
+            const processedValidTo = valid_to ? formatDateForMySQL(valid_to) : null;
+            
+            let currentDbValidTo = null;
+            if (currentEntry.valid_to) {
+                if (currentEntry.valid_to instanceof Date) {
+                    currentDbValidTo = currentEntry.valid_to.toISOString().split('T')[0];
+                } else {
+                    currentDbValidTo = currentEntry.valid_to;
+                }
+            }
+            
+            console.log('[BACKEND] Comparing valid_to:', processedValidTo, 'vs', currentDbValidTo);
+            
+            if (processedValidTo !== currentDbValidTo) {
+                updateFields.push('valid_to = ?');
+                updateValues.push(processedValidTo);
+                console.log('[UPDATE] valid_to:', currentDbValidTo, '->', processedValidTo);
+            }
+        }
+
+        // Description
+        if (description !== undefined && safeCompare(description, currentEntry.description)) {
+            updateFields.push('description = ?');
+            updateValues.push(description || null);
+            console.log('[UPDATE] description:', currentEntry.description, '->', description);
+        }
+
+        // Active status
+        if (is_active !== undefined) {
+            const activeValue = is_active === 'true' || is_active === true || is_active === 1 ? 1 : 0;
+            if (activeValue !== currentEntry.is_active) {
+                updateFields.push('is_active = ?');
+                updateValues.push(activeValue);
+                console.log('[UPDATE] is_active:', currentEntry.is_active, '->', activeValue);
+            }
+        }
+
+        // Handle uploaded images nếu có
         let newImagePaths = {
             plate_image_path: currentEntry.plate_image_path,
             plate_image_cropped_path: currentEntry.plate_image_cropped_path,
@@ -272,246 +353,123 @@ const updateBlacklist = async (req, res) => {
         let detectedPlateImage = currentEntry.detected_plate_image || null;
         let ocrUpdateData = null;
         
-        // SỬA: Chỉ xử lý ảnh khi có files
         if (req.files && Object.keys(req.files).length > 0) {
-            if (req.files.plate_image) {
-                if (replace_images === 'true' && currentEntry.plate_image_path) {
-                    oldImagesToDelete.push(currentEntry.plate_image_path);
-                }
-                newImagePaths.plate_image_path = req.files.plate_image[0].path;
-                newImageMetadata.original = {
-                    filename: req.files.plate_image[0].filename,
-                    size: req.files.plate_image[0].size,
-                    mimetype: req.files.plate_image[0].mimetype,
-                    updated_at: new Date()
-                };
+    if (req.files.plate_image) {
+        if (replace_images === 'true' && currentEntry.plate_image_path) {
+            oldImagesToDelete.push(currentEntry.plate_image_path);
+        }
+        newImagePaths.plate_image_path = req.files.plate_image[0].path;
+        newImageMetadata.original = {
+            filename: req.files.plate_image[0].filename,
+            size: req.files.plate_image[0].size,
+            mimetype: req.files.plate_image[0].mimetype,
+            updated_at: new Date()
+        };
+        
+        // SỬA: QUAN TRỌNG - Detect lại biển số từ ảnh mới
+        try {
+            const pythonScript = path.join(__dirname, './detect_plate.py');
+            const imagePath = req.files.plate_image[0].path;
+            
+            console.log('[DEBUG UPDATE] Python script path:', pythonScript);
+            console.log('[DEBUG UPDATE] Image path:', imagePath);
+            
+            // Đảm bảo file tồn tại trước khi chạy OCR
+            let fileExists = fsSync.existsSync(imagePath);
+            let retryCount = 0;
+            while (!fileExists && retryCount < 10) {
+                console.warn(`[DEBUG UPDATE] File chưa tồn tại, thử delay 200ms lần ${retryCount + 1}:`, imagePath);
+                await new Promise(resolve => setTimeout(resolve, 200));
+                fileExists = fsSync.existsSync(imagePath);
+                retryCount++;
+            }
+
+            if (fileExists) {
+                const result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`).toString();
+                const lines = result.trim().split('\n');
+                const lastLine = lines[lines.length - 1];
                 
-                // THÊM: Detect lại biển số từ ảnh mới
-                try {
-                    const pythonScript = path.join(__dirname, '../WhiteList/detect_plate.py');
-                    const imagePath = req.files.plate_image[0].path;
-                    
-                    console.log('[DEBUG] Python script path:', pythonScript);
-                    console.log('[DEBUG] Image path:', imagePath);
-                    
-                    const result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`).toString();
-                    const lines = result.trim().split('\n');
-                    const lastLine = lines[lines.length - 1];
-                    
-                    console.log('[DEBUG] Python output:', result);
-                    console.log('[DEBUG] Last line:', lastLine);
-                    
-                    const ocrResult = JSON.parse(lastLine);
-                    
-                    detectedPlateImage = ocrResult.detected_plate_image || null;
-                    if (detectedPlateImage && !detectedPlateImage.startsWith('/uploads/blacklist/detected_plates/')) {
+                console.log('[DEBUG UPDATE] Python output:', result);
+                console.log('[DEBUG UPDATE] Last line:', lastLine);
+                
+                const ocrResult = JSON.parse(lastLine);
+                
+                // SỬA: Update detected plate image path
+                if (ocrResult.detected_plate_image) {
+                    detectedPlateImage = ocrResult.detected_plate_image;
+                    // Đảm bảo đường dẫn đúng subfolder
+                    if (!detectedPlateImage.startsWith('/uploads/blacklist/detected_plates/')) {
                         const fileName = detectedPlateImage.split('/').pop();
                         detectedPlateImage = `/uploads/blacklist/detected_plates/${fileName}`;
                     }
-                    
-                   if (ocrResult.plate_text) {  // SỬA: plate_text thay vì text
-                        ocrUpdateData = {
-                            ocr_raw_text: ocrResult.plate_text,  // SỬA: plate_text thay vì text
-                            ocr_confidence: ocrResult.confidence || 0
-                        };
+                    console.log('[DEBUG UPDATE] New detected plate image:', detectedPlateImage);
+                } else {
+                    // Fallback: tìm file detected mới nhất
+                    const detectedDir = path.join(__dirname, '../../public/uploads/blacklist/detected_plates/');
+                    try {
+                        const files = fsSync.readdirSync(detectedDir)
+                            .filter(f => f.startsWith('detected_') && f.endsWith('.jpg'))
+                            .map(f => ({ 
+                                name: f, 
+                                time: fsSync.statSync(path.join(detectedDir, f)).mtime.getTime() 
+                            }))
+                            .sort((a, b) => b.time - a.time);
+                        
+                        if (files.length > 0) {
+                            detectedPlateImage = `/uploads/blacklist/detected_plates/${files[0].name}`;
+                            console.log('[DEBUG UPDATE] Fallback detected plate image:', detectedPlateImage);
+                        }
+                    } catch (dirErr) {
+                        console.warn('[DEBUG UPDATE] Lỗi khi đọc thư mục detected_plates:', dirErr.message);
                     }
-                    
-                    console.log('[DEBUG][UPDATE] detectedPlateImage:', detectedPlateImage);
-                    console.log('[DEBUG][UPDATE] ocrUpdateData:', ocrUpdateData);
-                    
-                } catch (err) {
-                    console.error('[UPDATE] OCR error:', err);
-                    detectedPlateImage = currentEntry.detected_plate_image;
-                    ocrUpdateData = null;
                 }
-            }
-        
-            if (req.files.plate_image_cropped) {
-                if (replace_images === 'true' && currentEntry.plate_image_cropped_path) {
-                    oldImagesToDelete.push(currentEntry.plate_image_cropped_path);
-                }
-                newImagePaths.plate_image_cropped_path = req.files.plate_image_cropped[0].path;
-                newImageMetadata.cropped = {
-                    filename: req.files.plate_image_cropped[0].filename,
-                    size: req.files.plate_image_cropped[0].size,
-                    mimetype: req.files.plate_image_cropped[0].mimetype,
-                    updated_at: new Date()
-                };
-            }
-        
-            if (req.files.plate_image_processed) {
-                if (replace_images === 'true' && currentEntry.plate_image_processed_path) {
-                    oldImagesToDelete.push(currentEntry.plate_image_processed_path);
-                }
-                newImagePaths.plate_image_processed_path = req.files.plate_image_processed[0].path;
-                newImageMetadata.processed = {
-                    filename: req.files.plate_image_processed[0].filename,
-                    size: req.files.plate_image_processed[0].size,
-                    mimetype: req.files.plate_image_processed[0].mimetype,
-                    updated_at: new Date()
-                };
-            }
-        }
-
-        // Validate evidence files format if provided
-        let evidenceFilesJson = currentEntry.evidence_files;
-        if (evidence_files !== undefined) {
-            if (evidence_files === null) {
-                evidenceFilesJson = null;
+               
+                if (ocrUpdateData && ocrUpdateData.ocr_raw_text) {
+                        updateFields.push('ocr_raw_text = ?');
+                        updateValues.push(ocrUpdateData.ocr_raw_text);
+                        updateFields.push('ocr_confidence = ?');
+                        updateValues.push(ocrUpdateData.ocr_confidence);
+                        updateFields.push('ocr_processed_at = NOW()');
+                        console.log('[DEBUG UPDATE] Adding OCR data to update:', ocrUpdateData);
+                    }
+                
             } else {
-                try {
-                    evidenceFilesJson = typeof evidence_files === 'string' ? JSON.parse(evidence_files) : evidence_files;
-                    if (!Array.isArray(evidenceFilesJson)) {
-                        throw new Error('Evidence files must be an array');
-                    }
-                } catch (error) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Định dạng evidence_files không hợp lệ'
-                    });
-                }
+                console.error('[DEBUG UPDATE] File vẫn không tồn tại sau retry:', imagePath);
+                detectedPlateImage = currentEntry.detected_plate_image; // Giữ nguyên ảnh cũ
             }
+            
+        } catch (err) {
+            console.error('[UPDATE] OCR error:', err);
+            detectedPlateImage = currentEntry.detected_plate_image; // Giữ nguyên ảnh cũ nếu lỗi
+            ocrUpdateData = null;
         }
-
-        // Prepare update data
-        const updateFields = [];
-        const updateValues = [];
-        
-       // SỬA: Cho phép update field với empty string và kiểm tra các giá trị có thay đổi không
-if (location_id !== undefined && location_id !== currentEntry.location_id) {
-    updateFields.push('location_id = ?');
-    updateValues.push(location_id || null);
-}
-if (plate_number !== undefined && plate_number !== currentEntry.plate_number) {
-    updateFields.push('plate_number = ?');
-    updateValues.push(plate_number);
-}
-if (vehicle_id !== undefined && vehicle_id !== currentEntry.vehicle_id) {
-    updateFields.push('vehicle_id = ?');
-    updateValues.push(vehicle_id || null);
-}
-if (violation_type !== undefined && violation_type !== currentEntry.violation_type) {
-    updateFields.push('violation_type = ?');
-    updateValues.push(violation_type);
-}
-if (reason !== undefined && reason !== currentEntry.reason) {
-    updateFields.push('reason = ?');
-    updateValues.push(reason);
-}
-if (severity !== undefined && severity !== currentEntry.severity) {
-    updateFields.push('severity = ?');
-    updateValues.push(severity);
-}
-if (owner_name !== undefined && owner_name !== currentEntry.owner_name) {
-    updateFields.push('owner_name = ?');
-    updateValues.push(owner_name || null);
-}
-// Validate phone format if provided
-if (owner_phone && owner_phone.trim() !== '') {
-    const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
-    if (!phoneRegex.test(owner_phone.replace(/\s+/g, ''))) {
-        console.log('Phone validation failed for:', owner_phone); // THÊM debug
-        return res.status(400).json({
-            success: false,
-            message: 'Định dạng số điện thoại không hợp lệ',
-            errors: [`Số điện thoại "${owner_phone}" không đúng định dạng`]
-        });
     }
-}
-if (valid_from !== undefined) {
-    const processedValidFrom = valid_from ? formatDateForMySQL(valid_from) : null;
-    console.log('[BACKEND] valid_from processing:');
-    console.log('  Input:', valid_from);
-    console.log('  Processed:', processedValidFrom);
-    console.log('  Current DB value:', currentEntry.valid_from);
     
-    if (processedValidFrom !== currentEntry.valid_from) {
-        updateFields.push('valid_from = ?');
-        updateValues.push(processedValidFrom);
-        console.log('[BACKEND] valid_from will be updated to:', processedValidFrom);
-    } else {
-        console.log('[BACKEND] valid_from unchanged');
-    }
-}
-if (valid_to !== undefined) {
-    const processedValidTo = valid_to ? formatDateForMySQL(valid_to) : null;
-    console.log('[BACKEND] valid_to processing:');
-    console.log('  Input:', valid_to);
-    console.log('  Processed:', processedValidTo);
-    console.log('  Current DB value:', currentEntry.valid_to);
+    // SỬA: QUAN TRỌNG - Cập nhật các đường dẫn ảnh vào database
+    updateFields.push('plate_image_path = ?');
+    updateValues.push(newImagePaths.plate_image_path);
     
-    if (processedValidTo !== currentEntry.valid_to) {
-        updateFields.push('valid_to = ?');
-        updateValues.push(processedValidTo);
-        console.log('[BACKEND] valid_to will be updated to:', processedValidTo);
-    } else {
-        console.log('[BACKEND] valid_to unchanged');
-    }
+    updateFields.push('plate_image_cropped_path = ?');
+    updateValues.push(newImagePaths.plate_image_cropped_path);
+    
+    updateFields.push('plate_image_processed_path = ?');
+    updateValues.push(newImagePaths.plate_image_processed_path);
+    
+    updateFields.push('image_metadata = ?');
+    updateValues.push(JSON.stringify(newImageMetadata));
+    
+    // SỬA: QUAN TRỌNG - Cập nhật detected_plate_image
+    updateFields.push('detected_plate_image = ?');
+    updateValues.push(detectedPlateImage);
+    
+    console.log('[DEBUG UPDATE] Final detected_plate_image to save:', detectedPlateImage);
 }
-if (description !== undefined && description !== currentEntry.description) {
-    updateFields.push('description = ?');
-    updateValues.push(description || null);
-}
-        if (evidence_files !== undefined) {
-            updateFields.push('evidence_files = ?');
-            updateValues.push(evidenceFilesJson ? JSON.stringify(evidenceFilesJson) : null);
-        }
-        
-        // OCR data update
-        if (ocrUpdateData && ocrUpdateData.ocr_raw_text) {
-            updateFields.push('ocr_raw_text = ?');
-            updateValues.push(ocrUpdateData.ocr_raw_text);
-            updateFields.push('ocr_confidence = ?');
-            updateValues.push(ocrUpdateData.ocr_confidence);
-            updateFields.push('ocr_processed_at = NOW()');
-            console.log('[DEBUG] Adding OCR data to update:', ocrUpdateData);
-        }
-        
-        // Manual OCR fields
-        if (ocr_raw_text !== undefined && ocr_raw_text !== currentEntry.ocr_raw_text) {
-            updateFields.push('ocr_raw_text = ?');
-            updateValues.push(ocr_raw_text);
-        }
-        if (ocr_confidence !== undefined && ocr_confidence !== currentEntry.ocr_confidence) {
-            updateFields.push('ocr_confidence = ?');
-            updateValues.push(ocr_confidence);
-            if (ocr_raw_text !== undefined || ocr_confidence !== undefined) {
-                updateFields.push('ocr_processed_at = NOW()');
-            }
-        }
-        if (verification_status !== undefined && verification_status !== currentEntry.verification_status) {
-            updateFields.push('verification_status = ?');
-            updateValues.push(verification_status);
-        }
-        if (verified_plate_number !== undefined && verified_plate_number !== currentEntry.verified_plate_number) {
-            updateFields.push('verified_plate_number = ?');
-            updateValues.push(verified_plate_number);
-        }
 
-        // Image updates - chỉ update khi có file mới
-        if (req.files && Object.keys(req.files).length > 0) {
-            updateFields.push('plate_image_path = ?');
-            updateValues.push(newImagePaths.plate_image_path);
-            
-            updateFields.push('plate_image_cropped_path = ?');
-            updateValues.push(newImagePaths.plate_image_cropped_path);
-            
-            updateFields.push('plate_image_processed_path = ?');
-            updateValues.push(newImagePaths.plate_image_processed_path);
-            
-            updateFields.push('image_metadata = ?');
-            updateValues.push(JSON.stringify(newImageMetadata));
-            
-            updateFields.push('detected_plate_image = ?');
-            updateValues.push(detectedPlateImage);
-        }
+        // Debug final update info
+        console.log('[DEBUG] Final update fields:', updateFields);
+        console.log('[DEBUG] Final update values:', updateValues);
 
-        if (is_active !== undefined && (is_active ? 1 : 0) !== currentEntry.is_active) {
-            updateFields.push('is_active = ?');
-            updateValues.push(is_active ? 1 : 0);
-        }
-
-        // SỬA: Kiểm tra có field nào thay đổi không
+        // Check if there are any changes
         if (updateFields.length === 0) {
             return res.status(200).json({
                 success: true,
@@ -533,62 +491,64 @@ if (description !== undefined && description !== currentEntry.description) {
                 updateValues
             );
 
-            // Delete old images if replacing
-            for (const oldImagePath of oldImagesToDelete) {
-                try {
-                    await fs.unlink(oldImagePath);
-                    console.log(`Deleted old image: ${oldImagePath}`);
-                } catch (unlinkError) {
-                    console.warn(`Could not delete old image ${oldImagePath}:`, unlinkError.message);
-                }
-            }
-
             await connection.commit();
 
-        } catch (error) {
-            await connection.rollback();
-            
-            // Clean up newly uploaded files on error
-            if (req.files) {
-                const newFilesToDelete = [];
-                if (req.files.plate_image) newFilesToDelete.push(req.files.plate_image[0].path);
-                if (req.files.plate_image_cropped) newFilesToDelete.push(req.files.plate_image_cropped[0].path);
-                if (req.files.plate_image_processed) newFilesToDelete.push(req.files.plate_image_processed[0].path);
-                
-                for (const filePath of newFilesToDelete) {
-                    try {
-                        await fs.unlink(filePath);
-                    } catch (unlinkError) {
-                        console.error('Error deleting uploaded file:', unlinkError);
-                    }
-                }
+            // Get updated entry
+           const [updatedEntry] = await connection.execute(
+                `SELECT b.*, l.name as location_name, l.code as location_code, l.zone_type,
+                        v.make, v.model, v.color, v.vehicle_type,
+                        u.name as created_by_name,
+                        CASE 
+                            WHEN b.valid_from IS NULL AND b.valid_to IS NULL THEN 'permanent'
+                            WHEN b.valid_from IS NOT NULL AND b.valid_from > CURDATE() THEN 'future'
+                            WHEN b.valid_to IS NOT NULL AND b.valid_to < CURDATE() THEN 'expired'
+                            ELSE 'active'
+                        END as current_status,
+                        CASE 
+                            WHEN b.plate_image_path IS NOT NULL OR b.plate_image_cropped_path IS NOT NULL OR b.plate_image_processed_path IS NOT NULL THEN TRUE
+                            ELSE FALSE
+                        END as has_images
+                FROM vehicle_blacklist b
+                LEFT JOIN locations l ON b.location_id = l.id
+                LEFT JOIN vehicles v ON b.vehicle_id = v.id
+                LEFT JOIN users u ON b.created_by = u.id
+                WHERE b.id = ?`,
+                [id]
+            );
+
+           const responseData = {
+            ...updatedEntry[0],
+            // SỬA: Đảm bảo detected_plate_image được trả về
+            detected_plate_image: detectedPlateImage || updatedEntry[0].detected_plate_image,
+            plate_image_path: newImagePaths.plate_image_path || updatedEntry[0].plate_image_path,
+            plate_image_cropped_path: newImagePaths.plate_image_cropped_path || updatedEntry[0].plate_image_cropped_path,
+            plate_image_processed_path: newImagePaths.plate_image_processed_path || updatedEntry[0].plate_image_processed_path,
+            update_info: {
+                updated_fields: updateFields.filter(field => !field.includes('updated_at')),
+                has_new_images: req.files ? Object.keys(req.files).length > 0 : false,
+                replaced_images_count: oldImagesToDelete.length,
+                ocr_updated: ocrUpdateData ? true : false,
+                new_detected_plate_image: detectedPlateImage,
+                // SỬA: Thêm debug info
+                original_detected_image: currentEntry.detected_plate_image,
+                detected_image_changed: detectedPlateImage !== currentEntry.detected_plate_image
             }
-            throw error;
-        }
+        };
 
-        const [updatedEntry] = await connection.execute(
-            `SELECT b.*, l.name as location_name, l.code as location_code, l.zone_type,
-                    v.make, v.model, v.color, v.vehicle_type,
-                    u.name as created_by_name,
-                    CASE 
-                        WHEN b.valid_from IS NULL AND b.valid_to IS NULL THEN 'permanent'
-                        WHEN b.valid_from IS NOT NULL AND b.valid_from > CURDATE() THEN 'future'
-                        WHEN b.valid_to IS NOT NULL AND b.valid_to < CURDATE() THEN 'expired'
-                        ELSE 'active'
-                    END as current_status,
-                    CASE 
-                        WHEN b.plate_image_path IS NOT NULL OR b.plate_image_cropped_path IS NOT NULL OR b.plate_image_processed_path IS NOT NULL THEN TRUE
-                        ELSE FALSE
-                    END as has_images
-             FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
-             LEFT JOIN vehicles v ON b.vehicle_id = v.id
-             LEFT JOIN users u ON b.created_by = u.id
-             WHERE b.id = ?`,
-            [id]
-        );
+        console.log('[DEBUG RESPONSE] Final response data:', {
+            id: responseData.id,
+            plate_number: responseData.plate_number,
+            detected_plate_image: responseData.detected_plate_image,
+            plate_image_path: responseData.plate_image_path,
+            has_new_images: responseData.update_info.has_new_images,
+            detected_image_changed: responseData.update_info.detected_image_changed
+        });
 
-        // Log access
+        res.status(200).json({
+            success: true,
+            message: 'Cập nhật blacklist entry thành công',
+            data: responseData
+        });
         await connection.execute(
             `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, 
                                     old_values, new_values, status, ip_address, user_agent, created_at)
@@ -612,48 +572,14 @@ if (description !== undefined && description !== currentEntry.description) {
                 req.get('User-Agent')
             ]
         );
-
-        const responseData = {
-            ...updatedEntry[0],
-            // Ensure image paths are correctly returned
-            detected_plate_image: detectedPlateImage || updatedEntry[0].detected_plate_image,
-            plate_image_path: newImagePaths.plate_image_path || updatedEntry[0].plate_image_path,
-            plate_image_cropped_path: newImagePaths.plate_image_cropped_path || updatedEntry[0].plate_image_cropped_path,
-            plate_image_processed_path: newImagePaths.plate_image_processed_path || updatedEntry[0].plate_image_processed_path,
-            update_info: {
-                updated_fields: updateFields.filter(field => !field.includes('updated_at')),
-                has_new_images: req.files ? Object.keys(req.files).length > 0 : false,
-                replaced_images_count: oldImagesToDelete.length,
-                ocr_updated: ocrUpdateData ? true : false,
-                new_detected_plate_image: detectedPlateImage
-            }
-        };
-
-        console.log('[DEBUG] Final response data:', {
-            id: responseData.id,
-            plate_number: responseData.plate_number,
-            detected_plate_image: responseData.detected_plate_image,
-            plate_image_path: responseData.plate_image_path,
-            has_new_images: responseData.update_info.has_new_images
-        });
-
-        res.status(200).json({
-            success: true,
-            message: 'Cập nhật blacklist entry thành công',
-            data: responseData
-        });
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        }
 
     } catch (error) {
         console.error('Error updating blacklist entry:', error);
         
-        // Handle duplicate key error
-        if (error.code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({
-                success: false,
-                message: 'Biển số này đã có trong danh sách đen tại vị trí này'
-            });
-        }
-
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật blacklist entry',
@@ -728,21 +654,19 @@ const updateBlacklistStatus = async (req, res) => {
             ]
         );
 
+        // Sau khi thực hiện UPDATE, lấy lại bản ghi vừa cập nhật từ DB
+        const [updatedRows] = await db.query('SELECT * FROM blacklist WHERE id = ?', [id]);
+        const updatedData = updatedRows && updatedRows[0] ? updatedRows[0] : null;
+
+        if (!updatedData) {
+          return res.status(404).json({ success: false, message: 'Không tìm thấy bản ghi sau khi cập nhật' });
+        }
+
         res.status(200).json({
-            success: true,
-            message: 'Cập nhật blacklist entry thành công',
-            data: {
-                ...updatedEntry[0],
-                // SỬA: Đảm bảo trả về đường dẫn ảnh đầy đủ
-                detected_plate_image: detectedPlateImage || updatedEntry[0].detected_plate_image,
-                plate_image_path: newImagePaths.plate_image_path || updatedEntry[0].plate_image_path,
-                update_info: {
-                updated_fields: updateFields.filter(field => !field.includes('updated_at')),
-                has_new_images: req.files ? Object.keys(req.files).length > 0 : false,
-                replaced_images_count: oldImagesToDelete.length
-                }
-            }
-            });
+          success: true,
+          message: 'Cập nhật trạng thái blacklist entry thành công',
+          data: updatedData
+        });
 
     } catch (error) {
         console.error('Error updating blacklist status:', error);
