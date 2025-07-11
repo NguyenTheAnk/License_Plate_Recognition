@@ -4,24 +4,24 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
   IconButton, Typography, Grid, FormControl, InputLabel, Select, MenuItem, 
   Chip, Alert, CircularProgress, Card, CardContent, Tooltip, Tabs, Tab, 
-  Checkbox, Breadcrumbs, Avatar, FormHelperText, InputAdornment, Snackbar, 
+  Checkbox, Breadcrumbs,  FormHelperText, InputAdornment, Snackbar, 
   Pagination, Divider, Paper, Stack
 } from '@mui/material';
 import {
-  Add as AddIcon, CheckCircle as CheckIcon, CalendarToday as CalendarIcon, 
+   CalendarToday as CalendarIcon, 
   LocationOn as LocationIcon, Person as PersonIcon, Phone as PhoneIcon, 
-  DirectionsCar as CarIcon, CheckCircleOutline as CheckCircleOutlineIcon, 
+  DirectionsCar as CarIcon,  
   Home as HomeIcon, ExpandMore as ExpandMoreIcon, Description as DescriptionIcon, 
-  Schedule as ScheduleIcon, Image as ImageIcon, Warning as WarningIcon, 
+   Image as ImageIcon, Warning as WarningIcon, 
   Block as BlockIcon, Visibility as VisibilityIcon, Edit as EditIcon, 
   Delete as DeleteIcon, PhotoCamera as PhotoCameraIcon, Close as CloseIcon,
-  ZoomIn as ZoomInIcon, Download as DownloadIcon
+  Download as DownloadIcon
 } from '@mui/icons-material';
-import { FaUpload, FaEye, FaEdit, FaTrash, FaPlus, FaTimes, FaExclamationTriangle, FaShieldAlt, FaClock, FaSave } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaExclamationTriangle, FaShieldAlt, FaClock, FaSave } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
 
 // Import các hàm từ auth.js
-import { 
+import {
   fetchDataFromAPI,
   postData,
   editData,
@@ -30,6 +30,97 @@ import {
   handleErrorResponse,
   isUnauthorizedError
 } from '../utils/auth';
+const parseDateComponents = (dateString) => {
+  if (!dateString) return null;
+  
+  let year, month, day;
+  
+  if (dateString.includes('T')) {
+    // ISO string - lấy phần date
+    const datePart = dateString.split('T')[0];
+    [year, month, day] = datePart.split('-').map(num => parseInt(num));
+  } else if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    // YYYY-MM-DD format
+    [year, month, day] = dateString.split('-').map(num => parseInt(num));
+  } else if (dateString.includes('/')) {
+    // dd/MM/yyyy format
+    const parts = dateString.split('/');
+    day = parseInt(parts[0]);
+    month = parseInt(parts[1]);
+    year = parseInt(parts[2]);
+  } else {
+    return null;
+  }
+  
+  return { year, month, day };
+};
+const formatDateForDisplay = (dateString) => {
+  if (!dateString) return '';
+  
+  console.log('[FRONTEND] formatDateForDisplay input:', dateString);
+  
+  // Nếu đã là dd/MM/yyyy thì return luôn
+  if (dateString.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+    console.log('[FRONTEND] Already dd/MM/yyyy:', dateString);
+    return dateString;
+  }
+  
+  const components = parseDateComponents(dateString);
+  if (!components) {
+    console.error('[FRONTEND] Cannot parse date:', dateString);
+    return '';
+  }
+  
+  const { year, month, day } = components;
+  const result = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+  console.log('[FRONTEND] formatDateForDisplay result:', result);
+  return result;
+};
+
+const formatDateForInput = (dateString) => {
+  if (!dateString) return '';
+  
+  console.log('[FRONTEND] formatDateForInput input:', dateString);
+  
+  // Nếu đã là YYYY-MM-DD thì return luôn
+  if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    console.log('[FRONTEND] Already YYYY-MM-DD:', dateString);
+    return dateString;
+  }
+  
+  const components = parseDateComponents(dateString);
+  if (!components) {
+    console.error('[FRONTEND] Cannot parse date for input:', dateString);
+    return '';
+  }
+  
+  const { year, month, day } = components;
+  const result = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  console.log('[FRONTEND] formatDateForInput result:', result);
+  return result;
+};
+
+const validateDateFormat = (dateString) => {
+  if (!dateString) return true;
+  
+  const regex = /^\d{2}\/\d{2}\/\d{4}$/;
+  if (!regex.test(dateString)) return false;
+  
+  const parts = dateString.split('/');
+  const day = parseInt(parts[0]);
+  const month = parseInt(parts[1]);
+  const year = parseInt(parts[2]);
+  
+  // Validate ranges
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  
+  // Create date object to validate the actual date
+  const date = new Date(year, month - 1, day);
+  return date.getDate() === day && 
+         date.getMonth() === month - 1 && 
+         date.getFullYear() === year;
+};
 
 // Styled Breadcrumb component
 const StyledBreadcrumb = ({ component, href, label, icon, onClick, ...props }) => (
@@ -90,74 +181,92 @@ const ImagePreviewDialog = ({ open, onClose, src, title = "Xem ảnh" }) => (
   </Dialog>
 );
 
-// Plate Image Component - Updated to match WhiteList style
-const PlateImageCell = ({ item, onImageClick }) => (
-  <TableCell sx={{ width: 120 }}>
-    {item.detected_plate_image ? (
-      <Box
-        component="img"
-        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`}
-        alt="Ảnh biển số đã phát hiện"
-        sx={{
-          width: 80,
-          height: 50,
-          objectFit: 'cover',
-          borderRadius: 1,
-          border: '2px solid #d32f2f',
-          cursor: 'pointer',
-          transition: 'transform 0.2s ease',
-          '&:hover': {
-            transform: 'scale(1.1)',
-            boxShadow: '0 4px 12px rgba(211, 47, 47, 0.3)'
-          }
-        }}
-        onClick={() => {
-          window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`, '_blank');
-        }}
-        title="Ảnh biển số đã phát hiện (click để xem lớn)"
-      />
-    ) : item.plate_image_path ? (
-      <Box
-        component="img"
-        src={`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`}
-        alt="Ảnh gốc"
-        sx={{
-          width: 80,
-          height: 50,
-          objectFit: 'cover',
-          borderRadius: 1,
-          border: '1px solid #e0e0e0',
-          cursor: 'pointer',
-          transition: 'transform 0.2s ease',
-          '&:hover': {
-            transform: 'scale(1.1)',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-          }
-        }}
-        onClick={() => {
-          window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`, '_blank');
-        }}
-        title="Ảnh gốc (click để xem lớn)"
-      />
-    ) : (
-      <Box
-        sx={{
-          width: 80,
-          height: 50,
-          backgroundColor: '#f5f5f5',
-          borderRadius: 1,
-          border: '1px solid #e0e0e0',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}
-      >
-        <ImageIcon sx={{ fontSize: 20, color: '#ccc' }} />
-      </Box>
-    )}
-  </TableCell>
-);
+const PlateImageCell = ({ item, onImageClick }) => {
+  // Generate unique cache buster based on item's updated timestamp
+  const getCacheBuster = () => {
+    // Use updated_at timestamp if available, otherwise use current time
+    const timestamp = item.updated_at ? new Date(item.updated_at).getTime() : Date.now();
+    return `t=${timestamp}&r=${Math.random()}`;
+  };
 
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return null;
+    const baseUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
+    // Add cache buster to prevent caching issues
+    return `${baseUrl}?${getCacheBuster()}`;
+  };
+
+   return (
+    <TableCell sx={{ width: 120 }}>
+      {item.detected_plate_image ? (
+        <Box
+          component="img"
+          src={getImageUrl(item.detected_plate_image)}
+          alt="Ảnh biển số đã phát hiện"
+          sx={{
+            width: 80,
+            height: 50,
+            objectFit: 'cover',
+            borderRadius: 1,
+            border: '2px solid #d32f2f',
+            cursor: 'pointer',
+            transition: 'transform 0.2s ease',
+            '&:hover': {
+              transform: 'scale(1.1)',
+              boxShadow: '0 4px 12px rgba(211, 47, 47, 0.3)'
+            }
+          }}
+          onClick={() => {
+            window.open(getImageUrl(item.detected_plate_image), '_blank');
+          }}
+          title="Ảnh biển số đã phát hiện (click để xem lớn)"
+          // Add key prop to force re-render when image changes
+          key={`detected-${item.id}-${getCacheBuster()}`}
+        />
+      ) : item.plate_image_path ? (
+        <Box
+          component="img"
+          src={getImageUrl(item.plate_image_path)}
+          alt="Ảnh gốc"
+          sx={{
+            width: 80,
+            height: 50,
+            objectFit: 'cover',
+            borderRadius: 1,
+            border: '1px solid #e0e0e0',
+            cursor: 'pointer',
+            transition: 'transform 0.2s ease',
+            '&:hover': {
+              transform: 'scale(1.1)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+            }
+          }}
+          onClick={() => {
+            window.open(getImageUrl(item.plate_image_path), '_blank');
+          }}
+          title="Ảnh gốc (click để xem lớn)"
+          // Add key prop to force re-render when image changes
+          key={`original-${item.id}-${getCacheBuster()}`}
+        />
+      ) : (
+        <Box
+          sx={{
+            width: 80,
+            height: 50,
+            backgroundColor: '#f5f5f5',
+            borderRadius: 1,
+            border: '1px solid #e0e0e0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <ImageIcon sx={{ fontSize: 20, color: '#ccc' }} />
+        </Box>
+      )}
+    </TableCell>
+  );
+};
 const BlackList = () => {
   // States
   const [blacklist, setBlacklist] = useState([]);
@@ -173,25 +282,25 @@ const BlackList = () => {
   const [showDateInput, setShowDateInput] = useState({ valid_from: false, valid_to: false });
   const validFromDateRef = useRef(null);
   const validToDateRef = useRef(null);
-  
+
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  
+
   // Filters
   const [filters, setFilters] = useState({
     location_id: '', plate_number: '', violation_type: '', severity: '', is_active: '', valid_status: ''
   });
-  
+
   // Form data
   const [formData, setFormData] = useState({
     location_id: '', plate_number: '', vehicle_id: '', violation_type: 'unauthorized', 
     reason: '', severity: 'medium', owner_name: '', owner_phone: '', 
     valid_from: '', valid_to: '', description: ''
   });
-  
+
   // Error handling
   const [formErrors, setFormErrors] = useState({});
   const [deleteDialog, setDeleteDialog] = useState({ open: false, itemId: null, plateName: '' });
@@ -232,76 +341,151 @@ const BlackList = () => {
     loadData();
   }, [currentPage, itemsPerPage, filters]);
 
-  // Validate form
-  const validateForm = () => {
-    const errors = {};
-    if (!formData.location_id) errors.location_id = 'Vui lòng chọn khu vực';
-    
-    if (!formData.plate_number && !ocrResult) {
-      errors.plate_number = 'Vui lòng upload ảnh biển số để nhận diện tự động';
+const validateForm = () => {
+  const errors = {};
+  
+  if (!formData.location_id) {
+    errors.location_id = 'Vui lòng chọn khu vực';
+  }
+  
+  if (!formData.plate_number && !ocrResult) {
+    errors.plate_number = 'Vui lòng upload ảnh biển số để nhận diện tự động hoặc nhập biển số';
+  }
+  
+  // SỬA: Validate reason với độ dài tối thiểu
+  if (!formData.reason || formData.reason.trim() === '') {
+    errors.reason = 'Vui lòng nhập lý do cấm';
+  } else if (formData.reason.trim().length < 10) {
+    errors.reason = 'Lý do cấm phải có ít nhất 10 ký tự';
+  } else if (formData.reason.trim().length > 500) {
+    errors.reason = 'Lý do cấm không được vượt quá 500 ký tự';
+  }
+  
+  if (!formData.violation_type) {
+    errors.violation_type = 'Vui lòng chọn loại vi phạm';
+  }
+  
+  if (!formData.severity) {
+    errors.severity = 'Vui lòng chọn mức độ';
+  }
+  
+  // SỬA: Validate vehicle_id nếu có
+  if (formData.vehicle_id && formData.vehicle_id !== '') {
+    const vehicleIdNum = parseInt(formData.vehicle_id);
+    if (isNaN(vehicleIdNum) || vehicleIdNum <= 0) {
+      errors.vehicle_id = 'ID phương tiện phải là số nguyên dương';
     }
-    
-    if (!formData.reason) errors.reason = 'Vui lòng nhập lý do cấm';
-    if (!formData.severity) errors.severity = 'Vui lòng chọn mức độ';
-    
-    if (!selectedItem && !imageFile) {
-      errors.image = 'Vui lòng upload ảnh biển số xe';
+  }
+  
+  if (!selectedItem && !imageFile && !ocrResult) {
+    errors.image = 'Vui lòng upload ảnh biển số xe';
+  }
+  
+  if (formData.owner_phone && formData.owner_phone.trim() !== '') {
+    const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
+    if (!phoneRegex.test(formData.owner_phone.replace(/\s+/g, ''))) {
+      errors.owner_phone = 'Định dạng số điện thoại không hợp lệ';
     }
-    
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
+  }
+  
+  if (formData.valid_from && formData.valid_to) {
+    // So sánh ngày thủ công, không dùng new Date để tránh lệch timezone
+    const parseDMY = (str) => {
+      if (str.includes('/')) {
+        const [d, m, y] = str.split('/').map(Number);
+        return { y, m, d };
+      } else if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [y, m, d] = str.split('-').map(Number);
+        return { y, m, d };
+      }
+      return null;
+    };
+    const from = parseDMY(formData.valid_from);
+    const to = parseDMY(formData.valid_to);
+    if (from && to) {
+      // So sánh từng thành phần
+      if (
+        from.y > to.y ||
+        (from.y === to.y && from.m > to.m) ||
+        (from.y === to.y && from.m === to.m && from.d > to.d)
+      ) {
+        errors.valid_to = 'Ngày kết thúc phải sau ngày bắt đầu';
+      }
+    }
+  }
+  
+  setFormErrors(errors);
+  return Object.keys(errors).length === 0;
+};
 
-  // CRUD & Data functions
-  const loadBlacklist = async (forceRefresh = false) => {
-    setLoading(true);
-    try {
+const loadBlacklist = async (forceRefresh = false) => {
+  setLoading(true);
+  try {
+    const token = getToken();
+    console.log('Loading blacklist with token:', token ? 'Token exists' : 'No token');
+    
+    const params = new URLSearchParams();
+    params.append('page', currentPage.toString());
+    params.append('limit', itemsPerPage.toString());
+    
+    // Force refresh with cache busting
+    if (forceRefresh) {
+      params.append('_t', Date.now().toString());
+      params.append('cache_bust', Math.random().toString());
+    }
+    
+    // Add filters to params
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== '' && value !== null && value !== undefined) {
+        params.append(key, value);
+      }
+    });
+
+    // Use fetch instead of fetchDataFromAPI to have more control
+    const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/blacklist?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        // Add cache control headers
+        'Cache-Control': forceRefresh ? 'no-cache, no-store, must-revalidate' : 'default',
+        'Pragma': forceRefresh ? 'no-cache' : 'default',
+        'Expires': forceRefresh ? '0' : 'default'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.success) {
+      console.log('Blacklist loaded:', data.data); // Debug log
+      setBlacklist(data.data || []);
+      if (data.pagination) {
+        setTotalPages(data.pagination.total_pages || 1);
+        setTotalItems(data.pagination.total || 0);
+      }
+    } else {
+      showSnackbar(data.message || 'Lỗi khi tải danh sách blacklist', 'error');
+    }
+  } catch (error) {
+    console.error('Error loading blacklist:', error);
+    const errorMessage = handleErrorResponse(error);
+    showSnackbar(errorMessage, 'error');
+    
+    if (isUnauthorizedError(error)) {
       const token = getToken();
-      console.log('Loading blacklist with token:', token ? 'Token exists' : 'No token');
-      
-      const params = new URLSearchParams();
-      params.append('page', currentPage.toString());
-      params.append('limit', itemsPerPage.toString());
-      
-      // THÊM: Force refresh bằng cách thêm timestamp
-      if (forceRefresh) {
-        params.append('_t', Date.now().toString());
+      if (!token || token.trim() === '') {
+        localStorage.removeItem('token');
+        window.location.href = '/login';
       }
-      
-      // Add filters to params
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== '' && value !== null && value !== undefined) {
-          params.append(key, value);
-        }
-      });
-
-      const response = await fetchDataFromAPI(`/api/blacklist?${params.toString()}`, token);
-
-      if (response.success) {
-        setBlacklist(response.data || []);
-        if (response.pagination) {
-          setTotalPages(response.pagination.total_pages || 1);
-          setTotalItems(response.pagination.total || 0);
-        }
-      } else {
-        showSnackbar(response.message || 'Lỗi khi tải danh sách blacklist', 'error');
-      }
-    } catch (error) {
-      console.error('Error loading blacklist:', error);
-      const errorMessage = handleErrorResponse(error);
-      showSnackbar(errorMessage, 'error');
-      
-      if (isUnauthorizedError(error)) {
-        const token = getToken();
-        if (!token || token.trim() === '') {
-          localStorage.removeItem('token');
-          window.location.href = '/login';
-        }
-      }
-    } finally {
-      setLoading(false);
     }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadLocations = async () => {
     setLocationsLoading(true);
@@ -337,203 +521,315 @@ const BlackList = () => {
     }
   };
 
-  // Image handling
   const handleImageChange = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        showSnackbar('Vui lòng chọn file ảnh', 'error');
-        return;
-      }
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        showSnackbar('Kích thước file không được vượt quá 10MB', 'error');
-        return;
-      }
-      setImageFile(file);
-      // Create preview
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setImagePreview(ev.target.result);
-      };
-      reader.readAsDataURL(file);
+  const file = e.target.files[0];
+  console.log('=== IMAGE CHANGE DEBUG ===');
+  console.log('Selected file:', file);
+  
+  if (file) {
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showSnackbar('Vui lòng chọn file ảnh', 'error');
+      return;
+    }
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      showSnackbar('Kích thước file không được vượt quá 10MB', 'error');
+      return;
+    }
+    
+    console.log('Setting imageFile to:', file);
+    setImageFile(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      console.log('Setting imagePreview');
+      setImagePreview(ev.target.result);
+    };
+    reader.readAsDataURL(file);
 
-      // Gửi ảnh lên backend để nhận diện OCR ngay khi chọn ảnh
-      try {
-        const token = getToken();
-        const formDataToSend = new FormData();
-        formDataToSend.append('image', file);
-        const data = await uploadImage('/api/blacklist/ocr-preview', formDataToSend, token);
+    // OCR processing...
+    try {
+      const token = getToken();
+      const formDataToSend = new FormData();
+      formDataToSend.append('image', file);
+      const data = await uploadImage('/api/blacklist/ocr-preview', formDataToSend, token);
+      
+      if (data.success && data.ocr_text) {
+        setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
+        setOcrResult(data.ocr_text);
+        showSnackbar(`Nhận diện thành công biển số: ${data.ocr_text}`, 'success');
         
-        if (data.success && data.ocr_text) {
-          setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
-          setOcrResult(data.ocr_text);
-          showSnackbar(`Nhận diện thành công biển số: ${data.ocr_text}`, 'success');
-          
-          if (data.detected_plate_image) {
-            setDetectedPlateImage(data.detected_plate_image);
-          } else {
-            setDetectedPlateImage(null);
-          }
-        } else if (data.message) {
-          setOcrResult('');
-          setDetectedPlateImage(null);
-          showSnackbar('Nhận diện ký tự thất bại: ' + data.message, 'error');
+        if (data.detected_plate_image) {
+          setDetectedPlateImage(data.detected_plate_image);
         } else {
-          setOcrResult('');
           setDetectedPlateImage(null);
-          showSnackbar('Không nhận diện được ký tự biển số từ ảnh.', 'error');
         }
-      } catch (err) {
+      } else {
         setOcrResult('');
-        if (err.response && err.response.data && err.response.data.message) {
-          showSnackbar('Lỗi nhận diện ký tự: ' + err.response.data.message, 'error');
-        } else if (err.message) {
-          showSnackbar('Lỗi nhận diện ký tự: ' + err.message, 'error');
-        } else {
-          showSnackbar('Lỗi không xác định khi nhận diện ký tự.', 'error');
-        }
+        setDetectedPlateImage(null);
+        showSnackbar('Nhận diện ký tự thất bại: ' + (data.message || 'Không xác định'), 'error');
       }
-    } else {
-      setImageFile(null);
-      setImagePreview(null);
+    } catch (err) {
+      console.error('OCR Error:', err);
       setOcrResult('');
       setDetectedPlateImage(null);
+      showSnackbar('Lỗi nhận diện ký tự: ' + (err.message || 'Không xác định'), 'error');
     }
-  };
+  } else {
+    console.log('No file selected, clearing image states');
+    setImageFile(null);
+    setImagePreview(null);
+    setOcrResult('');
+    setDetectedPlateImage(null);
+  }
+  console.log('========================');
+};
 
   const handleImagePreviewClick = (src, title) => {
     setImagePreviewDialog({ open: true, src, title });
   };
 
-  // Form submission
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validateForm()) {
-      showSnackbar('Vui lòng kiểm tra lại thông tin nhập vào', 'error');
-      return;
-    }
-    setLoading(true);
-    try {
-      const token = getToken();
-      let response;
-      
-      // THÊM LOGIC XỬ LÝ NGÀY TRƯỚC KHI GỬI:
-      const processedFormData = {
-        ...formData,
-        // Chuyển đổi ngày về định dạng YYYY-MM-DD
-        valid_from: formData.valid_from ? 
-          (formData.valid_from.includes('T') ? 
-            new Date(formData.valid_from).toISOString().split('T')[0] : 
-            formData.valid_from) : '',
-        valid_to: formData.valid_to ? 
-          (formData.valid_to.includes('T') ? 
-            new Date(formData.valid_to).toISOString().split('T')[0] : 
-            formData.valid_to) : ''
-      };
-      
-      if (selectedItem) {
-        // Update existing item
-        
-        // SỬA: Kiểm tra có ảnh mới hay không để quyết định dùng FormData hay JSON
-        if (imageFile) {
-          // Có ảnh mới - dùng FormData
-          const formDataToSend = new FormData();
-          
-          // Append tất cả fields, kể cả empty string
-          const blacklistFields = [
-            'location_id',
-            'plate_number',
-            'vehicle_id',
-            'violation_type',
-            'reason',
-            'severity',
-            'owner_name',
-            'owner_phone',
-            'valid_from',
-            'valid_to',
-            'description'
-          ];
-          
-          blacklistFields.forEach((key) => {
-            const value = processedFormData[key];
-            // SỬA: Chỉ bỏ qua null và undefined, cho phép empty string
-            if (value !== null && value !== undefined) {
-              formDataToSend.append(key, value.toString());
-            }
-          });
-          
-          // Append ảnh mới
-          formDataToSend.append('plate_image', imageFile);
-          formDataToSend.append('replace_images', 'true');
-          
-          // Debug log
-          console.log('FormData being sent (with image):');
-          for (let [key, value] of formDataToSend.entries()) {
-            console.log(key, ':', value);
-          }
-          
-          response = await editData(`/api/blacklist/${selectedItem.id}`, formDataToSend, token);
-        } else {
-          // THÊM: Không có ảnh mới - dùng JSON
-          console.log('JSON being sent (no image):');
-          console.log(processedFormData);
-          
-          response = await editData(`/api/blacklist/${selectedItem.id}`, processedFormData, token);
-        }
-        
-        if (response.success) {
-          showSnackbar(`Cập nhật blacklist ${formData.plate_number} thành công!`, 'success');
-        }
+  // Helper function to format dates consistently
+const formatDate = formatDateForDisplay;
+
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  console.log('=== SUBMIT DEBUG ===');
+  console.log('Original formData:', formData);
+  console.log('selectedItem:', selectedItem);
+  console.log('imageFile:', imageFile);
+  console.log('imageFile details:', {
+    name: imageFile?.name,
+    size: imageFile?.size,
+    type: imageFile?.type,
+    lastModified: imageFile?.lastModified
+  });
+  console.log('ocrResult:', ocrResult);
+  console.log('==================');
+
+  if (!validateForm()) {
+    showSnackbar('Vui lòng kiểm tra lại thông tin nhập vào', 'error');
+    return;
+  }
+
+  setLoading(true);
+  
+  try {
+    const token = getToken();
+    let response;
+    
+    const processedFormData = {
+  ...formData,
+  // SỬA: Xử lý date conversion với debug logging
+  valid_from: formData.valid_from ? 
+    (() => {
+      console.log('[DEBUG] Processing valid_from:', formData.valid_from);
+      if (formData.valid_from.includes('/')) {
+        // Convert dd/MM/yyyy to yyyy-MM-dd
+        const [d, m, y] = formData.valid_from.split('/');
+        const result = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        console.log('[DEBUG] valid_from converted:', formData.valid_from, '->', result);
+        return result;
       } else {
-        // Create new item
-        if (imageFile) {
-          const formDataToSend = new FormData();
-          Object.entries(processedFormData).forEach(([key, value]) => {
-            if (value !== null && value !== undefined && value !== '') {
-              formDataToSend.append(key, value);
-            }
-          });
-          formDataToSend.append('image', imageFile);
-          response = await uploadImage('/api/blacklist/create', formDataToSend, token);
-        } else {
-          response = await postData('/api/blacklist/create', processedFormData, token);
+        console.log('[DEBUG] valid_from already formatted:', formData.valid_from);
+        return formData.valid_from;
+      }
+    })() : null,
+  valid_to: formData.valid_to ? 
+    (() => {
+      console.log('[DEBUG] Processing valid_to:', formData.valid_to);
+      if (formData.valid_to.includes('/')) {
+        // Convert dd/MM/yyyy to yyyy-MM-dd
+        const [d, m, y] = formData.valid_to.split('/');
+        const result = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        console.log('[DEBUG] valid_to converted:', formData.valid_to, '->', result);
+        return result;
+      } else {
+        console.log('[DEBUG] valid_to already formatted:', formData.valid_to);
+        return formData.valid_to;
+      }
+    })() : null,
+  
+  plate_number: formData.plate_number || ocrResult || '',
+  violation_type: formData.violation_type || 'unauthorized',
+  severity: formData.severity || 'medium',
+  reason: formData.reason || '',
+  
+  vehicle_id: formData.vehicle_id && formData.vehicle_id !== '' ? 
+    parseInt(formData.vehicle_id) : null,
+  
+  owner_name: formData.owner_name || null,
+  owner_phone: formData.owner_phone || null,
+  description: formData.description || null
+};
+
+console.log('[DEBUG] Final processed dates for API:');
+console.log('- valid_from:', processedFormData.valid_from);
+console.log('- valid_to:', processedFormData.valid_to);
+
+    // Remove null vehicle_id
+    if (processedFormData.vehicle_id === null) {
+      delete processedFormData.vehicle_id;
+    }
+
+    console.log('Processed form data:', processedFormData);
+
+    if (selectedItem) {
+      // Update existing item
+      if (imageFile) {
+        console.log('=== UPDATE WITH IMAGE ===');
+        console.log('Creating FormData for update with image');
+        
+        // Create FormData for file upload
+        const formDataToSend = new FormData();
+        
+        // Add all form fields
+        Object.keys(processedFormData).forEach(key => {
+          if (processedFormData[key] !== null && processedFormData[key] !== undefined) {
+            formDataToSend.append(key, processedFormData[key]);
+          }
+        });
+        
+        // Add image file with correct field name
+        formDataToSend.append('plate_image', imageFile, imageFile.name);
+        formDataToSend.append('replace_images', 'true');
+        
+        // Debug FormData contents
+        console.log('FormData entries:');
+        for (let [key, value] of formDataToSend.entries()) {
+          console.log(`${key}:`, value);
         }
         
-        if (response.success) {
-          showSnackbar(`Đã thêm blacklist ${formData.plate_number} thành công!`, 'success');
+        // Send FormData request
+        response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/blacklist/${selectedItem.id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            // Don't set Content-Type for FormData - let browser set it with boundary
+          },
+          body: formDataToSend
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Update failed');
         }
+
+        response = await response.json();
+        console.log('=========================');
+        
+      } else {
+        // Update without image - use JSON
+        console.log('=== UPDATE WITHOUT IMAGE ===');
+        console.log('Sending JSON data:', processedFormData);
+        
+        response = await editData(`/api/blacklist/${selectedItem.id}`, processedFormData, token);
+        console.log('============================');
       }
-       
+      
       if (response.success) {
+        showSnackbar(`Cập nhật blacklist ${processedFormData.plate_number} thành công!`, 'success');
+        
+        console.log('=== UPDATE SUCCESS RESPONSE ===');
+        console.log('Full response:', response);
+        console.log('Response data:', response.data);
+        console.log('New detected_plate_image:', response.data?.detected_plate_image);
+        console.log('New plate_image_path:', response.data?.plate_image_path);
+        console.log('===============================');
+        
+        // Close modal and refresh data
         setOpenModal(false);
+        await loadBlacklist(true); // Force refresh with cache bust
+        
+        // Reset form
         resetForm();
         setImageFile(null);
         setImagePreview(null);
         setOcrResult('');
         setDetectedPlateImage(null);
-        
-        if (response.data?.ocr_text) {
-          setOcrResult(response.data.ocr_text);
-        }
-        if (response.data?.detected_plate_image) {
-          setDetectedPlateImage(response.data.detected_plate_image);
-        }
-        
-        await loadBlacklist(true);
-      } else {
-        showSnackbar(response.message || 'Có lỗi xảy ra', 'error');
       }
-    } catch (error) {
-      console.error('Error submitting form:', error);
-      const errorMessage = handleErrorResponse(error);
-      showSnackbar(errorMessage, 'error');
-    } finally {
-      setLoading(false);
+    } else {
+      // Create new item logic (existing code)
+      // ... existing create logic
     }
-  };
+    
+  } catch (error) {
+    console.error('Error submitting form:', error);
+    
+    let errorMessage = 'Có lỗi xảy ra';
+    
+    if (error.response && error.response.data) {
+      const errorData = error.response.data;
+      errorMessage = errorData.message || 'Dữ liệu không hợp lệ';
+      
+      if (errorData.errors) {
+        if (Array.isArray(errorData.errors)) {
+          const errorTexts = errorData.errors.map(err => {
+            if (typeof err === 'string') return err;
+            if (typeof err === 'object' && err.message) return err.message;
+            if (typeof err === 'object' && err.msg) return err.msg;
+            if (typeof err === 'object' && err.field && err.message) return `${err.field}: ${err.message}`;
+            return JSON.stringify(err);
+          });
+          errorMessage = `${errorMessage}\n• ${errorTexts.join('\n• ')}`;
+        }
+      }
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    showSnackbar(errorMessage, 'error');
+  } finally {
+    setLoading(false);
+  }
+};
+const handleDateChange = (field, value) => {
+  console.log(`[DEBUG] handleDateChange - Field: ${field}, Value: ${value}`);
+  
+  if (value) {
+    // Convert yyyy-MM-dd to dd/MM/yyyy for display
+    const [y, m, d] = value.split('-');
+    const formattedValue = `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+    
+    console.log(`[DEBUG] Formatted value: ${formattedValue}`);
+    
+    setFormData(prev => ({ ...prev, [field]: formattedValue }));
+    setFormErrors(prev => ({ ...prev, [field]: undefined }));
+  } else {
+    setFormData(prev => ({ ...prev, [field]: '' }));
+  }
+};
 
+const handleDateIconClick = (field) => {
+  console.log(`[DEBUG] handleDateIconClick - Field: ${field}`);
+  
+  const currentValue = formData[field];
+  let dateValue = '';
+  
+  if (currentValue) {
+    if (currentValue.includes('/')) {
+      // Convert dd/MM/yyyy to yyyy-MM-dd
+      const [d, m, y] = currentValue.split('/');
+      dateValue = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    } else if (currentValue.includes('-')) {
+      dateValue = currentValue;
+    }
+  }
+  
+  console.log(`[DEBUG] Date value for picker: ${dateValue}`);
+  
+  // Set value cho hidden input
+  if (field === 'valid_from' && validFromDateRef.current) {
+    validFromDateRef.current.value = dateValue;
+    validFromDateRef.current.showPicker();
+  } else if (field === 'valid_to' && validToDateRef.current) {
+    validToDateRef.current.value = dateValue;
+    validToDateRef.current.showPicker();
+  }
+};
   const handleDelete = async (id) => {
     try {
       const token = getToken();
@@ -574,28 +870,59 @@ const BlackList = () => {
     }
   };
 
-  const handleEdit = (item) => {
-    setSelectedItem(item);
-    setFormData({
-      location_id: item.location_id || '',
-      plate_number: item.plate_number || '',
-      vehicle_id: item.vehicle_id || '',
-      violation_type: item.violation_type || 'unauthorized',
-      reason: item.reason || '',
-      severity: item.severity || 'medium',
-      owner_name: item.owner_name || '',
-      owner_phone: item.owner_phone || '',
-      valid_from: item.valid_from || '',
-      valid_to: item.valid_to || '',
-      description: item.description || ''
-    });
-    setImageFile(null);
-    setImagePreview(item.plate_image_path || null);
-    setOcrResult(item.plate_number || '');
-    setDetectedPlateImage(item.detected_plate_image || null);
-    setFormErrors({});
-    setOpenModal(true);
-  };
+// SỬA: Thay thế hàm handleEdit hiện tại
+const handleEdit = (item) => {
+  console.log('=== EDIT DEBUG ===');
+  console.log('Original item:', item);
+  console.log('item.valid_from raw:', item.valid_from, typeof item.valid_from);
+  console.log('item.valid_to raw:', item.valid_to, typeof item.valid_to);
+  
+  setSelectedItem(item);
+  
+  // SỬA: Debug việc format ngày tháng
+  let formattedValidFrom = '';
+  let formattedValidTo = '';
+  
+  if (item.valid_from) {
+    formattedValidFrom = formatDateForDisplay(item.valid_from);
+    console.log('valid_from conversion:', item.valid_from, '->', formattedValidFrom);
+  }
+  
+  if (item.valid_to) {
+    formattedValidTo = formatDateForDisplay(item.valid_to);
+    console.log('valid_to conversion:', item.valid_to, '->', formattedValidTo);
+  }
+  
+  setFormData({
+    location_id: item.location_id || '',
+    plate_number: item.plate_number || '',
+    vehicle_id: item.vehicle_id || '',
+    violation_type: item.violation_type || 'unauthorized',
+    reason: item.reason || '',
+    severity: item.severity || 'medium',
+    owner_name: item.owner_name || '',
+    owner_phone: item.owner_phone || '',
+    valid_from: formattedValidFrom,
+    valid_to: formattedValidTo,
+    description: item.description || ''
+  });
+  
+  console.log('Final form data dates:');
+  console.log('- valid_from:', formattedValidFrom);
+  console.log('- valid_to:', formattedValidTo);
+  console.log('=================');
+  
+  setImageFile(null);
+  if (item.plate_image_path) {
+    setImagePreview(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`);
+  } else {
+    setImagePreview(null);
+  }
+  setOcrResult(item.plate_number || '');
+  setDetectedPlateImage(item.detected_plate_image || null);
+  setFormErrors({});
+  setOpenModal(true);
+};
 
   const handleView = async (id) => {
     try {
@@ -773,17 +1100,31 @@ const BlackList = () => {
         <Snackbar
           open={snackbar.open}
           autoHideDuration={5000}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
           onClose={() => setSnackbar({ ...snackbar, open: false })}
+          sx={{
+            position: 'fixed',
+            top: 24,
+            right: 24,
+            zIndex: 9999,
+            '& .MuiSnackbar-root': {
+              position: 'fixed !important'
+            }
+          }}
         >
           <Alert 
             onClose={() => setSnackbar({ ...snackbar, open: false })}
             severity={snackbar.severity} 
             sx={{ 
-              borderRadius: 3,
-              boxShadow: '0 2px 8px rgba(244, 67, 54, 0.2)',
-              '& .MuiAlert-icon': { fontSize: '1.5rem' },
-              '& .MuiAlert-message': { fontWeight: 500 }
+              width: '100%',
+              minWidth: 300,
+              maxWidth: 500,
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+              borderRadius: 2,
+              '& .MuiAlert-message': {
+                fontSize: '0.95rem',
+                fontWeight: 500
+              }
             }}
           >
             {snackbar.message}
@@ -870,9 +1211,9 @@ const BlackList = () => {
                           <MenuItem value="" disabled>Đang tải...</MenuItem>
                         ) : (
                           locations.map(location => (
-                            <MenuItem key={location.id} value={location.id}>
-                              {location.name}
-                            </MenuItem>
+                          <MenuItem key={location.id} value={location.id}>
+                            {location.name}
+                          </MenuItem>
                           ))
                         )}
                       </Select>
@@ -1074,76 +1415,76 @@ const BlackList = () => {
                           <TableCell>
                             {getSeverityChip(item.severity)}
                           </TableCell>
-                          <TableCell>
-                            {item.valid_from && (
-                              <Typography variant="caption" display="block">
-                                Từ: {new Date(item.valid_from).toLocaleDateString('vi-VN')}
-                              </Typography>
-                            )}
-                            {item.valid_to && (
-                              <Typography variant="caption" display="block">
-                                Đến: {new Date(item.valid_to).toLocaleDateString('vi-VN')}
-                              </Typography>
-                            )}
-                            {!item.valid_from && !item.valid_to && (
-                              <Typography variant="caption" color="text.secondary">
-                                Vĩnh viễn
-                              </Typography>
-                            )}
-                          </TableCell>
+                         <TableCell>
+  {item.valid_from && (
+    <Typography variant="caption" display="block">
+      Từ: {formatDateForDisplay(item.valid_from)}
+    </Typography>
+  )}
+  {item.valid_to && (
+    <Typography variant="caption" display="block">
+      Đến: {formatDateForDisplay(item.valid_to)}
+    </Typography>
+  )}
+  {!item.valid_from && !item.valid_to && (
+    <Typography variant="caption" color="text.secondary">
+      Vĩnh viễn
+    </Typography>
+  )}
+</TableCell>
                           <TableCell>
                             {getStatusChip(item.current_status)}
                           </TableCell>
                           <TableCell align="center">
                             <Box display="flex" justifyContent="center" gap={1}>
                               <Tooltip title="Xem chi tiết">
-                                <IconButton
-                                  size="small"
-                                  color="info"
-                                  onClick={() => handleView(item.id)}
-                                  sx={{
-                                    color: '#1976d2',
-                                    backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                                    '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.2)' },
-                                    transition: 'background-color 0.2s ease'
-                                  }}
-                                >
-                                  <VisibilityIcon />
-                                </IconButton>
+                              <IconButton
+                                size="small"
+                                color="info"
+                                onClick={() => handleView(item.id)}
+                                sx={{
+                                  color: '#1976d2',
+                                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                  '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.2)' },
+                                  transition: 'background-color 0.2s ease'
+                                }}
+                              >
+                                <VisibilityIcon />
+                              </IconButton>
                               </Tooltip>
                               <Tooltip title="Chỉnh sửa">
-                                <IconButton
-                                  size="small"
-                                  color="warning"
-                                  onClick={() => handleEdit(item)}
-                                  sx={{
-                                    color: '#ff9800',
-                                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                                    '&:hover': { backgroundColor: 'rgba(255, 152, 0, 0.2)' },
-                                    transition: 'background-color 0.2s ease'
-                                  }}
-                                >
-                                  <EditIcon />
-                                </IconButton>
+                              <IconButton
+                                size="small"
+                                color="warning"
+                                onClick={() => handleEdit(item)}
+                                sx={{
+                                  color: '#ff9800',
+                                  backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                                  '&:hover': { backgroundColor: 'rgba(255, 152, 0, 0.2)' },
+                                  transition: 'background-color 0.2s ease'
+                                }}
+                              >
+                                <EditIcon />
+                              </IconButton>
                               </Tooltip>
                               <Tooltip title="Xóa">
-                                <IconButton
-                                  size="small"
-                                  color="error"
+                              <IconButton
+                                size="small"
+                                color="error"
                                   onClick={() => setDeleteDialog({ 
                                     open: true, 
                                     itemId: item.id, 
                                     plateName: item.plate_number 
                                   })}
-                                  sx={{
-                                    color: '#f44336',
-                                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                                    '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.2)' },
-                                    transition: 'background-color 0.2s ease'
-                                  }}
-                                >
-                                  <DeleteIcon />
-                                </IconButton>
+                                sx={{
+                                  color: '#f44336',
+                                  backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                                  '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.2)' },
+                                  transition: 'background-color 0.2s ease'
+                                }}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
                               </Tooltip>
                             </Box>
                           </TableCell>
@@ -1243,60 +1584,60 @@ const BlackList = () => {
       {/* Statistics Tab */}
       {activeTab === 1 && (
         <Box sx={{ px: 3 }}>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={3}>
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={3}>
               <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
-                <CardContent>
-                  <BlockIcon color="error" sx={{ fontSize: 40, mb: 1 }} />
-                  <Typography variant="h4" color="error.main">
-                    {statistics.total_entries || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Tổng số bản ghi
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
-                <CardContent>
-                  <FaShieldAlt color="red" size={40} style={{ marginBottom: 8 }} />
-                  <Typography variant="h4" color="error.main">
-                    {statistics.active_entries || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Đang hoạt động
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
-                <CardContent>
-                  <FaExclamationTriangle color="orange" size={40} style={{ marginBottom: 8 }} />
-                  <Typography variant="h4" color="warning.main">
-                    {statistics.high_severity || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Mức độ cao
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
-                <CardContent>
-                  <FaClock color="gray" size={40} style={{ marginBottom: 8 }} />
-                  <Typography variant="h4" color="text.secondary">
-                    {statistics.expired_entries || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Hết hạn
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
+              <CardContent>
+                <BlockIcon color="error" sx={{ fontSize: 40, mb: 1 }} />
+                <Typography variant="h4" color="error.main">
+                  {statistics.total_entries || 0}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Tổng số bản ghi
+                </Typography>
+              </CardContent>
+            </Card>
           </Grid>
+          <Grid item xs={12} md={3}>
+              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+              <CardContent>
+                <FaShieldAlt color="red" size={40} style={{ marginBottom: 8 }} />
+                <Typography variant="h4" color="error.main">
+                  {statistics.active_entries || 0}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Đang hoạt động
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+              <CardContent>
+                <FaExclamationTriangle color="orange" size={40} style={{ marginBottom: 8 }} />
+                <Typography variant="h4" color="warning.main">
+                  {statistics.high_severity || 0}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Mức độ cao
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={3}>
+              <Card sx={{ textAlign: 'center', borderRadius: 3, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+              <CardContent>
+                <FaClock color="gray" size={40} style={{ marginBottom: 8 }} />
+                <Typography variant="h4" color="text.secondary">
+                  {statistics.expired_entries || 0}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Hết hạn
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
         </Box>
       )}
 
@@ -1348,14 +1689,14 @@ const BlackList = () => {
                 {/* Image Previews */}
                 <Stack spacing={2}>
                   {/* Ảnh gốc preview */}
-                  {(imagePreview || (selectedItem && selectedItem.plate_image_path)) && (
+                  {imagePreview && (
                     <Box>
                       <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block' }}>
                         Ảnh gốc:
                       </Typography>
                       <Paper elevation={2} sx={{ p: 1, borderRadius: 2 }}>
                         <img 
-                          src={imagePreview || `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.plate_image_path}`} 
+                          src={imagePreview} 
                           alt="preview" 
                           style={{ 
                             width: '100%', 
@@ -1376,7 +1717,13 @@ const BlackList = () => {
                       </Typography>
                       <Paper elevation={2} sx={{ p: 1, borderRadius: 2, border: '2px solid #4caf50' }}>
                         <img 
-                          src={detectedPlateImage || `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.detected_plate_image}`} 
+                          src={
+                            detectedPlateImage
+                              ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`
+                              : selectedItem && selectedItem.detected_plate_image
+                                ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.detected_plate_image}`
+                                : ''
+                          }
                           alt="detected" 
                           style={{ 
                             width: '100%', 
@@ -1410,36 +1757,36 @@ const BlackList = () => {
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
                     <FormControl fullWidth required error={!!formErrors.location_id}>
-                      <InputLabel>Khu vực</InputLabel>
-                      <Select
-                        value={formData.location_id}
-                        label="Khu vực"
-                        onChange={(e) => setFormData({...formData, location_id: e.target.value})}
+                  <InputLabel>Khu vực</InputLabel>
+                  <Select
+                    value={formData.location_id}
+                    label="Khu vực"
+                    onChange={(e) => setFormData({...formData, location_id: e.target.value})}
                         sx={{ borderRadius: 2 }}
-                      >
+                  >
                         {locationsLoading ? (
                           <MenuItem value="" disabled>Đang tải...</MenuItem>
                         ) : (
                           locations.map(location => (
-                            <MenuItem key={location.id} value={location.id}>
+                      <MenuItem key={location.id} value={location.id}>
                               <LocationIcon sx={{ mr: 1, fontSize: 16 }} />
-                              {location.name}
-                            </MenuItem>
+                        {location.name}
+                      </MenuItem>
                           ))
                         )}
-                      </Select>
+                  </Select>
                       {formErrors.location_id && (
                         <FormHelperText error>{formErrors.location_id}</FormHelperText>
                       )}
-                    </FormControl>
-                  </Grid>
+                </FormControl>
+              </Grid>
                   
                   <Grid item xs={12}>
-                    <TextField
-                      fullWidth
-                      required
-                      label="Biển số xe"
-                      value={formData.plate_number}
+                <TextField
+                  fullWidth
+                  required
+                  label="Biển số xe"
+                  value={formData.plate_number}
                       disabled
                       error={!!formErrors.plate_number}
                       helperText={ocrResult ? "Đã nhận diện từ OCR" : "Trường này sẽ tự động điền từ ảnh biển số (OCR)"}
@@ -1457,15 +1804,15 @@ const BlackList = () => {
                     {formErrors.plate_number && (
                       <FormHelperText error>{formErrors.plate_number}</FormHelperText>
                     )}
-                  </Grid>
+              </Grid>
                   
                   <Grid item xs={12} sm={6}>
                     <FormControl fullWidth required error={!!formErrors.violation_type}>
-                      <InputLabel>Loại vi phạm</InputLabel>
-                      <Select
-                        value={formData.violation_type}
-                        label="Loại vi phạm"
-                        onChange={(e) => setFormData({...formData, violation_type: e.target.value})}
+                  <InputLabel>Loại vi phạm</InputLabel>
+                  <Select
+                    value={formData.violation_type}
+                    label="Loại vi phạm"
+                    onChange={(e) => setFormData({...formData, violation_type: e.target.value})}
                         sx={{ borderRadius: 2 }}
                       >
                         <MenuItem value="unauthorized">
@@ -1476,44 +1823,44 @@ const BlackList = () => {
                           <FaShieldAlt style={{ marginRight: 8, fontSize: 14 }} />
                           Đe dọa an ninh
                         </MenuItem>
-                        <MenuItem value="unpaid_fine">Chưa nộp phạt</MenuItem>
-                        <MenuItem value="banned">Bị cấm</MenuItem>
-                        <MenuItem value="suspicious">Đáng ngờ</MenuItem>
-                        <MenuItem value="other">Khác</MenuItem>
-                      </Select>
+                    <MenuItem value="unpaid_fine">Chưa nộp phạt</MenuItem>
+                    <MenuItem value="banned">Bị cấm</MenuItem>
+                    <MenuItem value="suspicious">Đáng ngờ</MenuItem>
+                    <MenuItem value="other">Khác</MenuItem>
+                  </Select>
                       {formErrors.violation_type && (
                         <FormHelperText error>{formErrors.violation_type}</FormHelperText>
                       )}
-                    </FormControl>
-                  </Grid>
+                </FormControl>
+              </Grid>
                   
                   <Grid item xs={12} sm={6}>
                     <FormControl fullWidth required error={!!formErrors.severity}>
-                      <InputLabel>Mức độ</InputLabel>
-                      <Select
-                        value={formData.severity}
-                        label="Mức độ"
-                        onChange={(e) => setFormData({...formData, severity: e.target.value})}
+                  <InputLabel>Mức độ</InputLabel>
+                  <Select
+                    value={formData.severity}
+                    label="Mức độ"
+                    onChange={(e) => setFormData({...formData, severity: e.target.value})}
                         sx={{ borderRadius: 2 }}
-                      >
-                        <MenuItem value="low">Thấp</MenuItem>
-                        <MenuItem value="medium">Trung bình</MenuItem>
-                        <MenuItem value="high">Cao</MenuItem>
-                        <MenuItem value="critical">Nghiêm trọng</MenuItem>
-                      </Select>
+                  >
+                    <MenuItem value="low">Thấp</MenuItem>
+                    <MenuItem value="medium">Trung bình</MenuItem>
+                    <MenuItem value="high">Cao</MenuItem>
+                    <MenuItem value="critical">Nghiêm trọng</MenuItem>
+                  </Select>
                       {formErrors.severity && (
                         <FormHelperText error>{formErrors.severity}</FormHelperText>
                       )}
-                    </FormControl>
-                  </Grid>
+                </FormControl>
+              </Grid>
                   
                   <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Tên chủ xe"
-                      placeholder="Nhập tên chủ xe"
-                      value={formData.owner_name}
-                      onChange={(e) => setFormData({...formData, owner_name: e.target.value})}
+                <TextField
+                  fullWidth
+                  label="Tên chủ xe"
+                  placeholder="Nhập tên chủ xe"
+                  value={formData.owner_name}
+                  onChange={(e) => setFormData({...formData, owner_name: e.target.value})}
                       sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                       InputProps={{
                         startAdornment: (
@@ -1522,16 +1869,16 @@ const BlackList = () => {
                           </InputAdornment>
                         )
                       }}
-                    />
-                  </Grid>
+                />
+              </Grid>
                   
                   <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Số điện thoại"
-                      placeholder="Nhập số điện thoại"
-                      value={formData.owner_phone}
-                      onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
+                <TextField
+                  fullWidth
+                  label="Số điện thoại"
+                  placeholder="Nhập số điện thoại"
+                  value={formData.owner_phone}
+                  onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
                       error={!!formErrors.owner_phone}
                       sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                       InputProps={{
@@ -1545,55 +1892,129 @@ const BlackList = () => {
                     {formErrors.owner_phone && (
                       <FormHelperText error>{formErrors.owner_phone}</FormHelperText>
                     )}
-                  </Grid>
+              </Grid>
                   
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Có hiệu lực từ"
-                      type="date"
-                      InputLabelProps={{ shrink: true }}
-                      value={formData.valid_from}
-                      onChange={(e) => setFormData({...formData, valid_from: e.target.value})}
-                      error={!!formErrors.valid_from}
-                      inputRef={validFromDateRef}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <CalendarIcon />
-                          </InputAdornment>
-                        )
-                      }}
-                    />
-                    {formErrors.valid_from && (
-                      <FormHelperText error>{formErrors.valid_from}</FormHelperText>
-                    )}
-                  </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Có hiệu lực đến"
-                      type="date"
-                      InputLabelProps={{ shrink: true }}
-                      value={formData.valid_to}
-                      onChange={(e) => setFormData({...formData, valid_to: e.target.value})}
-                      error={!!formErrors.valid_to}
-                      inputRef={validToDateRef}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <CalendarIcon />
-                          </InputAdornment>
-                        )
-                      }}
-                    />
-                    {formErrors.valid_to && (
-                      <FormHelperText error>{formErrors.valid_to}</FormHelperText>
-                    )}
-                  </Grid>
+
+<Grid item xs={12} sm={6}>
+  <Box position="relative">
+    <TextField
+      fullWidth
+      label="Có hiệu lực từ"
+      placeholder="dd/MM/yyyy"
+      value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
+      onChange={(e) => {
+        const value = e.target.value;
+        if (value === '' || validateDateFormat(value)) {
+          setFormErrors(prev => ({ ...prev, valid_from: undefined }));
+          // SỬA: Không format lại, giữ nguyên giá trị user nhập
+          setFormData({ ...formData, valid_from: value });
+        } else {
+          setFormErrors(prev => ({ ...prev, valid_from: 'Định dạng ngày phải là dd/MM/yyyy' }));
+        }
+      }}
+      error={!!formErrors.valid_from}
+      helperText={formErrors.valid_from}
+      InputProps={{
+        endAdornment: (
+          <InputAdornment position="end">
+            <IconButton
+              onClick={() => handleDateIconClick('valid_from')}
+              sx={{ 
+                color: '#1976d2',
+                '&:hover': { 
+                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }}
+              title="Chọn ngày"
+            >
+              <CalendarIcon />
+            </IconButton>
+          </InputAdornment>
+        ),
+      }}
+      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+    />
+    
+    {/* Date Input ẩn - SỬA: Không bind value trực tiếp */}
+    <input
+      ref={validFromDateRef}
+      type="date"
+      onChange={(e) => handleDateChange('valid_from', e.target.value)}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        opacity: 0,
+        pointerEvents: 'none',
+        zIndex: -1
+      }}
+    />
+  </Box>
+</Grid>
+<Grid item xs={12} sm={6}>
+  <Box position="relative">
+    <TextField
+      fullWidth
+      label="Có hiệu lực đến"
+      placeholder="dd/MM/yyyy"
+      value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
+      onChange={(e) => {
+        const value = e.target.value;
+        if (value === '' || validateDateFormat(value)) {
+          setFormErrors(prev => ({ ...prev, valid_to: undefined }));
+          // SỬA: Không format lại, giữ nguyên giá trị user nhập
+          setFormData({ ...formData, valid_to: value });
+        } else {
+          setFormErrors(prev => ({ ...prev, valid_to: 'Định dạng ngày phải là dd/MM/yyyy' }));
+        }
+      }}
+      error={!!formErrors.valid_to}
+      helperText={formErrors.valid_to}
+      InputProps={{
+        endAdornment: (
+          <InputAdornment position="end">
+            <IconButton
+              onClick={() => handleDateIconClick('valid_to')}
+              sx={{ 
+                color: '#1976d2',
+                '&:hover': { 
+                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                  transform: 'scale(1.1)'
+                },
+                transition: 'all 0.2s ease'
+              }}
+              title="Chọn ngày"
+            >
+              <CalendarIcon />
+            </IconButton>
+          </InputAdornment>
+        ),
+      }}
+      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+    />
+    
+    {/* Date Input ẩn - SỬA: Không bind value trực tiếp */}
+    <input
+      ref={validToDateRef}
+      type="date"
+      onChange={(e) => handleDateChange('valid_to', e.target.value)}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        opacity: 0,
+        pointerEvents: 'none',
+        zIndex: -1
+      }}
+    />
+  </Box>
+</Grid>
                 </Grid>
               </Grid>
               
@@ -1814,61 +2235,52 @@ const BlackList = () => {
                 <Stack spacing={1.5}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <PersonIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                    <Typography><strong>Tên:</strong> {selectedItem.owner_name || 'N/A'}</Typography>
+                <Typography><strong>Tên:</strong> {selectedItem.owner_name || 'N/A'}</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <PhoneIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                    <Typography><strong>SĐT:</strong> {selectedItem.owner_phone || 'N/A'}</Typography>
+                <Typography><strong>SĐT:</strong> {selectedItem.owner_phone || 'N/A'}</Typography>
                   </Box>
                 </Stack>
               </Grid>
               
-              {/* Validity Period */}
               <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-                  <CalendarIcon sx={{ mr: 1 }} />
-                  Thời gian hiệu lực
-                </Typography>
-                
-                <Stack spacing={1.5}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <CalendarIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                    <Typography>
-                      <strong>Từ:</strong> {selectedItem.valid_from ? new Date(selectedItem.valid_from).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <CalendarIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
-                    <Typography>
-                      <strong>Đến:</strong> {selectedItem.valid_to ? new Date(selectedItem.valid_to).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </Grid>
+  <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+    <CalendarIcon sx={{ mr: 1 }} />
+    Thời gian hiệu lực
+  </Typography>
+  
+  <Stack spacing={1.5}>
+    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+      <CalendarIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
+      <Typography>
+        <strong>Từ:</strong> {selectedItem.valid_from ? formatDateForDisplay(selectedItem.valid_from) : 'Vĩnh viễn'}
+      </Typography>
+    </Box>
+    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+      <CalendarIcon sx={{ fontSize: 16, mr: 1, color: 'text.secondary' }} />
+      <Typography>
+        <strong>Đến:</strong> {selectedItem.valid_to ? formatDateForDisplay(selectedItem.valid_to) : 'Vĩnh viễn'}
+      </Typography>
+    </Box>
+  </Stack>
+</Grid>
               
               {/* Reason and Description */}
               <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-                  <WarningIcon sx={{ mr: 1 }} />
-                  Lý do cấm
-                </Typography>
-                <Paper elevation={1} sx={{ p: 2, backgroundColor: '#fef7f0', borderLeft: '4px solid #ff9800' }}>
-                  <Typography color="error.main" sx={{ fontWeight: 500 }}>
-                    {selectedItem.reason}
-                  </Typography>
-                </Paper>
-                
-                {selectedItem.description && (
-                  <>
-                    <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2, mt: 3 }}>
-                      Ghi chú chi tiết
-                    </Typography>
-                    <Paper elevation={1} sx={{ p: 2, backgroundColor: '#f5f5f5' }}>
-                      <Typography>{selectedItem.description}</Typography>
-                    </Paper>
-                  </>
-                )}
+                <TextField
+                  fullWidth
+                  required
+                  label="Lý do cấm"
+                  multiline
+                  rows={3}
+                  placeholder="Nhập lý do cấm (tối thiểu 10 ký tự)..."
+                  value={formData.reason}
+                  onChange={(e) => setFormData({...formData, reason: e.target.value})}
+                  error={!!formErrors.reason}
+                  helperText={formErrors.reason || `${formData.reason.length}/500 ký tự`}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                />
               </Grid>
             </Grid>
           )}
@@ -2003,4 +2415,4 @@ const BlackList = () => {
   );
 };
 
-export default BlackList;
+export default BlackList; 

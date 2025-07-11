@@ -23,9 +23,7 @@ const {
 } = require('../controllers/BlackList/updateBlackList');
 const { 
     deleteBlacklist, 
-    bulkDeleteBlacklist, 
-    restoreBlacklist, 
-    bulkRestoreBlacklist,
+    bulkDeleteBlacklist,
     deleteExpiredBlacklist 
 } = require('../controllers/BlackList/deleteBlackList');
 
@@ -119,18 +117,11 @@ router.put('/:id/extend',
     extendBlacklistValidity
 );
 
-// Soft delete blacklist entry (set inactive)
+// Delete blacklist entry (permanent)
 router.delete('/:id', 
     auth, 
    // checkPermission('blacklist.delete'), 
     deleteBlacklist
-);
-
-// Restore deleted (inactive) blacklist entry
-router.post('/:id/restore', 
-    auth, 
-    //checkPermission('blacklist.update'), 
-    restoreBlacklist
 );
 
 // ========================================
@@ -149,13 +140,6 @@ router.post('/bulk/delete',
     auth, 
     //checkPermission('blacklist.delete'), 
     bulkDeleteBlacklist
-);
-
-// Bulk restore blacklist entries
-router.post('/bulk/restore', 
-    auth, 
-   // checkPermission('blacklist.update'), 
-    bulkRestoreBlacklist
 );
 
 // ========================================

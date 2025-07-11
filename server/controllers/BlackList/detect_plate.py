@@ -213,7 +213,7 @@ def main():
                     'success': True,
                     'text': text,
                     'bbox': bbox,
-                    'detected_plate_image': detected_plate_image,
+                    'detected_plate_image': detected_plate_image if detected_plate_image else '',
                     'method': 'yolov5_detection_paddleocr_recognition',
                     'confidence': bbox.get('confidence', 0) if bbox else 0
                 }))
@@ -224,7 +224,7 @@ def main():
                 'success': True,
                 'text': fallback_text,
                 'bbox': None,
-                'detected_plate_image': detected_plate_image,
+                'detected_plate_image': detected_plate_image if detected_plate_image else '',
                 'method': 'full_image_paddleocr_recognition',
                 'message': 'No license plate detected, using full image recognition.',
                 'confidence': 0
@@ -233,7 +233,7 @@ def main():
             print(json.dumps({
                 'success': False,
                 'message': 'Could not recognize license plate characters from image.',
-                'detected_plate_image': detected_plate_image
+                'detected_plate_image': ''
             }))
     except Exception as e:
         print(json.dumps({'success': False, 'message': str(e)}))

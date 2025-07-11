@@ -40,19 +40,54 @@ const storage = multer.diskStorage({
     }
 });
 
+// SỬA: Thay thế hàm formatDateForMySQL trong updateBlackList.js
 const formatDateForMySQL = (dateString) => {
     if (!dateString) return null;
     
+    console.log('[BACKEND] formatDateForMySQL input:', dateString, typeof dateString);
+    
     // Nếu đã là định dạng YYYY-MM-DD thì return luôn
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        console.log('[BACKEND] Already YYYY-MM-DD format:', dateString);
         return dateString;
     }
     
-    // Chuyển đổi từ ISO datetime hoặc date object sang YYYY-MM-DD
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return null;
+    // SỬA: Xử lý string date mà không dùng Date constructor để tránh timezone
+    let year, month, day;
     
-    return date.toISOString().split('T')[0];
+    if (dateString.includes('-')) {
+        // YYYY-MM-DD format
+        [year, month, day] = dateString.split('-').map(num => parseInt(num));
+    } else if (dateString.includes('/')) {
+        // Frontend gửi format YYYY-MM-DD đã convert từ dd/MM/yyyy
+        // Nhưng nếu vẫn nhận dd/MM/yyyy thì xử lý
+        const parts = dateString.split('/');
+        if (parts.length === 3) {
+            // Assume dd/MM/yyyy format từ frontend
+            day = parseInt(parts[0]);
+            month = parseInt(parts[1]);
+            year = parseInt(parts[2]);
+        }
+    } else if (dateString.includes('T')) {
+        // ISO string - chỉ lấy phần date
+        const datePart = dateString.split('T')[0];
+        console.log('[BACKEND] ISO string date part:', datePart);
+        return datePart; // Đã là YYYY-MM-DD
+    }
+    
+    // Validate components
+    if (year && month && day && 
+        year >= 1900 && year <= 2100 && 
+        month >= 1 && month <= 12 && 
+        day >= 1 && day <= 31) {
+        
+        const result = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        console.log('[BACKEND] formatDateForMySQL result:', result);
+        return result;
+    }
+    
+    console.error('[BACKEND] Invalid date format:', dateString);
+    return null;
 };
 
 const upload = multer({
@@ -274,9 +309,9 @@ const updateBlacklist = async (req, res) => {
                         detectedPlateImage = `/uploads/blacklist/detected_plates/${fileName}`;
                     }
                     
-                    if (ocrResult.text) {
+                   if (ocrResult.plate_text) {  // SỬA: plate_text thay vì text
                         ocrUpdateData = {
-                            ocr_raw_text: ocrResult.text,
+                            ocr_raw_text: ocrResult.plate_text,  // SỬA: plate_text thay vì text
                             ocr_confidence: ocrResult.confidence || 0
                         };
                     }
@@ -342,57 +377,81 @@ const updateBlacklist = async (req, res) => {
         const updateFields = [];
         const updateValues = [];
         
-        // SỬA: Cho phép update field với empty string và kiểm tra các giá trị có thay đổi không
-        if (location_id !== undefined && location_id !== currentEntry.location_id) {
-            updateFields.push('location_id = ?');
-            updateValues.push(location_id || null);
-        }
-        if (plate_number !== undefined && plate_number !== currentEntry.plate_number) {
-            updateFields.push('plate_number = ?');
-            updateValues.push(plate_number);
-        }
-        if (vehicle_id !== undefined && vehicle_id !== currentEntry.vehicle_id) {
-            updateFields.push('vehicle_id = ?');
-            updateValues.push(vehicle_id || null);
-        }
-        if (violation_type !== undefined && violation_type !== currentEntry.violation_type) {
-            updateFields.push('violation_type = ?');
-            updateValues.push(violation_type);
-        }
-        if (reason !== undefined && reason !== currentEntry.reason) {
-            updateFields.push('reason = ?');
-            updateValues.push(reason);
-        }
-        if (severity !== undefined && severity !== currentEntry.severity) {
-            updateFields.push('severity = ?');
-            updateValues.push(severity);
-        }
-        if (owner_name !== undefined && owner_name !== currentEntry.owner_name) {
-            updateFields.push('owner_name = ?');
-            updateValues.push(owner_name || null);
-        }
-        if (owner_phone !== undefined && owner_phone !== currentEntry.owner_phone) {
-            updateFields.push('owner_phone = ?');
-            updateValues.push(owner_phone || null);
-        }
-        if (valid_from !== undefined) {
-            const processedValidFrom = valid_from ? formatDateForMySQL(valid_from) : null;
-            if (processedValidFrom !== currentEntry.valid_from) {
-                updateFields.push('valid_from = ?');
-                updateValues.push(processedValidFrom);
-            }
-        }
-        if (valid_to !== undefined) {
-            const processedValidTo = valid_to ? formatDateForMySQL(valid_to) : null;
-            if (processedValidTo !== currentEntry.valid_to) {
-                updateFields.push('valid_to = ?');
-                updateValues.push(processedValidTo);
-            }
-        }
-        if (description !== undefined && description !== currentEntry.description) {
-            updateFields.push('description = ?');
-            updateValues.push(description || null);
-        }
+       // SỬA: Cho phép update field với empty string và kiểm tra các giá trị có thay đổi không
+if (location_id !== undefined && location_id !== currentEntry.location_id) {
+    updateFields.push('location_id = ?');
+    updateValues.push(location_id || null);
+}
+if (plate_number !== undefined && plate_number !== currentEntry.plate_number) {
+    updateFields.push('plate_number = ?');
+    updateValues.push(plate_number);
+}
+if (vehicle_id !== undefined && vehicle_id !== currentEntry.vehicle_id) {
+    updateFields.push('vehicle_id = ?');
+    updateValues.push(vehicle_id || null);
+}
+if (violation_type !== undefined && violation_type !== currentEntry.violation_type) {
+    updateFields.push('violation_type = ?');
+    updateValues.push(violation_type);
+}
+if (reason !== undefined && reason !== currentEntry.reason) {
+    updateFields.push('reason = ?');
+    updateValues.push(reason);
+}
+if (severity !== undefined && severity !== currentEntry.severity) {
+    updateFields.push('severity = ?');
+    updateValues.push(severity);
+}
+if (owner_name !== undefined && owner_name !== currentEntry.owner_name) {
+    updateFields.push('owner_name = ?');
+    updateValues.push(owner_name || null);
+}
+// Validate phone format if provided
+if (owner_phone && owner_phone.trim() !== '') {
+    const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
+    if (!phoneRegex.test(owner_phone.replace(/\s+/g, ''))) {
+        console.log('Phone validation failed for:', owner_phone); // THÊM debug
+        return res.status(400).json({
+            success: false,
+            message: 'Định dạng số điện thoại không hợp lệ',
+            errors: [`Số điện thoại "${owner_phone}" không đúng định dạng`]
+        });
+    }
+}
+if (valid_from !== undefined) {
+    const processedValidFrom = valid_from ? formatDateForMySQL(valid_from) : null;
+    console.log('[BACKEND] valid_from processing:');
+    console.log('  Input:', valid_from);
+    console.log('  Processed:', processedValidFrom);
+    console.log('  Current DB value:', currentEntry.valid_from);
+    
+    if (processedValidFrom !== currentEntry.valid_from) {
+        updateFields.push('valid_from = ?');
+        updateValues.push(processedValidFrom);
+        console.log('[BACKEND] valid_from will be updated to:', processedValidFrom);
+    } else {
+        console.log('[BACKEND] valid_from unchanged');
+    }
+}
+if (valid_to !== undefined) {
+    const processedValidTo = valid_to ? formatDateForMySQL(valid_to) : null;
+    console.log('[BACKEND] valid_to processing:');
+    console.log('  Input:', valid_to);
+    console.log('  Processed:', processedValidTo);
+    console.log('  Current DB value:', currentEntry.valid_to);
+    
+    if (processedValidTo !== currentEntry.valid_to) {
+        updateFields.push('valid_to = ?');
+        updateValues.push(processedValidTo);
+        console.log('[BACKEND] valid_to will be updated to:', processedValidTo);
+    } else {
+        console.log('[BACKEND] valid_to unchanged');
+    }
+}
+if (description !== undefined && description !== currentEntry.description) {
+    updateFields.push('description = ?');
+    updateValues.push(description || null);
+}
         if (evidence_files !== undefined) {
             updateFields.push('evidence_files = ?');
             updateValues.push(evidenceFilesJson ? JSON.stringify(evidenceFilesJson) : null);
@@ -507,7 +566,6 @@ const updateBlacklist = async (req, res) => {
             throw error;
         }
 
-        // Get updated entry with related data
         const [updatedEntry] = await connection.execute(
             `SELECT b.*, l.name as location_name, l.code as location_code, l.zone_type,
                     v.make, v.model, v.color, v.vehicle_type,
@@ -555,17 +613,34 @@ const updateBlacklist = async (req, res) => {
             ]
         );
 
+        const responseData = {
+            ...updatedEntry[0],
+            // Ensure image paths are correctly returned
+            detected_plate_image: detectedPlateImage || updatedEntry[0].detected_plate_image,
+            plate_image_path: newImagePaths.plate_image_path || updatedEntry[0].plate_image_path,
+            plate_image_cropped_path: newImagePaths.plate_image_cropped_path || updatedEntry[0].plate_image_cropped_path,
+            plate_image_processed_path: newImagePaths.plate_image_processed_path || updatedEntry[0].plate_image_processed_path,
+            update_info: {
+                updated_fields: updateFields.filter(field => !field.includes('updated_at')),
+                has_new_images: req.files ? Object.keys(req.files).length > 0 : false,
+                replaced_images_count: oldImagesToDelete.length,
+                ocr_updated: ocrUpdateData ? true : false,
+                new_detected_plate_image: detectedPlateImage
+            }
+        };
+
+        console.log('[DEBUG] Final response data:', {
+            id: responseData.id,
+            plate_number: responseData.plate_number,
+            detected_plate_image: responseData.detected_plate_image,
+            plate_image_path: responseData.plate_image_path,
+            has_new_images: responseData.update_info.has_new_images
+        });
+
         res.status(200).json({
             success: true,
             message: 'Cập nhật blacklist entry thành công',
-            data: {
-                ...updatedEntry[0],
-                update_info: {
-                    updated_fields: updateFields.filter(field => !field.includes('updated_at')),
-                    has_new_images: req.files ? Object.keys(req.files).length > 0 : false,
-                    replaced_images_count: oldImagesToDelete.length
-                }
-            }
+            data: responseData
         });
 
     } catch (error) {
@@ -655,14 +730,19 @@ const updateBlacklistStatus = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: `${is_active ? 'Kích hoạt' : 'Vô hiệu hóa'} blacklist entry thành công`,
+            message: 'Cập nhật blacklist entry thành công',
             data: {
-                id: parseInt(id),
-                plate_number: currentEntry.plate_number,
-                is_active,
-                previous_status: currentEntry.is_active
+                ...updatedEntry[0],
+                // SỬA: Đảm bảo trả về đường dẫn ảnh đầy đủ
+                detected_plate_image: detectedPlateImage || updatedEntry[0].detected_plate_image,
+                plate_image_path: newImagePaths.plate_image_path || updatedEntry[0].plate_image_path,
+                update_info: {
+                updated_fields: updateFields.filter(field => !field.includes('updated_at')),
+                has_new_images: req.files ? Object.keys(req.files).length > 0 : false,
+                replaced_images_count: oldImagesToDelete.length
+                }
             }
-        });
+            });
 
     } catch (error) {
         console.error('Error updating blacklist status:', error);
