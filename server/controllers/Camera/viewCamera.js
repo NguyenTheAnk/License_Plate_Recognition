@@ -1,8 +1,9 @@
+// server\controllers\Camera\getCameraStream.js
 const db = require('../../db');
 
 const getCameraDetailedView = async (req, res) => {
     const connection = await db.promise();
-    
+
     try {
         const cameraId = req.params.id;
 
@@ -23,7 +24,8 @@ const getCameraDetailedView = async (req, res) => {
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
-                END as connection_status
+                END as connection_status,
+                CONCAT(c.protocol, '://', c.host, ':', c.port, c.path) as rtsp_url
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
@@ -171,7 +173,7 @@ const getCameraDetailedView = async (req, res) => {
 
 const getCameraHealthReport = async (req, res) => {
     const connection = await db.promise();
-    
+
     try {
         const { days = 7 } = req.query;
 
@@ -246,8 +248,163 @@ const getCameraHealthReport = async (req, res) => {
     }
 };
 
+const getCameraPerformanceReport = async (req, res) => {
+    const connection = await db.promise();
 
-module.exports = { 
-    getCameraDetailedView, 
-    getCameraHealthReport
+    try {
+        const { days = 30, page = 1, limit = 20 } = req.query;
+        const offset = (page - 1) * limit;
+
+        // Get camera performance metrics
+        const [performanceMetrics] = await connection.execute(`
+            SELECT 
+                c.id,
+                c.name,
+                c.code,
+                l.name as location_name,
+                COUNT(lpd.id) as total_detections,
+                COUNT(DISTINCT lpd.plate_number) as unique_plates,
+                COUNT(DISTINCT DATE(lpd.detection_time)) as active_days,
+                AVG(lpd.confidence) as avg_confidence,
+                COUNT(CASE WHEN lpd.confidence >= 0.9 THEN 1 END) as high_confidence_count,
+                COUNT(CASE WHEN lpd.confidence < 0.7 THEN 1 END) as low_confidence_count,
+                COUNT(CASE WHEN lpd.is_verified = 1 THEN 1 END) as verified_count,
+                MAX(lpd.detection_time) as last_detection,
+                MIN(lpd.detection_time) as first_detection,
+                ROUND(COUNT(lpd.id) / NULLIF(COUNT(DISTINCT DATE(lpd.detection_time)), 0), 2) as avg_detections_per_day,
+                ROUND(COUNT(CASE WHEN lpd.confidence >= 0.9 THEN 1 END) * 100.0 / NULLIF(COUNT(lpd.id), 0), 2) as high_confidence_rate,
+                ROUND(COUNT(CASE WHEN lpd.is_verified = 1 THEN 1 END) * 100.0 / NULLIF(COUNT(lpd.id), 0), 2) as verification_rate
+            FROM cameras c
+            JOIN locations l ON c.location_id = l.id
+            LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
+                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
+            WHERE c.is_active = 1
+            GROUP BY c.id, c.name, c.code, l.name
+            ORDER BY total_detections DESC
+            LIMIT ? OFFSET ?
+        `, [days, parseInt(limit), offset]);
+
+        // Get total count for pagination
+        const [countResult] = await connection.execute(
+            'SELECT COUNT(*) as total FROM cameras WHERE is_active = 1'
+        );
+
+        const total = countResult[0].total;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                period_days: parseInt(days),
+                cameras: performanceMetrics,
+                pagination: {
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
+                    total: total,
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error getting camera performance report:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy báo cáo hiệu suất camera',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+const getCameraComparisonReport = async (req, res) => {
+    const connection = await db.promise();
+
+    try {
+        const { camera_ids, days = 7 } = req.body;
+
+        if (!camera_ids || !Array.isArray(camera_ids) || camera_ids.length < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cần ít nhất 2 camera để so sánh'
+            });
+        }
+
+        if (camera_ids.length > 10) {
+            return res.status(400).json({
+                success: false,
+                message: 'Chỉ có thể so sánh tối đa 10 camera cùng lúc'
+            });
+        }
+
+        const placeholders = camera_ids.map(() => '?').join(',');
+
+        // Get comparison data
+        const [comparisonData] = await connection.execute(`
+            SELECT 
+                c.id,
+                c.name,
+                c.code,
+                l.name as location_name,
+                c.status,
+                TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) as minutes_since_heartbeat,
+                COUNT(lpd.id) as total_detections,
+                COUNT(DISTINCT lpd.plate_number) as unique_plates,
+                COUNT(DISTINCT DATE(lpd.detection_time)) as active_days,
+                AVG(lpd.confidence) as avg_confidence,
+                COUNT(CASE WHEN lpd.confidence >= 0.9 THEN 1 END) as high_confidence_count,
+                COUNT(CASE WHEN lpd.is_verified = 1 THEN 1 END) as verified_count,
+                MAX(lpd.detection_time) as last_detection,
+                ROUND(COUNT(lpd.id) / NULLIF(COUNT(DISTINCT DATE(lpd.detection_time)), 0), 2) as avg_detections_per_day
+            FROM cameras c
+            JOIN locations l ON c.location_id = l.id
+            LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
+                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
+            WHERE c.id IN (${placeholders}) AND c.is_active = 1
+            GROUP BY c.id, c.name, c.code, l.name, c.status, c.last_heartbeat
+            ORDER BY total_detections DESC
+        `, [days, ...camera_ids]);
+
+        // Get daily pattern comparison
+        const [dailyComparison] = await connection.execute(`
+            SELECT 
+                lpd.camera_id,
+                c.name as camera_name,
+                DATE(lpd.detection_time) as date,
+                COUNT(*) as detection_count,
+                COUNT(DISTINCT lpd.plate_number) as unique_plates,
+                AVG(lpd.confidence) as avg_confidence
+            FROM license_plate_detections lpd
+            JOIN cameras c ON lpd.camera_id = c.id
+            WHERE lpd.camera_id IN (${placeholders}) 
+            AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
+            GROUP BY lpd.camera_id, c.name, DATE(lpd.detection_time)
+            ORDER BY camera_id, date
+        `, [...camera_ids, days]);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                period_days: parseInt(days),
+                camera_count: camera_ids.length,
+                comparison_data: comparisonData,
+                daily_patterns: dailyComparison
+            }
+        });
+
+    } catch (error) {
+        console.error('Error getting camera comparison report:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy báo cáo so sánh camera',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+module.exports = {
+    getCameraDetailedView,
+    getCameraHealthReport,
+    getCameraPerformanceReport,
+    getCameraComparisonReport
 };

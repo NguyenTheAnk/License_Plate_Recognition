@@ -1,7 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
-  Box, Avatar, Typography, Divider, List, ListItem, ListItemIcon, ListItemText, Switch, Button, LinearProgress, Paper, Collapse, Chip
-} from '@mui/material';
+  Box,
+  Avatar,
+  Typography,
+  Divider,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Switch,
+  Button,
+  LinearProgress,
+  Paper,
+  Collapse,
+  Chip,
+} from "@mui/material";
 import {
   Home as HomeIcon,
   DirectionsCar as LicensePlateIcon,
@@ -18,9 +31,10 @@ import {
   ExpandLess,
   ExpandMore,
   SmartToy as AiIcon,
-  Videocam as CameraIcon
-} from '@mui/icons-material';
-import { useNavigate, useLocation } from 'react-router-dom';
+  Videocam as CameraIcon,
+  PlayCircleOutline as PlayIcon,
+} from "@mui/icons-material";
+import { fetchDataFromAPI } from '../utils/auth';
 
 const SIDEBAR_WIDTH = 260;
 
@@ -38,7 +52,6 @@ const menuGroups = [
         text: 'Quản lý người dùng và phân quyền',
         icon: <UserManagementIcon />,
         path: '/user-management',
-        // Loại bỏ requiredPermission để hiển thị cho tất cả user
         children: [
           { text: 'Quản lý người dùng', icon: <UsersIcon />, path: '/user' },
           { text: 'Quản lý quyền', icon: <PermissionIcon />, path: '/permissions' },
@@ -49,11 +62,7 @@ const menuGroups = [
   }
 ];
 
-function Sidebar({ user, onLogout }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const currentPath = location.pathname;
-
+function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   // Debug: Log user object
   useEffect(() => {
     console.log('=== SIDEBAR DEBUG ===');
@@ -74,6 +83,39 @@ function Sidebar({ user, onLogout }) {
 
   // State cho việc mở/đóng submenu
   const [openSubmenus, setOpenSubmenus] = useState({});
+  const [isCameraListOpen, setIsCameraListOpen] = useState(false);
+  const [cameras, setCameras] = useState([]);
+
+  // Camera state
+  const totalCameras = 46;
+
+  // Trạng thái AI
+  const [aiStatus, setAiStatus] = useState(true);
+
+  // Fetch cameras data
+  useEffect(() => {
+    const fetchCameras = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const data = await fetchDataFromAPI("/api/cameras/streams/all", token);
+        console.log("API response from /api/cameras/streams/all:", data);
+        const cameraList = data.data.cameras || [];
+        console.log("Camera list before filter:", cameraList);
+        let activeCamerasList = cameraList.filter(
+          (camera) => camera.connection_status === "online"
+        );
+        if (activeCamerasList.length === 0) {
+          // Nếu không có camera online, hiển thị tất cả camera để debug
+          activeCamerasList = cameraList;
+        }
+        console.log("Active cameras after filter (or all if none online):", activeCamerasList);
+        setCameras(activeCamerasList);
+      } catch (error) {
+        console.error("Sidebar Error fetching cameras:", error);
+      }
+    };
+    fetchCameras();
+  }, []);
 
   // Hàm toggle submenu
   const handleSubmenuToggle = (itemText) => {
@@ -83,12 +125,26 @@ function Sidebar({ user, onLogout }) {
     }));
   };
 
-  // Camera state
-  const totalCameras = 46;
-  const activeCameras = 12;
+  const handleCameraToggle = () => {
+    setIsCameraListOpen(!isCameraListOpen);
+  };
 
-  // Trạng thái AI
-  const [aiStatus, setAiStatus] = useState(true);
+  const handleCameraSelect = (cameraId) => {
+    console.log("Chọn camera:", cameraId);
+
+    // Gọi hàm từ SamplePage để mở luồng mới
+    if (window.startCameraStream) {
+      window.startCameraStream(cameraId.toString());
+    }
+
+    // Chuyển hướng nếu cần
+    if (currentPath !== "/route-monitoring") {
+      navigate("/route-monitoring");
+    }
+  };
+
+  // Tính số camera đang hoạt động
+  const activeCameras = cameras.length;
 
   // Helper function để check permission
   const hasPermission = (permissionCode) => {
@@ -191,7 +247,7 @@ function Sidebar({ user, onLogout }) {
       }}>
         <Box sx={{ position: 'relative', mb: 1 }}>
           <Avatar 
-            src={user?.avatar ? user.avatar : undefined}
+            src={user?.avatar ? user.avatar : "/logo-user.png"}
             alt="avatar" 
             sx={{ 
               width: 70, 
@@ -366,15 +422,33 @@ function Sidebar({ user, onLogout }) {
           boxShadow: '0 3px 8px rgba(255, 193, 7, 0.2)'
         }
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-          <CameraIcon sx={{ color: '#f57f17', mr: 1, fontSize: 18 }} />
-          <Typography variant="caption" sx={{ 
-            fontWeight: 600, 
-            fontSize: 12,
-            color: '#e65100'
-          }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            mb: 1,
+            cursor: "pointer",
+            "&:hover": {
+              "& .MuiTypography-root": {
+                color: "#d84315",
+              },
+            },
+          }}
+          onClick={handleCameraToggle}
+        >
+          <CameraIcon sx={{ color: "#f57f17", mr: 1, fontSize: 18 }} />
+          <Typography
+            variant="caption"
+            sx={{
+              fontWeight: 600,
+              fontSize: 12,
+              color: "#e65100",
+              flex: 1,
+            }}
+          >
             Các camera hoạt động
           </Typography>
+          {isCameraListOpen ? <ExpandLess /> : <ExpandMore />}
         </Box>
         <LinearProgress 
           variant="determinate" 
@@ -403,9 +477,65 @@ function Sidebar({ user, onLogout }) {
             fontSize: 11,
             color: '#ff9800'
           }}>
-            {Math.round((activeCameras / totalCameras) * 100)}%
+            {totalCameras === 0 ? 0 : Math.round((activeCameras / totalCameras) * 100)}%
           </Typography>
         </Box>
+        <Collapse in={isCameraListOpen} timeout="auto" unmountOnExit>
+          <List dense sx={{ mt: 1, maxHeight: 200, overflowY: "auto" }}>
+            {cameras.length > 0 ? (
+              cameras.map((camera) => (
+                <ListItem
+                  key={camera.id}
+                  button
+                  onClick={() => handleCameraSelect(camera.id)}
+                  sx={{
+                    borderRadius: 2,
+                    mb: 0.5,
+                    pl: 2,
+                    pr: 1,
+                    py: 0.5,
+                    transition: "all 0.3s ease",
+                    "&:hover": {
+                      bgcolor: "#f3e5f5",
+                      transform: "translateX(4px)",
+                      boxShadow: "0 2px 8px rgba(156, 39, 176, 0.2)",
+                    },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 24 }}>
+                    <PlayIcon sx={{ fontSize: 16, color: "#4caf50" }} />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={camera.name || `Camera ${camera.id}`}
+                    secondary={`${camera.protocol?.toUpperCase()} - ${
+                      camera.status
+                    }`}
+                    primaryTypographyProps={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: "#333",
+                    }}
+                    secondaryTypographyProps={{
+                      fontSize: 11,
+                      color: "#666",
+                    }}
+                  />
+                </ListItem>
+              ))
+            ) : (
+              <ListItem>
+                <ListItemText
+                  primary="Không có camera nào hoạt động"
+                  primaryTypographyProps={{
+                    color: "#757575",
+                    fontSize: 12,
+                    textAlign: "center",
+                  }}
+                />
+              </ListItem>
+            )}
+          </List>
+        </Collapse>
       </Paper>
 
       {/* Menu */}
@@ -477,7 +607,6 @@ function Sidebar({ user, onLogout }) {
                         backgroundColor: '#e3f2fd',
                         color: '#1976d2',
                         borderLeft: '4px solid #1976d2',
-                        // Không dùng transform, scale, padding/margin thay đổi ở đây
                         boxShadow: '0 2px 8px rgba(25, 118, 210, 0.10)'
                       },
                       fontSize: 14 
@@ -540,7 +669,6 @@ function Sidebar({ user, onLogout }) {
                                 backgroundColor: '#f3e5f5',
                                 color: '#7b1fa2',
                                 borderLeft: '4px solid #7b1fa2',
-                                // Không dùng transform, scale, padding/margin thay đổi ở đây
                               },
                               fontSize: 13 
                             }}

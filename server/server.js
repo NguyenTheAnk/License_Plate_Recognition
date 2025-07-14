@@ -7,11 +7,13 @@ const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
 const db = require('./db');
-
+const streamingService = require('./services/streamingService');
+const { getAllCameras } = require('./controllers/Camera/getCamera');
+const { getAllCameraStreams, startCameraStream, stopCameraStream, getStreamStatus } = require('./controllers/Camera/getCameraStream');
 const app = express();
 
 const port = process.env.PORT || 4000;
-
+app.use(express.static('public'));
 // Middleware
 app.use(cors());
 app.options('*', cors());
@@ -20,8 +22,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
-
-
+app.use('/api/cameras', require('./routes/camera'));
+app.use(express.static('public'));
+app.use('/streams', express.static(path.join(__dirname, '../public/streams')));
 
 
 const plateRoutes = require('./routes/plate');
@@ -41,10 +44,12 @@ const blackList = require('./routes/blackList');
 
 // WebSocket setup
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = streamingService.initWebSocketServer(server);
 app.set('wss', wss);
+
+// Thêm xử lý WebSocket cho các sự kiện khác (không phải streaming)
 wss.on('connection', (ws) => {
-  console.log('Client connected');
+  console.log('Client connected to main WebSocket');
   ws.on('message', (message) => {
     console.log('Received:', message.toString());
     try {
@@ -62,8 +67,27 @@ wss.on('connection', (ws) => {
     }
   });
   ws.on('close', () => {
-    console.log('Client disconnected');
+    console.log('Client disconnected from main WebSocket');
   });
+});
+
+// API endpoints - sử dụng controller có sẵn
+app.get('/api/cameras', getAllCameras);
+app.get('/api/cameras/streams', getAllCameraStreams);
+
+// Streaming endpoints mới
+app.post('/api/cameras/:id/stream/start', startCameraStream);
+app.post('/api/cameras/:id/stream/stop', stopCameraStream);
+app.get('/api/cameras/:id/stream/status', getStreamStatus);
+
+// Cleanup khi server shutdown
+process.on('SIGINT', () => {
+    console.log('Shutting down server...');
+    streamingService.cleanupStreams();
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
 });
 
 // Đăng ký các routes chuẩn RESTful
@@ -74,10 +98,11 @@ app.use('/api/roles', rolesRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/auth', authRoute);
 app.use('/api/user', userRoute);
-app.use('/api/camera', cameraRoute);
+//app.use('/api/camera', cameraRoute);
 app.use('/api/location', locationRoute);
 app.use('/api/whitelist', whiteList);
 app.use('/api/blacklist', blackList);
+
 // Đăng ký các routes khác nếu có
 
 // Global error handler (luôn trả về JSON)

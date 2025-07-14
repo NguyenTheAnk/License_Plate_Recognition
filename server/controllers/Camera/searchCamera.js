@@ -1,3 +1,4 @@
+
 const db = require('../../db');
 
 const searchCameras = async (req, res) => {

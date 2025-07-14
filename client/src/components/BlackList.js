@@ -558,10 +558,10 @@ const loadBlacklist = async (forceRefresh = false) => {
     setLocationsLoading(true);
     try {
       const token = getToken();
-      const response = await fetchDataFromAPI('/api/location?limit=1000&is_active=1', token);
-      
+      // SỬA: Gọi đúng endpoint lấy khu vực active
+      const response = await fetchDataFromAPI('/api/location/active', token);
       if (response.success) {
-        setLocations(response.data.locations || []);
+        setLocations(response.data.locations || response.data || []);
       } else {
         console.error('Failed to load locations:', response.message);
         showSnackbar('Không thể tải danh sách khu vực: ' + response.message, 'error');

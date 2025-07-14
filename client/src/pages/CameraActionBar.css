@@ -1,0 +1,94 @@
+.camera-action-bar {
+    display: flex;
+    gap: 12px;
+    margin-top: 0;
+    justify-content: flex-start;
+    flex-shrink: 0; /* Quan trọng */
+    min-height: 50px;
+    height: auto;
+    background: #2e2e2e;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    padding: 0 12px;
+    align-items: center;
+    width: 100%; /* Đảm bảo thanh chiếm toàn bộ chiều rộng */
+    box-sizing: border-box;
+  }
+  
+  .action-btn {
+    width: 35px;
+    height: 35px;
+    border: none;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-right: 12px;
+    padding: 0;
+  }
+  
+  .close-btn {
+    background: #f44336;
+  }
+  .close-btn:hover {
+    background: #d32f2f;
+  }
+  
+  .retry-btn {
+    background: #2196F3;
+  }
+  .retry-btn:hover {
+    background: #1976D2;
+  }
+  
+  .fullscreen-btn {
+    background: #4CAF50;
+  }
+  .fullscreen-btn:hover {
+    background: #388E3C;
+  }
+  
+  .config-btn {
+    background: #FFD600;
+  }
+  .config-btn:hover {
+    background: #FFC107;
+  }
+  
+  .record-btn {
+    background: #FF5722;
+  }
+  .record-btn.recording {
+    background: #D32F2F;
+  }
+  .record-btn:hover {
+    background: #E64A19;
+  }
+  
+  .motion-btn {
+    background: #9C27B0;
+  }
+  .motion-btn:hover {
+    background: #7B1FA2;
+  }
+  
+  .action-btn svg {
+    display: block;
+    color: #fff !important;
+    width: 25px;
+    height: 25px;
+  }
+  
+  .camera-actionbar-name {
+    color: #fff;
+    font-size: 16px; /* Giảm kích thước font */
+    font-weight: 500;
+    margin-left: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1;
+    max-width: 200px;
+  }

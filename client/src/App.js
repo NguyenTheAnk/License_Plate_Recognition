@@ -12,10 +12,13 @@ import User from './pages/User/User';
 import UserDetail from './pages/User/UserDetail';
 import Roles from './pages/Roles';
 import Permissions from './pages/Permissions';
+import Cameras from './pages/Cameras';
 import Search from './pages/Search';
 import axios from 'axios';
 import WhiteList from './components/WhiteList';
 import BlackList from './components/BlackList';
+import SamplePage from './pages/SamplePage';
+import CameraConfigurationPage from './pages/CameraConfigurationPage';
 
 export const MyContext = React.createContext();
 
@@ -173,10 +176,13 @@ function AppContent() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/user" element={<User />} />
                   <Route path="/user/:id/detailed" element={<UserDetail />} />
+                  <Route path="/cameras" element={<Cameras />} />
                   <Route path="/whitelist" element={<WhiteList />} />
                   <Route path="/blacklist" element={<BlackList />} />
                   <Route path="/roles" element={<Roles />} />
                   <Route path="/search" element={<Search />} />
+                  <Route path="/route-monitoring" element={<SamplePage />} />
+                  <Route path="/camera-config/:id" element={<CameraConfigurationPage />} />
                   <Route path="/permissions" element={<Permissions />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

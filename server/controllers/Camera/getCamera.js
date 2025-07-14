@@ -1,8 +1,21 @@
+// server\controllers\Camera\getCamera.js
 const db = require('../../db');
+
+const buildRtspUrl = (camera) => {
+    // Trả về RTSP URL động, không trả password ra ngoài response!
+    if (camera.protocol === 'rtsp') {
+        if (camera.username && camera.password) {
+            return `${camera.protocol}://${camera.username}:${camera.password}@${camera.host}:${camera.port}${camera.path}`;
+        } else {
+            return `${camera.protocol}://${camera.host}:${camera.port}${camera.path}`;
+        }
+    }
+    return '';
+};
 
 const getCameraById = async (req, res) => {
     const connection = await db.promise();
-    
+
     try {
         const cameraId = req.params.id;
 
@@ -20,7 +33,7 @@ const getCameraById = async (req, res) => {
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
-                END as connection_status
+                END as connection_status,
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
@@ -46,7 +59,7 @@ const getCameraById = async (req, res) => {
         `, [cameraId]);
 
         const camera = {
-            ...cameras[0],
+            rtsp_url: buildRtspUrl(cameras[0]), 
             recent_stats: recentDetections[0]
         };
 
@@ -87,7 +100,7 @@ const getCameraById = async (req, res) => {
 
 const getAllCameras = async (req, res) => {
     const connection = await db.promise();
-    
+
     try {
         const {
             page = 1,
@@ -105,7 +118,7 @@ const getAllCameras = async (req, res) => {
         const pageNum = Math.max(1, parseInt(page) || 1);
         const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20)); // Cap at 100
         const offsetNum = (pageNum - 1) * limitNum;
-        
+
         // Build where conditions and parameters separately
         let whereConditions = ['c.is_active = 1'];
         let queryParams = [];
@@ -153,7 +166,7 @@ const getAllCameras = async (req, res) => {
             JOIN locations l ON c.location_id = l.id 
             ${whereClause}
         `;
-        
+
         console.log('Debug - Count query:', countQuery);
         const [countResult] = await connection.execute(countQuery, queryParams);
         const total = countResult[0].total;
@@ -165,6 +178,15 @@ const getAllCameras = async (req, res) => {
                 c.name,
                 c.code,
                 c.url,
+                c.ke,
+                c.mid,
+                c.details,
+                c.protocol,
+                c.host,
+                c.path,
+                c.port,
+                c.width,
+                c.height,
                 c.location_id,
                 c.direction,
                 c.camera_type,
@@ -177,6 +199,7 @@ const getAllCameras = async (req, res) => {
                 c.status,
                 c.last_heartbeat,
                 c.is_active,
+                c.is_detect,
                 c.created_at,
                 c.updated_at,
                 l.name as location_name,
@@ -190,7 +213,8 @@ const getAllCameras = async (req, res) => {
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
-                END as connection_status
+                END as connection_status,
+                CONCAT(c.protocol, '://', c.host, ':', c.port, c.path) as rtsp_url
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
@@ -200,14 +224,14 @@ const getAllCameras = async (req, res) => {
         `;
 
         console.log('Debug - Main query:', mainQuery);
-        
+
         // Execute main query with only the WHERE clause parameters
         const [cameras] = await connection.execute(mainQuery, queryParams);
 
         // Get detection counts separately
         const cameraIds = cameras.map(camera => camera.id);
         let detectionCounts = {};
-        
+
         if (cameraIds.length > 0) {
             // Use IN clause with proper parameter binding
             const placeholders = cameraIds.map(() => '?').join(',');
@@ -220,7 +244,7 @@ const getAllCameras = async (req, res) => {
                 AND detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 GROUP BY camera_id
             `;
-            
+
             try {
                 const [detections] = await connection.execute(detectionQuery, cameraIds);
                 detections.forEach(detection => {
@@ -280,7 +304,7 @@ const getAllCameras = async (req, res) => {
             sqlState: error.sqlState,
             sql: error.sql
         });
-        
+
         res.status(500).json({
             success: false,
             message: 'Lỗi khi lấy danh sách camera',
@@ -290,7 +314,7 @@ const getAllCameras = async (req, res) => {
 };
 const getCamerasByLocation = async (req, res) => {
     const connection = await db.promise();
-    
+
     try {
         const locationId = req.params.locationId;
 
@@ -343,7 +367,7 @@ const getCamerasByLocation = async (req, res) => {
 
 const getCameraStatistics = async (req, res) => {
     const connection = await db.promise();
-    
+
     try {
         // Get overall statistics
         const [overallStats] = await connection.execute(`
@@ -415,9 +439,9 @@ const getCameraStatistics = async (req, res) => {
     }
 };
 
-module.exports = { 
-    getCameraById, 
-    getAllCameras, 
-    getCamerasByLocation, 
-    getCameraStatistics 
+module.exports = {
+    getCameraById,
+    getAllCameras,
+    getCamerasByLocation,
+    getCameraStatistics
 };

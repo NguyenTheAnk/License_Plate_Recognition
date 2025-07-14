@@ -1,13 +1,19 @@
+// server\routes\camera.js
 const express = require('express');
 const router = express.Router();
 
 // Import controllers
 const { createCamera } = require('../controllers/Camera/createCamera');
 const { getCameraById, getAllCameras, getCamerasByLocation, getCameraStatistics } = require('../controllers/Camera/getCamera');
-const { updateCamera, updateCameraStatus, bulkUpdateCameraStatus } = require('../controllers/Camera/updateCamera');
-const { deleteCamera, bulkDeleteCameras } = require('../controllers/Camera/deleteCamera');
+const { updateCamera, updateCameraStatus, updateCameraHeartbeat, bulkUpdateCameraStatus } = require('../controllers/Camera/updateCamera');
+const { deleteCamera, hardDeleteCamera, restoreCamera, bulkDeleteCameras } = require('../controllers/Camera/deleteCamera');
 const { searchCameras, searchCamerasByCriteria, getCamerasByStatus, getCamerasByType, getCamerasByRole, getOfflineCameras } = require('../controllers/Camera/searchCamera');
-const { getCameraDetailedView, getCameraHealthReport } = require('../controllers/Camera/viewCamera');
+const { getCameraDetailedView, getCameraHealthReport, getCameraPerformanceReport, getCameraComparisonReport } = require('../controllers/Camera/viewCamera');
+const { getCameraStreamInfo, 
+    getAllCameraStreams, 
+    startCameraStream, 
+    stopCameraStream,
+    getStreamStatus } = require('../controllers/Camera/getCameraStream');
 
 // Import middlewares
 const auth = require('../middlewares/authMiddleware');
@@ -16,160 +22,227 @@ const { onlyAdminAccess } = require('../middlewares/adminMiddleware');
 const {
     createCameraValidator,
     updateCameraValidator,
+    deleteCameraValidator,
     updateStatusValidator,
     bulkOperationValidator,
     bulkStatusUpdateValidator,
     searchValidator,
-    deleteCameraValidator,
     searchCriteriaValidator,
+    comparisonReportValidator,
     locationParamValidator,
     statusParamValidator,
     typeParamValidator,
     roleParamValidator,
     offlineCamerasValidator,
     healthReportValidator,
+    performanceReportValidator
 } = require('../helper/cameraValidator');
 
 // Camera CRUD routes
-router.post('/create', 
-    auth, 
+router.post('/create',
+    auth,
     // checkPermission('cameras.create'), 
-    createCameraValidator, 
+    createCameraValidator,
     createCamera
 );
 
-router.get('/', 
-    auth, 
+router.post('/:id/stream/start',
+    auth,
+    // checkPermission('cameras.update'), 
+    // có thể thêm validator nếu muốn
+    startCameraStream
+);
+
+router.post('/:id/stream/stop',
+    auth,
+    // checkPermission('cameras.update'),
+    // có thể thêm validator nếu muốn
+    stopCameraStream
+);
+
+router.get('/:id/stream/status',
+    auth,
+    // checkPermission('cameras.view'),
+    getStreamStatus
+);
+
+router.get('/',
+    auth,
     // checkPermission('cameras.view'), 
     getAllCameras
 );
 
-router.get('/statistics', 
-    auth, 
+router.get('/statistics',
+    auth,
     // checkPermission('cameras.view'), 
     getCameraStatistics
 );
 
-router.get('/health-report', 
-    auth, 
+router.get('/health-report',
+    auth,
     // checkPermission('cameras.view'), 
     healthReportValidator,
     getCameraHealthReport
 );
 
+router.get('/performance-report',
+    auth,
+    // checkPermission('cameras.view'), 
+    performanceReportValidator,
+    getCameraPerformanceReport
+);
 
-router.get('/:id', 
-    auth, 
+router.post('/comparison-report',
+    auth,
+    // checkPermission('cameras.view'), 
+    comparisonReportValidator,
+    getCameraComparisonReport
+);
+
+router.get('/:id',
+    auth,
     // checkPermission('cameras.view'), 
     deleteCameraValidator,
     getCameraById
 );
 
-router.get('/:id/detailed', 
-    auth, 
+router.get('/:id/detailed',
+    auth,
     // checkPermission('cameras.view'), 
     deleteCameraValidator,
     getCameraDetailedView
 );
 
-router.put('/:id', 
-    auth, 
+router.get('/:id/stream',
+    auth,
+    // checkPermission('cameras.view'), 
+    deleteCameraValidator,
+    getCameraStreamInfo
+);
+
+router.get('/streams/all',
+    auth,
+    // checkPermission('cameras.view'), 
+    getAllCameraStreams
+);
+
+router.put('/:id',
+    auth,
     // checkPermission('cameras.update'), 
-    updateCameraValidator, 
+    updateCameraValidator,
     updateCamera
 );
 
-router.put('/:id/status', 
-    auth, 
+router.put('/:id/status',
+    auth,
     // checkPermission('cameras.update'), 
     updateStatusValidator,
     updateCameraStatus
 );
 
+router.put('/:id/heartbeat',
+    auth,
+    // checkPermission('cameras.update'), 
+    deleteCameraValidator,
+    updateCameraHeartbeat
+);
 
-router.delete('/:id', 
-    auth, 
+router.delete('/:id',
+    auth,
     // checkPermission('cameras.delete'), 
-    deleteCameraValidator, 
+    deleteCameraValidator,
     deleteCamera
 );
 
+router.delete('/:id/hard',
+    auth,
+    // onlyAdminAccess, 
+    // checkPermission('cameras.delete'), 
+    deleteCameraValidator,
+    hardDeleteCamera
+);
 
+router.put('/:id/restore',
+    auth,
+    // checkPermission('cameras.update'), 
+    deleteCameraValidator,
+    restoreCamera
+);
 
 // Search and filter routes
-router.get('/search/cameras', 
-    auth, 
+router.get('/search/cameras',
+    auth,
     // checkPermission('cameras.view'), 
     searchValidator,
     searchCameras
 );
 
-router.post('/search/criteria', 
-    auth, 
+router.post('/search/criteria',
+    auth,
     // checkPermission('cameras.view'), 
     searchCriteriaValidator,
     searchCamerasByCriteria
 );
 
-router.get('/filter/status/:status', 
-    auth, 
+router.get('/filter/status/:status',
+    auth,
     // checkPermission('cameras.view'), 
     statusParamValidator,
     getCamerasByStatus
 );
 
-router.get('/filter/type/:type', 
-    auth, 
+router.get('/filter/type/:type',
+    auth,
     // checkPermission('cameras.view'), 
     typeParamValidator,
     getCamerasByType
 );
 
-router.get('/filter/role/:role', 
-    auth, 
+router.get('/filter/role/:role',
+    auth,
     // checkPermission('cameras.view'), 
     roleParamValidator,
     getCamerasByRole
 );
 
-router.get('/filter/offline', 
-    auth, 
+router.get('/filter/offline',
+    auth,
     // checkPermission('cameras.view'), 
     offlineCamerasValidator,
     getOfflineCameras
 );
 
-router.get('/location/:locationId', 
-    auth, 
+router.get('/location/:locationId',
+    auth,
     // checkPermission('cameras.view'), 
     locationParamValidator,
     getCamerasByLocation
 );
 
 // Bulk operations
-router.post('/bulk/update-status', 
-    auth, 
+router.post('/bulk/update-status',
+    auth,
     // checkPermission('cameras.update'), 
     bulkStatusUpdateValidator,
     bulkUpdateCameraStatus
 );
 
-router.post('/bulk/delete', 
-    auth, 
+router.post('/bulk/delete',
+    auth,
     // checkPermission('cameras.delete'), 
     bulkOperationValidator,
     bulkDeleteCameras
 );
 
 // Camera management utilities
-router.post('/test-connection/:id', 
-    auth, 
+router.post('/test-connection/:id',
+    auth,
     // checkPermission('cameras.update'), 
     deleteCameraValidator,
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
-        
+
         try {
             const cameraId = req.params.id;
 
@@ -236,14 +309,14 @@ router.post('/test-connection/:id',
     }
 );
 
-router.post('/bulk/test-connection', 
-    auth, 
+router.post('/bulk/test-connection',
+    auth,
     // checkPermission('cameras.update'), 
     bulkOperationValidator,
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
-        
+
         try {
             const { cameraIds } = req.body;
 
@@ -311,14 +384,14 @@ router.post('/bulk/test-connection',
 );
 
 // Camera configuration management
-router.get('/:id/config', 
-    auth, 
+router.get('/:id/config',
+    auth,
     // checkPermission('cameras.view'), 
     deleteCameraValidator,
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
-        
+
         try {
             const cameraId = req.params.id;
 
@@ -370,13 +443,13 @@ router.get('/:id/config',
 );
 
 // Export cameras data
-router.get('/export/excel', 
-    auth, 
+router.get('/export/excel',
+    auth,
     // checkPermission('cameras.export'), 
     async (req, res) => {
         const db = require('../db');
         const connection = await db.promise();
-        
+
         try {
             const [cameras] = await connection.execute(`
                 SELECT 
