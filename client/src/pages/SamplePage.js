@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import CameraConfigurationPage from "./CameraConfigurationPage";
-import CameraActionBar from "./CameraActionBar";
+import CameraActionBar from "./";
 import CameraViewer from "../components/CameraViewer";
 import MonitorStatusPanel from "./MonitorStatusPanel";
 import "./SamplePage.css";
@@ -419,11 +419,11 @@ const SamplePage = () => {
     justifyItems: "center"
   });
 
-  // Style cho camera container chữ nhật như trong hình
+  // Style cho camera container chữ nhật với chiều cao thu nhỏ
   const getCameraContainerStyle = () => ({
     width: "100%",
     maxWidth: "500px", // Kích thước phù hợp
-    aspectRatio: "16/10", // Tỷ lệ chữ nhật
+    aspectRatio: "16/8", // Thu nhỏ chiều cao từ 16:10 xuống 16:8
     position: "relative",
     display: "flex",
     flexDirection: "column",

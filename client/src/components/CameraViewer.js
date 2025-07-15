@@ -122,7 +122,7 @@ const CameraViewer = ({ camera, actionBar, onClose, style }) => {
 
   const containerStyle = {
     width: '100%',
-    aspectRatio: '16/10', // Tỷ lệ như trong hình
+    aspectRatio: '16/8', // Thu nhỏ chiều cao từ 16:10 xuống 16:8
     position: 'relative',
     backgroundColor: '#000',
     borderRadius: '4px',

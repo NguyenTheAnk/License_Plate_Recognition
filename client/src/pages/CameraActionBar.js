@@ -118,7 +118,7 @@ const CameraPTZControl = ({
         }}
         onClick={handleButtonClick}
         disabled={disabled}
-        title="PTZ Control"
+        title="Điều khiển"
       >
         <MdGpsFixed size={12} />
       </button>
@@ -462,7 +462,7 @@ const CameraOptionsButton = ({
         }}
         onClick={handleButtonClick}
         disabled={disabled}
-        title="Tùy chọn camera"
+        title="Tùy chọn "
       >
         <MdMenu size={14} />
       </button>
@@ -696,7 +696,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={onFullscreen}
-          title="Fullscreen"
+          title="Toàn màn hình"
         >
           <FaUpDownLeftRight size={12} />
         </button>
@@ -709,7 +709,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={onConfigure}
-          title="Settings"
+          title="Cấu hình camera"
         >
           <FaWrench size={12} />
         </button>
@@ -722,7 +722,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={onScreenshot}
-          title="Screenshot"
+          title="Chụp ảnh màn hình"
         >
           <FaCamera size={12} />
         </button>
@@ -735,7 +735,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={onVideoList}
-          title="Video List"
+          title="Danh sách video"
         >
           <MdVideoLibrary size={14} />
         </button>
@@ -748,7 +748,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={onReconnect}
-          title="Reconnect"
+          title="Kết nối lại luồng"
         >
           <FaArrowsRotate size={12} />
         </button>
@@ -768,7 +768,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={onAlertLog}
-          title="Alerts"
+          title="Hiển thị nhật ký"
         >
           <MdWarning size={12} />
         </button>
@@ -781,7 +781,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={() => console.log('Recognition toggled')}
-          title="Recognition"
+          title="Bật nhận dạng"
         >
           <MdSmartToy size={12} />
         </button>
@@ -794,7 +794,7 @@ const CameraActionBar = ({
             color: 'white'
           }}
           onClick={onClose}
-          title="Close"
+          title="Đóng"
         >
           <MdClose size={12} />
         </button>

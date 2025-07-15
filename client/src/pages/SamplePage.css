@@ -102,11 +102,11 @@
   }
 }
 
-/* Camera feed container - Chữ nhật như trong hình */
+/* Camera feed container - Chữ nhật với chiều cao thu nhỏ */
 .camera-feed-container {
   width: 100%;
   max-width: 500px;
-  aspect-ratio: 16/10; /* Tỷ lệ chữ nhật */
+  aspect-ratio: 16/8; /* Thu nhỏ chiều cao */
   position: relative;
   display: flex;
   flex-direction: column;
@@ -153,61 +153,6 @@
 @media (max-width: 480px) {
   .camera-feed-container {
     width: 95%;
-    max-width: 300px;
-    padding: 10px;
-  }
-}
-
-/* Camera feed container - Hình vuông responsive */
-.camera-feed-container {
-  width: 100%;
-  max-width: 400px; /* Kích thước tối đa */
-  aspect-ratio: 1/1; /* Hình vuông */
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  overflow: hidden;
-  background-color: #000;
-  box-sizing: border-box;
-  margin: 0 auto; /* Center trong grid cell */
-}
-
-/* Responsive sizes cho camera container vuông */
-@media (max-width: 1400px) {
-  .camera-feed-container {
-    max-width: 350px;
-  }
-}
-
-@media (max-width: 1200px) {
-  .camera-feed-container {
-    max-width: 300px;
-  }
-}
-
-@media (max-width: 900px) {
-  .camera-feed-container {
-    max-width: 280px;
-  }
-}
-
-@media (max-width: 768px) {
-  .camera-feed-container {
-    max-width: 250px;
-  }
-}
-
-@media (max-width: 600px) {
-  .camera-feed-container {
-    max-width: 220px;
-  }
-}
-
-@media (max-width: 480px) {
-  .camera-feed-container {
-    width: 90%;
     max-width: 300px;
   }
 }
