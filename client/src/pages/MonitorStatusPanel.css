@@ -1,0 +1,183 @@
+/* MonitorStatusPanel.css */
+.monitor-status-panel {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  .monitor-status-panel h3 {
+    margin: 0 0 20px 0;
+    color: #2c3e50;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 30px;
+  }
+  
+  .status-card {
+    background: white;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    border-left: 4px solid #3498db;
+    transition: transform 0.2s ease;
+  }
+  
+  .status-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  
+  .camera-info h4 {
+    margin: 0 0 4px 0;
+    color: #2c3e50;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  
+  .camera-info p {
+    margin: 0 0 12px 0;
+    color: #6c757d;
+    font-size: 14px;
+  }
+  
+  .status-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  
+  .status-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  
+  .action-button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+  }
+  
+  .action-button.start {
+    background: #28a745;
+    color: white;
+  }
+  
+  .action-button.start:hover {
+    background: #218838;
+  }
+  
+  .action-button.stop {
+    background: #dc3545;
+    color: white;
+  }
+  
+  .action-button.stop:hover {
+    background: #c82333;
+  }
+  
+  .action-button.restart {
+    background: #fd7e14;
+    color: white;
+  }
+  
+  .action-button.restart:hover {
+    background: #e96b00;
+  }
+  
+  .action-button.record {
+    background: #e83e8c;
+    color: white;
+  }
+  
+  .action-button.record:hover {
+    background: #d91a72;
+  }
+  
+  .action-button.enable {
+    background: #20c997;
+    color: white;
+  }
+  
+  .action-button.enable:hover {
+    background: #1aa085;
+  }
+  
+  .status-details {
+    border-top: 1px solid #e9ecef;
+    padding-top: 8px;
+  }
+  
+  .status-details small {
+    color: #6c757d;
+    font-size: 11px;
+  }
+  
+  .status-legend {
+    background: white;
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid #e9ecef;
+  }
+  
+  .status-legend h4 {
+    margin: 0 0 12px 0;
+    color: #2c3e50;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  
+  .legend-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px;
+  }
+  
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+  
+  .legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  
+  /* Responsive */
+  @media (max-width: 768px) {
+    .status-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .legend-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .action-button {
+      font-size: 10px;
+      padding: 4px 8px;
+    }
+  }
