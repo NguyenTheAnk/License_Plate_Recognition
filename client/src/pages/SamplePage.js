@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import CameraConfigurationPage from "./CameraConfigurationPage";
-import CameraActionBar from "./";
+import CameraActionBar from "./CameraActionBar";
 import CameraViewer from "../components/CameraViewer";
 import MonitorStatusPanel from "./MonitorStatusPanel";
 import "./SamplePage.css";
