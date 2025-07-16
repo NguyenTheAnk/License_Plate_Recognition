@@ -31,7 +31,10 @@ const CameraViewer = ({ camera, actionBar, onClose, style }) => {
         const hls = new Hls({
           enableWorker: false,
           lowLatencyMode: true,
-          backBufferLength: 90
+          backBufferLength: 90,
+          liveSyncDuration: 2, // seconds, nhảy sát thời gian thực
+          liveMaxLatencyDuration: 3,
+          maxLiveSyncPlaybackRate: 1.5
         });
 
         hlsRef.current = hls;
@@ -42,7 +45,10 @@ const CameraViewer = ({ camera, actionBar, onClose, style }) => {
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log('HLS manifest parsed, attempting to play');
           setIsLoading(false);
-          
+          // Nhảy đến cuối stream (live edge)
+          if (video.duration && !isNaN(video.duration)) {
+            video.currentTime = video.duration;
+          }
           video.play()
             .then(() => {
               setIsPlaying(true);

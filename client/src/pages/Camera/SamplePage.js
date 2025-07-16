@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from "react";
 import CameraConfigurationPage from "./CameraConfigurationPage";
 import CameraActionBar from "./CameraActionBar";
-import CameraViewer from "../components/CameraViewer";
+import CameraViewer from "../../components/CameraViewer";
 import MonitorStatusPanel from "./MonitorStatusPanel";
 import "./SamplePage.css";
 import ReactDOM from "react-dom";
-import { fetchDataFromAPI, postData } from '../utils/auth';
+import { fetchDataFromAPI, postData } from '../../utils/auth';
 
 const SamplePage = () => {
   const [cameraPositions, setCameraPositions] = useState([]);

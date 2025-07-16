@@ -27,7 +27,7 @@ import {
   Phone
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { postData } from '../utils/auth.js';
+import { postData } from '../../utils/auth.js';
 
 function Register() {
   const [name, setName] = useState('');

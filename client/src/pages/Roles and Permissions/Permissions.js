@@ -59,7 +59,7 @@ import {
 import {
   BiSolidTrashAlt
 } from 'react-icons/bi';
-import { fetchDataFromAPI, postData, editData, deleteData, handleErrorResponse } from '../utils/auth';
+import { fetchDataFromAPI, postData, editData, deleteData, handleErrorResponse } from '../../utils/auth';
 import * as XLSX from 'xlsx';
 
 // Mock localStorage for demo purposes

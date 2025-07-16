@@ -89,7 +89,7 @@ import {
   editData, 
   deleteData, 
   handleErrorResponse 
-} from '../utils/auth';
+} from '../../utils/auth';
 
 // Modern Header Component
 const RoleHeader = ({ onAdd }) => (

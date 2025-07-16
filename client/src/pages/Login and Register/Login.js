@@ -24,7 +24,7 @@ import {
   Email
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { postData } from '../utils/auth.js';
+import { postData } from '../../utils/auth.js';
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState(''); // Đổi từ username thành email

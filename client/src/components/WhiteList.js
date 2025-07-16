@@ -31,14 +31,12 @@ import {
   Breadcrumbs,
   Avatar,
   FormHelperText,
-  InputAdornment,
   Snackbar,
   Stack
 } from '@mui/material';
 import {
   Add as AddIcon,
   CheckCircle as CheckIcon,
-  CalendarToday as CalendarIcon,
   LocationOn as LocationIcon,
   Person as PersonIcon,
   Phone as PhoneIcon,
@@ -1109,7 +1107,7 @@ const handleDateIconClickBackup = (field) => {
                           fontWeight: 600
                         }}
                       >
-                        Xóa vĩnh viễn ({selectedItems.length})
+                        Xóa ({selectedItems.length})
                       </Button>
                     )}
                   </Grid>

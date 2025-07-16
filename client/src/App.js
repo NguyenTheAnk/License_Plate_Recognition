@@ -6,19 +6,19 @@ import 'react-toastify/dist/ReactToastify.css';
 import Dashboard from './components/Dashboard';
 import Layout from './components/Layout';
 import PrivateRoute from './components/PrivateRoute';
-import Login from './pages/Login';
-import Register from './pages/Register';
+import Login from './pages/Login and Register/Login';
+import Register from './pages/Login and Register/Register';
 import User from './pages/User/User';
 import UserDetail from './pages/User/UserDetail';
-import Roles from './pages/Roles';
-import Permissions from './pages/Permissions';
-import Cameras from './pages/Cameras';
-import Search from './pages/Search';
+import Roles from './pages/Roles and Permissions/Roles';
+import Permissions from './pages/Roles and Permissions/Permissions';
+import Cameras from './pages/Camera/Cameras';
+import Search from './pages/Search/Search';
 import axios from 'axios';
 import WhiteList from './components/WhiteList';
 import BlackList from './components/BlackList';
-import SamplePage from './pages/SamplePage';
-import CameraConfigurationPage from './pages/CameraConfigurationPage';
+import SamplePage from './pages/Camera/SamplePage';
+import CameraConfigurationPage from './pages/Camera/CameraConfigurationPage';
 
 export const MyContext = React.createContext();
 
