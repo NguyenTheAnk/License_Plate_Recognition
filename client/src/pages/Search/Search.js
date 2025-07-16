@@ -14,13 +14,9 @@ function SearchPage() {
   // Danh sách khu vực lấy từ API
   const [locations, setLocations] = useState([]);
 
-  const cameras = [
-    { id: 1, name: 'Camera 01', location: 'Cổng chính', status: 'online' },
-    { id: 2, name: 'Camera 02', location: 'Bãi xe A', status: 'online' },
-    { id: 3, name: 'Camera 03', location: 'Bãi xe B', status: 'offline' }
-  ];
+  // Danh sách camera lấy từ API
+  const [cameras, setCameras] = useState([]);
 
-  // Enhanced filter options with better UX
   const statusOptions = [
     { value: '', label: 'Tất cả trạng thái', color: 'default' },
     { value: 'whitelist', label: 'Whitelist', color: 'success' },
@@ -204,6 +200,22 @@ function SearchPage() {
     fetchLocations();
   }, []);
 
+  // Fetch cameras from API on mount
+  useEffect(() => {
+    const fetchCameras = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const data = await fetchDataFromAPI('/api/cameras/streams/all', token);
+        // Lấy danh sách camera từ API (giống Sidebar)
+        const cameraList = data.data?.cameras || [];
+        setCameras(cameraList);
+      } catch (error) {
+        console.error('Error fetching cameras:', error);
+      }
+    };
+    fetchCameras();
+  }, []);
+
  const handleSearch = async () => {
   setLoading(true);
   setError(null);
@@ -228,7 +240,7 @@ function SearchPage() {
     const [whitelistRes, blacklistRes, cameraRes, locationRes, journeyRes, plateRes, accessRes] = await Promise.allSettled([
       fetchDataFromAPI(`/api/whitelist`, token, { params }),
       fetchDataFromAPI(`/api/blacklist`, token, { params }),
-      fetchDataFromAPI(`/api/camera`, token, { params }),
+      fetchDataFromAPI(`/api/cameras/streams/all`, token, { params }),
       fetchDataFromAPI(`/api/location/active`, token, { params }),
       fetchDataFromAPI(`/api/journey`, token, { params }),
       fetchDataFromAPI(`/api/plates`, token, { params }),
@@ -1005,10 +1017,12 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'camera':
-          data = await fetchDataFromAPI(`/api/camera`, token, { params });
-          setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
+          // Đảm bảo setResults là mảng camera
+          const cameraList = (data.data && Array.isArray(data.data.cameras)) ? data.data.cameras : [];
+          setResults(cameraList);
+          totalCountFromAPI = cameraList.length;
+          totalPagesFromAPI = Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'location':
           data = await fetchDataFromAPI(`/api/location/active`, token, { params });
@@ -1105,10 +1119,12 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'camera':
-          data = await fetchDataFromAPI(`/api/camera`, token, { params });
-          setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
+          // Đảm bảo setResults là mảng camera
+          const cameraList = (data.data && Array.isArray(data.data.cameras)) ? data.data.cameras : [];
+          setResults(cameraList);
+          totalCountFromAPI = cameraList.length;
+          totalPagesFromAPI = Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'location':
             // SỬA: Gửi đúng tham số cho location API với filters
@@ -1592,36 +1608,44 @@ useEffect(() => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {results.length === 0 ? (
-                        <TableRow>
-                          <TableCell 
-                            colSpan={tab === 'camera' || tab === 'location' || tab === 'journey' ? 6 : tab === 'plate' || tab === 'access' ? 7 : 8} 
-                            align="center"
-                            sx={{ py: 8 }}
-                          >
-                            <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
-                              <Avatar sx={{ bgcolor: 'grey.100', width: 64, height: 64 }}>
-                                <SearchIcon sx={{ fontSize: 32, color: 'grey.400' }} />
-                              </Avatar>
-                              <Typography variant="h6" color="text.secondary">
-                                Không tìm thấy kết quả
+                      {tab === 'camera' ? (
+                        cameras.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6} align="center">
+                              <Typography color="text.secondary" sx={{ py: 4 }}>
+                                Không có camera nào
                               </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                Thử điều chỉnh bộ lọc hoặc từ khóa tìm kiếm
-                              </Typography>
-                              <Button 
-                                variant="outlined" 
-                                startIcon={<Refresh />}
-                                onClick={handleClearFilters}
-                                sx={{ mt: 1 }}
-                              >
-                                Xóa bộ lọc
-                              </Button>
-                            </Box>
-                          </TableCell>
-                        </TableRow>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
+                            <TableRow key={item.id || index} hover>
+                              <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
+                              <TableCell>{item.name}</TableCell>
+                              <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
+                              <TableCell>{item.location_name || item.location || ''}</TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={item.connection_status === 'online' || item.status === 'online' ? 'Hoạt động' : 'Tạm dừng'}
+                                  color={item.connection_status === 'online' || item.status === 'online' ? 'success' : 'default'}
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Button 
+                                  variant="outlined" 
+                                  size="small" 
+                                  startIcon={<Visibility />} 
+                                  sx={{ borderRadius: 2, textTransform: 'none' }}
+                                >
+                                  Xem chi tiết
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )
                       ) : (
-                        results.map((item, index) => {
+                        results?.map((item, index) => {
                           const avatarStyle = getAvatarColor();
                           return (
                             <Fade in key={item.id || index} timeout={200 + index * 50}>
@@ -1643,44 +1667,41 @@ useEffect(() => {
 
                                 {/* Dynamic table rows based on tab */}
                                 {tab === 'camera' ? (
-                                  <>
-                                    <TableCell>
-                                      <Box display="flex" alignItems="center" gap={2}>
-                                        <Avatar sx={{ bgcolor: 'warning.light', width: 40, height: 40 }}>
-                                          <CameraAlt />
-                                        </Avatar>
-                                        <Typography variant="body2" fontWeight={600}>
-                                          {item.name}
+                                  cameras.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell colSpan={6} align="center">
+                                        <Typography color="text.secondary" sx={{ py: 4 }}>
+                                          Không có camera nào
                                         </Typography>
-                                      </Box>
-                                    </TableCell>
-                                    <TableCell>
-                                      <Chip 
-                                        label={item.camera_key || item.camera_id} 
-                                        variant="outlined" 
-                                        size="small"
-                                      />
-                                    </TableCell>
-                                    <TableCell>{item.location_name}</TableCell>
-                                    <TableCell>
-                                      <Chip 
-                                        label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
-                                        color={item.is_active ? 'success' : 'default'} 
-                                        size="small"
-                                        sx={{ fontWeight: 600 }}
-                                      />
-                                    </TableCell>
-                                    <TableCell>
-                                      <Button 
-                                        variant="outlined" 
-                                        size="small" 
-                                        startIcon={<Visibility />}
-                                        sx={{ borderRadius: 2, textTransform: 'none' }}
-                                      >
-                                        Xem chi tiết
-                                      </Button>
-                                    </TableCell>
-                                  </>
+                                      </TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
+                                      <TableRow key={item.id || index} hover>
+                                        <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
+                                        <TableCell>{item.name}</TableCell>
+                                        <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
+                                        <TableCell>{item.location_name || item.location || ''}</TableCell>
+                                        <TableCell>
+                                          <Chip 
+                                            label={item.connection_status === 'online' || item.status === 'online' ? 'Hoạt động' : 'Tạm dừng'}
+                                            color={item.connection_status === 'online' || item.status === 'online' ? 'success' : 'default'}
+                                            size="small"
+                                          />
+                                        </TableCell>
+                                        <TableCell>
+                                          <Button 
+                                            variant="outlined" 
+                                            size="small" 
+                                            startIcon={<Visibility />} 
+                                            sx={{ borderRadius: 2, textTransform: 'none' }}
+                                          >
+                                            Xem chi tiết
+                                          </Button>
+                                        </TableCell>
+                                      </TableRow>
+                                    ))
+                                  )
                                 ) : tab === 'location' ? (
                                   <>
                                     <TableCell>
