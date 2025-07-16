@@ -8,143 +8,138 @@ import {
 } from '@mui/icons-material';
 import { fetchDataFromAPI } from '../../utils/auth';
 
-// Enhanced dummy data with more realistic structure
-const locations = [
-  { id: 1, name: 'Cổng chính', zone_type: 'entry', camera_count: 4 },
-  { id: 2, name: 'Bãi xe A', zone_type: 'parking', camera_count: 8 },
-  { id: 3, name: 'Bãi xe B', zone_type: 'parking', camera_count: 6 },
-  { id: 4, name: 'Khu nội bộ', zone_type: 'internal', camera_count: 12 }
-];
-
-const cameras = [
-  { id: 1, name: 'Camera 01', location: 'Cổng chính', status: 'online' },
-  { id: 2, name: 'Camera 02', location: 'Bãi xe A', status: 'online' },
-  { id: 3, name: 'Camera 03', location: 'Bãi xe B', status: 'offline' }
-];
-
-// Enhanced filter options with better UX
-const statusOptions = [
-  { value: '', label: 'Tất cả trạng thái', color: 'default' },
-  { value: 'whitelist', label: 'Whitelist', color: 'success' },
-  { value: 'blacklist', label: 'Blacklist', color: 'error' }
-];
-
-const validStatusOptions = [
-  { value: '', label: 'Tất cả', color: 'default' },
-  { value: 'valid', label: 'Còn hiệu lực', color: 'success' },
-  { value: 'expired', label: 'Hết hạn', color: 'error' },
-  { value: 'future', label: 'Chưa có hiệu lực', color: 'warning' },
-  { value: 'permanent', label: 'Vĩnh viễn', color: 'info' }
-];
-
-const approvalOptions = [
-  { value: '', label: 'Tất cả', color: 'default' },
-  { value: 'approved', label: 'Đã duyệt', color: 'success' },
-  { value: 'pending', label: 'Chờ duyệt', color: 'warning' },
-  { value: 'rejected', label: 'Từ chối', color: 'error' }
-];
-
-const violationTypes = [
-  { value: '', label: 'Tất cả loại', color: 'default' },
-  { value: 'unauthorized', label: 'Không phép', color: 'error' },
-  { value: 'security_threat', label: 'Nguy cơ an ninh', color: 'error' },
-  { value: 'unpaid_fine', label: 'Chưa nộp phạt', color: 'warning' },
-  { value: 'banned', label: 'Cấm', color: 'error' },
-  { value: 'suspicious', label: 'Đáng ngờ', color: 'warning' },
-  { value: 'other', label: 'Khác', color: 'info' }
-];
-
-const severityOptions = [
-  { value: '', label: 'Tất cả mức độ', color: 'default' },
-  { value: 'low', label: 'Thấp', color: 'info' },
-  { value: 'medium', label: 'Trung bình', color: 'warning' },
-  { value: 'high', label: 'Cao', color: 'error' },
-  { value: 'critical', label: 'Nghiêm trọng', color: 'error' }
-];
-
-// Enhanced tab configuration with better icons and descriptions
-const tabList = [
-  { 
-    label: 'Tổng quan', 
-    value: 'all', 
-    icon: <SearchIcon />, 
-    description: 'Tìm kiếm tất cả',
-    color: 'primary'
-  },
-  { 
-    label: 'Whitelist', 
-    value: 'whitelist', 
-    icon: <CheckCircle />, 
-    description: 'Danh sách cho phép',
-    color: 'success'
-  },
-  { 
-    label: 'Blacklist', 
-    value: 'blacklist', 
-    icon: <Block />, 
-    description: 'Danh sách cấm',
-    color: 'error'
-  },
-  { 
-    label: 'Lịch sử', 
-    value: 'history', 
-    icon: <History />, 
-    description: 'Lịch sử ra vào',
-    color: 'info'
-  },
-  { 
-    label: 'Chủ xe', 
-    value: 'owner', 
-    icon: <Person />, 
-    description: 'Thông tin chủ xe',
-    color: 'secondary'
-  },
-  { 
-    label: 'Camera', 
-    value: 'camera', 
-    icon: <CameraAlt />, 
-    description: 'Hệ thống camera',
-    color: 'warning'
-  },
-  { 
-    label: 'Khu vực', 
-    value: 'location', 
-    icon: <LocationOn />, 
-    description: 'Quản lý khu vực',
-    color: 'info'
-  },
-  { 
-    label: 'Lộ trình', 
-    value: 'journey', 
-    icon: <Timeline />, 
-    description: 'Theo dõi lộ trình',
-    color: 'primary'
-  },
-  { 
-    label: 'Phát hiện', 
-    value: 'plate', 
-    icon: <LocationSearching />, 
-    description: 'Phát hiện biển số',
-    color: 'secondary'
-  },
-  { 
-    label: 'Truy cập', 
-    value: 'access', 
-    icon: <Security />, 
-    description: 'Kiểm soát truy cập',
-    color: 'warning'
-  },
-];
-
-const accessListTypes = [
-  { value: '', label: 'Tất cả danh sách', color: 'default' },
-  { value: 'whitelist', label: 'Whitelist', color: 'success' },
-  { value: 'blacklist', label: 'Blacklist', color: 'error' }
-];
-
 function SearchPage() {
   const theme = useTheme();
   
+  // Danh sách khu vực lấy từ API
+  const [locations, setLocations] = useState([]);
+
+  const cameras = [
+    { id: 1, name: 'Camera 01', location: 'Cổng chính', status: 'online' },
+    { id: 2, name: 'Camera 02', location: 'Bãi xe A', status: 'online' },
+    { id: 3, name: 'Camera 03', location: 'Bãi xe B', status: 'offline' }
+  ];
+
+  // Enhanced filter options with better UX
+  const statusOptions = [
+    { value: '', label: 'Tất cả trạng thái', color: 'default' },
+    { value: 'whitelist', label: 'Whitelist', color: 'success' },
+    { value: 'blacklist', label: 'Blacklist', color: 'error' }
+  ];
+
+  const validStatusOptions = [
+    { value: '', label: 'Tất cả', color: 'default' },
+    { value: 'valid', label: 'Còn hiệu lực', color: 'success' },
+    { value: 'expired', label: 'Hết hạn', color: 'error' },
+    { value: 'future', label: 'Chưa có hiệu lực', color: 'warning' },
+    { value: 'permanent', label: 'Vĩnh viễn', color: 'info' }
+  ];
+
+  const approvalOptions = [
+    { value: '', label: 'Tất cả', color: 'default' },
+    { value: 'approved', label: 'Đã duyệt', color: 'success' },
+    { value: 'pending', label: 'Chờ duyệt', color: 'warning' },
+    { value: 'rejected', label: 'Từ chối', color: 'error' }
+  ];
+
+  const violationTypes = [
+    { value: '', label: 'Tất cả loại', color: 'default' },
+    { value: 'unauthorized', label: 'Không phép', color: 'error' },
+    { value: 'security_threat', label: 'Nguy cơ an ninh', color: 'error' },
+    { value: 'unpaid_fine', label: 'Chưa nộp phạt', color: 'warning' },
+    { value: 'banned', label: 'Cấm', color: 'error' },
+    { value: 'suspicious', label: 'Đáng ngờ', color: 'warning' },
+    { value: 'other', label: 'Khác', color: 'info' }
+  ];
+
+  const severityOptions = [
+    { value: '', label: 'Tất cả mức độ', color: 'default' },
+    { value: 'low', label: 'Thấp', color: 'info' },
+    { value: 'medium', label: 'Trung bình', color: 'warning' },
+    { value: 'high', label: 'Cao', color: 'error' },
+    { value: 'critical', label: 'Nghiêm trọng', color: 'error' }
+  ];
+
+  // Enhanced tab configuration with better icons and descriptions
+  const tabList = [
+    { 
+      label: 'Tổng quan', 
+      value: 'all', 
+      icon: <SearchIcon />, 
+      description: 'Tìm kiếm tất cả',
+      color: 'primary'
+    },
+    { 
+      label: 'Whitelist', 
+      value: 'whitelist', 
+      icon: <CheckCircle />, 
+      description: 'Danh sách cho phép',
+      color: 'success'
+    },
+    { 
+      label: 'Blacklist', 
+      value: 'blacklist', 
+      icon: <Block />, 
+      description: 'Danh sách cấm',
+      color: 'error'
+    },
+    { 
+      label: 'Lịch sử', 
+      value: 'history', 
+      icon: <History />, 
+      description: 'Lịch sử ra vào',
+      color: 'info'
+    },
+    { 
+      label: 'Chủ xe', 
+      value: 'owner', 
+      icon: <Person />, 
+      description: 'Thông tin chủ xe',
+      color: 'secondary'
+    },
+    { 
+      label: 'Camera', 
+      value: 'camera', 
+      icon: <CameraAlt />, 
+      description: 'Hệ thống camera',
+      color: 'warning'
+    },
+    { 
+      label: 'Khu vực', 
+      value: 'location', 
+      icon: <LocationOn />, 
+      description: 'Quản lý khu vực',
+      color: 'info'
+    },
+    { 
+      label: 'Lộ trình', 
+      value: 'journey', 
+      icon: <Timeline />, 
+      description: 'Theo dõi lộ trình',
+      color: 'primary'
+    },
+    { 
+      label: 'Phát hiện', 
+      value: 'plate', 
+      icon: <LocationSearching />, 
+      description: 'Phát hiện biển số',
+      color: 'secondary'
+    },
+    { 
+      label: 'Truy cập', 
+      value: 'access', 
+      icon: <Security />, 
+      description: 'Kiểm soát truy cập',
+      color: 'warning'
+    },
+  ];
+
+  const accessListTypes = [
+    { value: '', label: 'Tất cả danh sách', color: 'default' },
+    { value: 'whitelist', label: 'Whitelist', color: 'success' },
+    { value: 'blacklist', label: 'Blacklist', color: 'error' }
+  ];
+
   // Enhanced state management
   const [filters, setFilters] = useState({
     plate_number: '',
@@ -163,7 +158,10 @@ function SearchPage() {
     q: '',
     journey_date: '',
     list_type: '',
-    is_active: ''
+    is_active: '',
+    location_name: '',
+    location_code: '',
+    zone_type: ''
   });
   
   const [tab, setTab] = useState('all');
@@ -178,9 +176,9 @@ function SearchPage() {
     journey: [], plate: [], access: []
   });
   const [currentPage, setCurrentPage] = useState(1);
-const [totalPages, setTotalPages] = useState(1);
-const [totalItems, setTotalItems] = useState(0);
-const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
   const [error, setError] = useState(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [searchHistory, setSearchHistory] = useState([]);
@@ -189,6 +187,22 @@ const [itemsPerPage, setItemsPerPage] = useState(10);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Fetch locations from API on mount
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetchDataFromAPI('/api/location/active', token, { params: { page: 1, limit: 1000 } });
+        if (res && (res.data?.locations || res.data)) {
+          setLocations(res.data?.locations || res.data);
+        }
+      } catch (err) {
+        // Có thể log lỗi hoặc hiển thị thông báo nếu cần
+      }
+    };
+    fetchLocations();
+  }, []);
 
  const handleSearch = async () => {
   setLoading(true);
@@ -215,7 +229,7 @@ const [itemsPerPage, setItemsPerPage] = useState(10);
       fetchDataFromAPI(`/api/whitelist`, token, { params }),
       fetchDataFromAPI(`/api/blacklist`, token, { params }),
       fetchDataFromAPI(`/api/camera`, token, { params }),
-      fetchDataFromAPI(`/api/location`, token, { params }),
+      fetchDataFromAPI(`/api/location/active`, token, { params }),
       fetchDataFromAPI(`/api/journey`, token, { params }),
       fetchDataFromAPI(`/api/plates`, token, { params }),
       fetchDataFromAPI(`/api/access-control`, token, { params })
@@ -261,7 +275,7 @@ const [itemsPerPage, setItemsPerPage] = useState(10);
       whitelist: totalWhitelist,
       blacklist: totalBlacklist,
       cameras: newResults.camera.length,
-      locations: newResults.location.length,
+      locations: newResults.location.length, // Đảm bảo đúng số lượng
       journeys: newResults.journey.length,
       plates: newResults.plate.length,
       access: newResults.access.length,
@@ -374,7 +388,10 @@ function getPaginationItems(current, total) {
     q: '',
     journey_date: '',
     list_type: '',
-    is_active: ''
+    is_active: '', 
+    location_name: '',
+    location_code: '',
+    zone_type: ''
   });
   setResults([]);
   setStats({});
@@ -386,12 +403,14 @@ function getPaginationItems(current, total) {
 
   // Pagination handlers
   const handleChangePage = (event, newPage) => {
-    setPage(newPage);
+    setCurrentPage(newPage);
+    // Gọi lại fetchTabData hoặc fetchFilteredData
   };
 
   const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+    setItemsPerPage(parseInt(event.target.value, 10));
+    setCurrentPage(1);
+    // Gọi lại fetchTabData hoặc fetchFilteredData
   };
 
   // Enhanced filter rendering based on tab
@@ -521,7 +540,72 @@ function getPaginationItems(current, total) {
         </>
       );
     }
-
+    // Thêm vào hàm renderFilters(), sau case 'access':
+if (tab === 'location') {
+  return (
+    <>
+      <Grid item xs={12} md={3}>
+        <TextField 
+          label="Tên khu vực" 
+          value={filters.location_name || ''} 
+          onChange={e => handleFilterChange('location_name', e.target.value)} 
+          fullWidth 
+          size="small" 
+          InputProps={{ 
+            startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} /> 
+          }}
+          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+        />
+      </Grid>
+      <Grid item xs={12} md={3}>
+        <TextField 
+          label="Mã khu vực" 
+          value={filters.location_code || ''} 
+          onChange={e => handleFilterChange('location_code', e.target.value)} 
+          fullWidth 
+          size="small" 
+          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+        />
+      </Grid>
+      <Grid item xs={12} md={2}>
+        <FormControl fullWidth size="small">
+          <InputLabel>Loại khu vực</InputLabel>
+          <Select 
+            value={filters.zone_type || ''} 
+            label="Loại khu vực" 
+            onChange={e => handleFilterChange('zone_type', e.target.value)}
+            sx={{ borderRadius: 2 }}
+          >
+            <MenuItem value="">Tất cả</MenuItem>
+            <MenuItem value="entry">Cổng vào</MenuItem>
+            <MenuItem value="exit">Cổng ra</MenuItem>
+            <MenuItem value="parking">Bãi xe</MenuItem>
+            <MenuItem value="internal">Nội bộ</MenuItem>
+          </Select>
+        </FormControl>
+      </Grid>
+      <Grid item xs={12} md={2}>
+        <FormControl fullWidth size="small">
+          <InputLabel>Trạng thái</InputLabel>
+          <Select 
+            value={filters.is_active || ''} 
+            label="Trạng thái" 
+            onChange={e => handleFilterChange('is_active', e.target.value)}
+            sx={{ borderRadius: 2 }}
+          >
+            <MenuItem value="">Tất cả</MenuItem>
+            <MenuItem value="true">
+              <Chip label="Hoạt động" color="success" size="small" />
+            </MenuItem>
+            <MenuItem value="false">
+              <Chip label="Tạm dừng" color="default" size="small" />
+            </MenuItem>
+          </Select>
+        </FormControl>
+      </Grid>
+    </>
+  );
+}
     if (tab === 'access') {
       return (
         <>
@@ -630,7 +714,7 @@ function getPaginationItems(current, total) {
               {locations.map(loc => (
                 <MenuItem key={loc.id} value={loc.id}>
                   <Box display="flex" alignItems="center" gap={1}>
-                    <LocationOn sx={{ fontSize: 16 }} />
+                    <LocationOn sx={{ fontSize: 16, color: 'primary.main' }} />
                     {loc.name}
                     <Chip label={loc.zone_type} size="small" sx={{ ml: 1 }} />
                   </Box>
@@ -911,13 +995,13 @@ useEffect(() => {
         case 'whitelist':
           data = await fetchDataFromAPI(`/api/whitelist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
+          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'blacklist':
           data = await fetchDataFromAPI(`/api/blacklist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
+          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'camera':
@@ -927,10 +1011,30 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'location':
-          data = await fetchDataFromAPI(`/api/location`, token, { params });
-          setResults(data.data?.locations || data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          data = await fetchDataFromAPI(`/api/location/active`, token, { params });
+          console.log('Location API response:', data);
+          console.log('Params sent:', params);
+          if (data.data && data.data.locations) {
+            setResults(data.data.locations);
+            totalCountFromAPI = data.data.pagination?.total_records || 0; // Sửa: lấy từ pagination.total_records
+            totalPagesFromAPI = data.data.pagination?.total_pages || 1;
+          } else if (data.locations) {
+            setResults(data.locations);
+            totalCountFromAPI = data.pagination?.total_records || 0; // Sửa: lấy từ pagination.total_records
+            totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          } else if (Array.isArray(data.data)) {
+            setResults(data.data);
+            totalCountFromAPI = data.total || data.pagination?.total || 0;
+            totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          } else if (Array.isArray(data)) {
+            setResults(data);
+            totalCountFromAPI = data.length;
+            totalPagesFromAPI = 1;
+          } else {
+            setResults([]);
+            totalCountFromAPI = 0;
+            totalPagesFromAPI = 1;
+          }
           break;
         case 'journey':
           data = await fetchDataFromAPI(`/api/journey`, token, { params });
@@ -959,6 +1063,7 @@ useEffect(() => {
       setTotalItems(totalCountFromAPI);
       setTotalPages(totalPagesFromAPI);
     } catch (err) {
+      console.error('Fetch tab data error:', err);
       setError('Lỗi khi tải dữ liệu: ' + (err.message || 'Không xác định'));
       setResults([]);
       setTotalCount(0);
@@ -990,13 +1095,13 @@ useEffect(() => {
         case 'whitelist':
           data = await fetchDataFromAPI(`/api/whitelist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
+          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'blacklist':
           data = await fetchDataFromAPI(`/api/blacklist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
+          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'camera':
@@ -1006,10 +1111,39 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'location':
-          data = await fetchDataFromAPI(`/api/location`, token, { params });
-          setResults(data.data?.locations || data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+            // SỬA: Gửi đúng tham số cho location API với filters
+            const locationFilterParams = {
+              name: filters.location_name,     // ✅ ĐÚNG field name
+              code: filters.location_code,     // ✅ ĐÚNG field name
+              zone_type: filters.zone_type,
+              is_active: filters.is_active,
+              page: currentPage, 
+              limit: itemsPerPage
+            };
+            data = await fetchDataFromAPI(`/api/location/active`, token, { params: locationFilterParams });
+            console.log('Filtered Location API response:', data);
+            console.log('Location filter params sent:', locationFilterParams);
+          if (data.data && data.data.locations) {
+            setResults(data.data.locations);
+            totalCountFromAPI = data.data.pagination?.total_records || 0; // Sửa: lấy từ pagination.total_records
+            totalPagesFromAPI = data.data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          } else if (data.locations) {
+            setResults(data.locations);
+            totalCountFromAPI = data.pagination?.total_records || 0; // Sửa: lấy từ pagination.total_records
+            totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          } else if (Array.isArray(data.data)) {
+            setResults(data.data);
+            totalCountFromAPI = data.total || data.pagination?.total || 0;
+            totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          } else if (Array.isArray(data)) {
+            setResults(data);
+            totalCountFromAPI = data.length;
+            totalPagesFromAPI = 1;
+          } else {
+            setResults([]);
+            totalCountFromAPI = 0;
+            totalPagesFromAPI = 1;
+          }
           break;
         case 'journey':
           data = await fetchDataFromAPI(`/api/journey`, token, { params });
@@ -1038,6 +1172,7 @@ useEffect(() => {
       setTotalItems(totalCountFromAPI);
       setTotalPages(totalPagesFromAPI);
     } catch (err) {
+      console.error('Filtered data error:', err);
       setError('Lỗi khi lọc dữ liệu: ' + (err.message || 'Không xác định'));
       setResults([]);
       setTotalCount(0);
@@ -1503,7 +1638,7 @@ useEffect(() => {
                               >
                                 {/* STT Cell */}
                                 <TableCell /* STT Cell */ sx={{ /* remove color and fontWeight, use default */ }}>
-                                  {currentPage && itemsPerPage ? ((currentPage - 1) * itemsPerPage + index + 1) : index + 1}
+                                  {((currentPage - 1) * itemsPerPage) + index + 1}
                                 </TableCell>
 
                                 {/* Dynamic table rows based on tab */}
@@ -1825,7 +1960,10 @@ useEffect(() => {
   background: 'rgba(0, 0, 0, 0.02)'
 }}>
   <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
-    Hiển thị {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} / {totalItems} bản ghi
+    {totalItems === 0
+      ? 'Hiển thị 0/0 bản ghi'
+      : `Hiển thị ${((currentPage - 1) * itemsPerPage) + 1} - ${Math.min(currentPage * itemsPerPage, totalItems)} / ${totalItems} bản ghi`
+    }
   </Typography>
   <Box display="flex" justifyContent="space-between" alignItems="center" p={3}>
     <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>

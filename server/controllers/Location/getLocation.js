@@ -1896,6 +1896,39 @@ const getAllActiveLocations = async (req, res) => {
     const connection = await db.promise();
     
     try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const offset = (page - 1) * limit;
+        const search = req.query.search || '';
+        const zoneType = req.query.zone_type || '';
+        
+        // Build WHERE clause
+        let whereConditions = ['is_active = 1'];
+        let queryParams = [];
+
+        if (search) {
+            whereConditions.push('(name LIKE ? OR code LIKE ? OR address LIKE ?)');
+            queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        }
+
+        if (zoneType) {
+            whereConditions.push('zone_type = ?');
+            queryParams.push(zoneType);
+        }
+
+        const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+
+        // Get total count
+        const [countResult] = await connection.execute(`
+            SELECT COUNT(*) as total
+            FROM locations 
+            ${whereClause}
+        `, queryParams);
+
+        const totalRecords = countResult[0].total;
+        const totalPages = Math.ceil(totalRecords / limit);
+
+        // Get paginated data
         const [locations] = await connection.execute(`
             SELECT 
                 id,
@@ -1906,14 +1939,25 @@ const getAllActiveLocations = async (req, res) => {
                 is_restricted,
                 parent_location_id
             FROM locations 
-            WHERE is_active = 1
+            ${whereClause}
             ORDER BY name ASC
-        `);
+            LIMIT ${limit} OFFSET ${offset}
+        `, queryParams);
 
         res.status(200).json({
             success: true,
             message: 'Lấy danh sách khu vực thành công',
-            data: locations
+            data: {
+                locations: locations,
+                pagination: {
+                    current_page: page,
+                    total_pages: totalPages,
+                    total_records: totalRecords,
+                    limit: limit,
+                    has_next: page < totalPages,
+                    has_prev: page > 1
+                }
+            }
         });
 
     } catch (error) {
