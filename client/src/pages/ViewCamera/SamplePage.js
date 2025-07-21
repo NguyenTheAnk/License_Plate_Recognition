@@ -1,16 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import CameraConfigurationPage from "./CameraConfigurationPage";
 import CameraActionBar from "./CameraActionBar";
-import CameraViewer from "../components/CameraViewer";
 import "./SamplePage.css";
 import ReactDOM from "react-dom";
-import { fetchDataFromAPI, postData } from '../utils/auth';
-// import { useLocation } from "react-router-dom";
+import { fetchDataFromAPI, postData } from '../../utils/auth';
+import CameraViewer from "../../components/CameraViewer";
 
 const SamplePage = () => {
-  // const { search } = useLocation();
-  // const params = new URLSearchParams(search);
-  // const cameraId = params.get("cameraId");
   const [cameraPositions, setCameraPositions] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [showConfig, setShowConfig] = useState(false);
@@ -22,6 +18,8 @@ const SamplePage = () => {
   const [rtspStreams, setRtspStreams] = useState({});
   const [selectedStreams, setSelectedStreams] = useState([]);
   const camerasRef = useRef([]);
+  const resizeRefs = useRef({});
+  const [cameraSizes, setCameraSizes] = useState({});
 
   useEffect(() => {
     camerasRef.current = cameras;
@@ -84,7 +82,6 @@ const SamplePage = () => {
         "Available cameras:",
         camerasRef.current
       );
-      // Nếu không tìm thấy, làm mới dữ liệu và thử lại
       await fetchCameras();
       const refreshedCamera = camerasRef.current.find(
         (c) => c.id === Number(cameraId)
@@ -95,7 +92,6 @@ const SamplePage = () => {
       }
     }
 
-    // Tạo streamId duy nhất
     const streamId = `${cameraId}-${Date.now()}`;
 
     isLoadingStream.current = true;
@@ -118,6 +114,10 @@ const SamplePage = () => {
         },
       }));
       setSelectedStreams((prev) => [...prev, streamId]);
+      setCameraSizes((prev) => ({
+        ...prev,
+        [streamId]: { width: 800, height: 500 },
+      }));
     } catch (error) {
       console.error("Error starting stream:", error);
       alert(
@@ -129,13 +129,11 @@ const SamplePage = () => {
   };
 
   const handleRetry = async (streamId) => {
-    // Lấy thông tin camera từ streamId
     const streamInfo = rtspStreams[streamId];
     if (!streamInfo) return;
 
     const cameraId = streamInfo.cameraId;
 
-    // Đánh dấu đang retry
     setRetrying((prev) => ({ ...prev, [streamId]: true }));
 
     try {
@@ -168,11 +166,15 @@ const SamplePage = () => {
 
   const handleCloseCameraFeed = (streamId) => {
     setSelectedStreams((prev) => prev.filter((id) => id !== streamId));
-
     setRtspStreams((prev) => {
       const newStreams = { ...prev };
       delete newStreams[streamId];
       return newStreams;
+    });
+    setCameraSizes((prev) => {
+      const newSizes = { ...prev };
+      delete newSizes[streamId];
+      return newSizes;
     });
   };
 
@@ -198,6 +200,36 @@ const SamplePage = () => {
       )
     );
     setShowConfig(false);
+  };
+
+  const startResize = (streamId, e) => {
+    const resizeRef = resizeRefs.current[streamId];
+    if (!resizeRef) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startWidth = parseInt(resizeRef.style.width, 10) || (cameraSizes[streamId]?.width || 800);
+    const startHeight = parseInt(resizeRef.style.height, 10) || (cameraSizes[streamId]?.height || 500);
+
+    const onMouseMove = (e) => {
+      const newWidth = startWidth + (e.clientX - startX);
+      const newHeight = startHeight + (e.clientY - startY);
+      setCameraSizes((prev) => ({
+        ...prev,
+        [streamId]: {
+          width: Math.max(400, Math.min(1200, newWidth)),
+          height: Math.max(300, Math.min(900, newHeight)),
+        },
+      }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
   };
 
   return (
@@ -253,15 +285,7 @@ const SamplePage = () => {
           </span>
         </div>
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(400px, 1fr))",
-          gap: "10px",
-          padding: "10px",
-          minHeight: "400px", // Ép chiều cao tối thiểu
-        }}
-      >
+      <div className="parent-grid">
         {selectedStreams.length > 0 ? (
           selectedStreams.map((streamId) => {
             const streamInfo = rtspStreams[streamId];
@@ -272,24 +296,19 @@ const SamplePage = () => {
               id: cameraId,
               name: `Camera ${cameraId}`,
             };
+            const size = cameraSizes[streamId] || { width: 800, height: 500 };
 
             return (
               <div
                 key={streamId}
                 className="camera-feed-container"
-                style={{
-                  position: "relative",
-                  width: "100%",
-                  height: "100%",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
+                ref={(el) => (resizeRefs.current[streamId] = el)}
               >
                 <div
                   className="camera-feed-box"
                   style={{
-                    width: "800px",
-                    height: "500px",
+                    width: `${size.width}px`,
+                    height: `${size.height}px`,
                     borderRadius: 8,
                     flexGrow: 1,
                     display: "flex",
@@ -302,30 +321,41 @@ const SamplePage = () => {
                       name: `${camera.name} (Stream ${streamId.split("-")[1]})`,
                       streamUrl: streamInfo.url,
                     }}
-                    actionBar={
+                    actionBar={({ startRecognition, stopRecognition, isRecognizing }) => (
                       <CameraActionBar
                         cameraName={camera.name}
                         cameraId={cameraId}
                         isRetrying={retrying[streamId]}
                         onRetry={() => handleRetry(streamId)}
                         onFullscreen={() => {
-                          const video = document.getElementById(
-                            `video-${streamId}`
-                          );
+                          const video = document.getElementById(`video-${streamId}`);
                           if (video && video.requestFullscreen) {
                             video.requestFullscreen();
                           } else {
-                            console.error(
-                              "Fullscreen not supported or element not found"
-                            );
+                            console.error("Fullscreen not supported or element not found");
                           }
                         }}
                         onConfigure={() => handleConfigClick(streamId)}
                         onClose={() => handleCloseCameraFeed(streamId)}
+                        onStartRecognize={startRecognition}
+                        onStopRecognize={stopRecognition}
+                        isRecognizing={isRecognizing}
                       />
-                    }
-                    onClose={() => handleCloseCameraFeed(streamId)} // Thêm prop onClose để dừng stream
+                    )}
+                    onClose={() => handleCloseCameraFeed(streamId)}
                     style={{ width: "100%", flexGrow: 1 }}
+                  />
+                  <div
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      background: "#607D8B",
+                      position: "absolute",
+                      bottom: 0,
+                      right: 0,
+                      cursor: "se-resize",
+                    }}
+                    onMouseDown={(e) => startResize(streamId, e)}
                   />
                 </div>
               </div>

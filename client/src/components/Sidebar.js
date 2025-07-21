@@ -65,13 +65,6 @@ const menuGroups = [
 function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   // Debug: Log user object
   useEffect(() => {
-    console.log('=== SIDEBAR DEBUG ===');
-    console.log('User prop received:', user);
-    console.log('User name:', user?.name);
-    console.log('User username:', user?.username);
-    console.log('User email:', user?.email);
-    console.log('User roles:', user?.roles);
-    console.log('User permissions:', user?.permissions);
   }, [user]);
 
   // Thời gian thực
@@ -98,9 +91,7 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
       try {
         const token = localStorage.getItem("token");
         const data = await fetchDataFromAPI("/api/cameras/streams/all", token);
-        console.log("API response from /api/cameras/streams/all:", data);
         const cameraList = data.data.cameras || [];
-        console.log("Camera list before filter:", cameraList);
         let activeCamerasList = cameraList.filter(
           (camera) => camera.connection_status === "online"
         );
@@ -108,7 +99,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
           // Nếu không có camera online, hiển thị tất cả camera để debug
           activeCamerasList = cameraList;
         }
-        console.log("Active cameras after filter (or all if none online):", activeCamerasList);
         setCameras(activeCamerasList);
       } catch (error) {
         console.error("Sidebar Error fetching cameras:", error);
@@ -130,7 +120,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   };
 
   const handleCameraSelect = (cameraId) => {
-    console.log("Chọn camera:", cameraId);
 
     // Gọi hàm từ SamplePage để mở luồng mới
     if (window.startCameraStream) {

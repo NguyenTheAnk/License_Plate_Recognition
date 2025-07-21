@@ -17,8 +17,8 @@ import Search from './pages/Search';
 import axios from 'axios';
 import WhiteList from './components/WhiteList';
 import BlackList from './components/BlackList';
-import SamplePage from './pages/SamplePage';
-import CameraConfigurationPage from './pages/CameraConfigurationPage';
+import SamplePage from './pages/ViewCamera/SamplePage';
+import CameraConfigurationPage from './pages/ViewCamera/CameraConfigurationPage';
 
 export const MyContext = React.createContext();
 

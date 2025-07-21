@@ -2,28 +2,45 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from paddleocr import PaddleOCR
+import logging
 
-# Load YOLOv8 model (chọn model và weights phù hợp)
-yolo_model = YOLO('yolov8n.pt')  # Thay bằng model đã train biển số
-ocr_model = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False)
+# Thiết lập logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load YOLOv8 model for general object detection
+logger.info("Loading YOLOv8 model...")
+try:
+    yolo_model = YOLO('yolov8n.pt')  # Mô hình cơ bản, nhận diện các đối tượng trong COCO
+    logger.info("YOLOv8 model loaded successfully.")
+except Exception as e:
+    logger.error(f"Failed to load YOLOv8 model: {str(e)}")
+    raise
 
 def detect_and_ocr(image_np):
-    # B1: Phát hiện biển số bằng YOLOv8
-    results = yolo_model(image_np)
-    boxes = results[0].boxes.xyxy.cpu().numpy() if results[0].boxes is not None else []
-    result_list = []
+    logger.info("Starting object detection...")
+    # Phát hiện tất cả đối tượng bằng YOLOv8
+    try:
+        results = yolo_model(image_np)
+        boxes = results[0].boxes.xyxy.cpu().numpy() if results[0].boxes is not None else []
+        classes = results[0].boxes.cls.cpu().numpy() if results[0].boxes is not None else []
+        class_names = yolo_model.names  # Danh sách tên các class trong COCO
+        logger.info(f"Detected {len(boxes)} objects.")
+    except Exception as e:
+        logger.error(f"Error during object detection: {str(e)}")
+        return []
 
-    for box in boxes:
+    result_list = []
+    
+    # Duyệt qua tất cả các đối tượng được phát hiện
+    for box, cls in zip(boxes, classes):
         x1, y1, x2, y2 = map(int, box)
-        plate_img = image_np[y1:y2, x1:x2]
-        # B2: Nhận diện ký tự bằng PaddleOCR
-        ocr_result = ocr_model.ocr(plate_img)
-        text = ''
-        if ocr_result and len(ocr_result[0]) > 0:
-            text = ''.join([line[1][0] for line in ocr_result[0]])
+        class_name = class_names[int(cls)]  # Lấy tên class (ví dụ: person, car, truck,...)
+        logger.info(f"Detected object: {class_name} at bbox [{x1}, {y1}, {x2}, {y2}]")
+        
         result_list.append({
-            "bbox": [int(x1), int(y1), int(x2), int(y2)],
-            "text": text
+            "object_bbox": [int(x1), int(y1), int(x2), int(y2)],
+            "object_class": class_name
         })
+    
     return result_list

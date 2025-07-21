@@ -176,11 +176,8 @@ const CreateUserDialog = ({ open, handleClose, onUserCreated }) => {
       
       // Prepare data for API (remove confirmPassword)
       const { confirmPassword, ...userData } = formData;
-      
-      console.log('Sending user data:', userData); // Debug log
-      
+            
       const response = await postData('/api/user/create', userData, token);
-      console.log('API Response:', response); // Debug log
       
       // Check if response has success field or if it's a successful response
       if (response.success || response.status === 'success' || response.user || response.id) {
