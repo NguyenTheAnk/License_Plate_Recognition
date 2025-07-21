@@ -314,6 +314,7 @@ def detect_plate_yolov5(image_path, model):
 
 def save_detected_plate_image(plate_img, original_image_path):
     try:
+        # Đúng chuẩn: lưu vào public/uploads/blacklist/detected_plates
         crop_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../public/uploads/blacklist/detected_plates/'))
         os.makedirs(crop_dir, exist_ok=True)
         if not os.path.exists(crop_dir):
@@ -330,6 +331,7 @@ def save_detected_plate_image(plate_img, original_image_path):
                 plate_img = cv2.resize(plate_img, (new_width, new_height))
             success = cv2.imwrite(crop_path, plate_img)
             if success:
+                # Trả về đường dẫn tương đối đúng chuẩn
                 relative_path = f'/uploads/blacklist/detected_plates/{crop_filename}'
                 return relative_path
             else:

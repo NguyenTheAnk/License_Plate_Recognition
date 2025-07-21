@@ -627,11 +627,16 @@ const handleEdit = (item) => {
   });
   setFormErrors({});
   setImageFile(null);
-  setImagePreview(null);
-  setOcrResult('');
+  setOcrResult(item.plate_number || '');
+  // Hiển thị preview ảnh như BlackList
   if (item.detected_plate_image) {
+    setImagePreview(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.detected_plate_image}`);
     setDetectedPlateImage(item.detected_plate_image);
+  } else if (item.plate_image_path) {
+    setImagePreview(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`);
+    setDetectedPlateImage(null);
   } else {
+    setImagePreview(null);
     setDetectedPlateImage(null);
   }
   setOpenModal(true);

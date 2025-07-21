@@ -10,6 +10,7 @@ const { spawn, execSync } = require('child_process');
 // ===== MULTER CONFIGURATION =====
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
+        // SỬA: Lưu vào public/uploads/whitelist
         const uploadDir = path.join(__dirname, '../../public/uploads/whitelist/');
         try {
             await fs.mkdir(uploadDir, { recursive: true });

@@ -21,7 +21,8 @@ const parseImageMetadata = (metadata) => {
 // Configure multer for image uploads (same as create)
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
-        const uploadDir = path.join('uploads', 'whitelist', 'images');
+        // Ảnh upload gốc lưu vào public/uploads/whitelist
+        const uploadDir = path.join(__dirname, '../../public/uploads/whitelist/');
         try {
             await fs.mkdir(uploadDir, { recursive: true });
             cb(null, uploadDir);

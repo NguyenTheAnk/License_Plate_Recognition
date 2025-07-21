@@ -25,7 +25,8 @@ const parseImageMetadata = (metadata) => {
 // Configure multer for image uploads (same as create)
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
-        const uploadDir = path.join('uploads', 'blacklist', 'images');
+        // Ảnh upload gốc lưu vào public/uploads/blacklist
+        const uploadDir = path.join(__dirname, '../../public/uploads/blacklist/');
         try {
             await fs.mkdir(uploadDir, { recursive: true });
             cb(null, uploadDir);
