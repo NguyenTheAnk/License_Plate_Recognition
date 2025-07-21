@@ -32,7 +32,8 @@ import {
   Avatar,
   FormHelperText,
   Snackbar,
-  Stack
+  Stack,
+  InputAdornment
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -1595,7 +1596,7 @@ const handleDateIconClickBackup = (field) => {
       )}
 
       {/* Enhanced Create/Edit Modal */}
-      <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="md" fullWidth>
+      <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="lg" fullWidth>
         <DialogTitle sx={{ 
           background: '#1976d2',
           color: 'white',
@@ -1613,7 +1614,7 @@ const handleDateIconClickBackup = (field) => {
           <DialogContent sx={{ p: 3 }}>
             <Grid container spacing={3}>
               {/* Left: Upload & Preview */}
-              <Grid item xs={12} md={5}>
+              <Grid item xs={12} md={6}>
                 <Card sx={{ p: 2, borderRadius: 2, boxShadow: 2, mb: 2 }}>
                   <Button
                     variant="outlined"
@@ -1670,7 +1671,7 @@ const handleDateIconClickBackup = (field) => {
                 </Card>
               </Grid>
               {/* Right: Form Fields */}
-              <Grid item xs={12} md={7}>
+              <Grid item xs={12} md={6}>
                 <Stack spacing={2}>
                   <FormControl fullWidth required error={!!formErrors.location_id}>
                     <InputLabel>Khu vực</InputLabel>
@@ -1740,22 +1741,116 @@ const handleDateIconClickBackup = (field) => {
                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                   />
                   <Box display="flex" gap={2}>
-                    <TextField
-                      fullWidth
-                      label="Có hiệu lực từ"
-                      placeholder="yyyy-MM-dd"
-                      value={formData.valid_from}
-                      onChange={(e) => setFormData({...formData, valid_from: e.target.value})}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                    />
-                    <TextField
-                      fullWidth
-                      label="Có hiệu lực đến"
-                      placeholder="yyyy-MM-dd"
-                      value={formData.valid_to}
-                      onChange={(e) => setFormData({...formData, valid_to: e.target.value})}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                    />
+                    <Box position="relative" flex={1}>
+                      <TextField
+                        fullWidth
+                        label="Có hiệu lực từ"
+                        placeholder="dd/MM/yyyy"
+                        value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || validateDateFormat(value)) {
+                            setFormErrors(prev => ({ ...prev, valid_from: undefined }));
+                            setFormData({ ...formData, valid_from: value });
+                          } else {
+                            setFormErrors(prev => ({ ...prev, valid_from: 'Định dạng ngày phải là dd/MM/yyyy' }));
+                          }
+                        }}
+                        error={!!formErrors.valid_from}
+                        helperText={formErrors.valid_from}
+                        InputProps={{
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <IconButton
+                                onClick={() => handleDateIconClick('valid_from')}
+                                sx={{ 
+                                  color: '#1976d2',
+                                  '&:hover': { 
+                                    backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                    transform: 'scale(1.1)'
+                                  },
+                                  transition: 'all 0.2s ease'
+                                }}
+                                title="Chọn ngày"
+                              >
+                                <ScheduleIcon />
+                              </IconButton>
+                            </InputAdornment>
+                          ),
+                        }}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      />
+                      <input
+                        ref={validFromDateRef}
+                        type="date"
+                        onChange={(e) => handleDateChange('valid_from', e.target.value)}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          opacity: 0,
+                          pointerEvents: 'none',
+                          zIndex: -1
+                        }}
+                      />
+                    </Box>
+                    <Box position="relative" flex={1}>
+                      <TextField
+                        fullWidth
+                        label="Có hiệu lực đến"
+                        placeholder="dd/MM/yyyy"
+                        value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '' || validateDateFormat(value)) {
+                            setFormErrors(prev => ({ ...prev, valid_to: undefined }));
+                            setFormData({ ...formData, valid_to: value });
+                          } else {
+                            setFormErrors(prev => ({ ...prev, valid_to: 'Định dạng ngày phải là dd/MM/yyyy' }));
+                          }
+                        }}
+                        error={!!formErrors.valid_to}
+                        helperText={formErrors.valid_to}
+                        InputProps={{
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <IconButton
+                                onClick={() => handleDateIconClick('valid_to')}
+                                sx={{ 
+                                  color: '#1976d2',
+                                  '&:hover': { 
+                                    backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                    transform: 'scale(1.1)'
+                                  },
+                                  transition: 'all 0.2s ease'
+                                }}
+                                title="Chọn ngày"
+                              >
+                                <ScheduleIcon />
+                              </IconButton>
+                            </InputAdornment>
+                          ),
+                        }}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                      />
+                      <input
+                        ref={validToDateRef}
+                        type="date"
+                        onChange={(e) => handleDateChange('valid_to', e.target.value)}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          opacity: 0,
+                          pointerEvents: 'none',
+                          zIndex: -1
+                        }}
+                      />
+                    </Box>
                   </Box>
                   <TextField
                     fullWidth

@@ -94,7 +94,7 @@ function SearchPlates({ filters, onFilterChange, onSearch, results, loading, err
                   ) : (
                     results.map(item => (
                       <TableRow key={item.id || (item.plate_number + item.timestamp)} hover>
-                        <TableCell>{item.plate_number}</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>{item.plate_number}</TableCell>
                         <TableCell>
                           <Avatar variant="rounded" src={item.plate_image || ''} sx={{ width: 60, height: 36, bgcolor: '#e0e0e0' }}>
                             <DirectionsCar />

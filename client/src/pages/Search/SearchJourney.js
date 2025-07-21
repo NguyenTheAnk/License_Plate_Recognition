@@ -72,7 +72,7 @@ function SearchJourney({ filters, onFilterChange, onSearch, results, loading, er
                   ) : (
                     results.map(item => (
                       <TableRow key={item.id || (item.plate_number + item.journey_date)} hover>
-                        <TableCell>{item.plate_number}</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>{item.plate_number}</TableCell>
                         <TableCell>{item.journey_date}</TableCell>
                         <TableCell>{item.route_description || (item.start_location + ' → ' + item.end_location)}</TableCell>
                         <TableCell>{item.vehicle_type || (item.make + ' ' + item.model)}</TableCell>

@@ -364,7 +364,7 @@ function SearchBlacklist({
                           <TableCell sx={{ fontWeight: 600, color: 'primary.main' }}>
                             {page * rowsPerPage + idx + 1}
                           </TableCell>
-                          <TableCell sx={{ fontWeight: 600, fontSize: 16, color: 'error.main' }}>
+                          <TableCell sx={{ fontWeight: 700, fontSize: 16, color: 'error.main' }}>
                             {item.plate_number}
                           </TableCell>
                           <TableCell>
