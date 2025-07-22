@@ -15,7 +15,12 @@ import {
   ExpandMore as ExpandMoreIcon,
   AccessTime as AccessTimeIcon,
   Security as SecurityIcon,
-  Assignment as AssignmentIcon
+  Assignment as AssignmentIcon,
+  FirstPage, 
+  LastPage, 
+  ChevronLeft, 
+  ChevronRight,
+  MoreHoriz 
 } from '@mui/icons-material';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
@@ -122,29 +127,36 @@ function TabPanel({ children, value, index, ...other }) {
   );
 }
 
-// Helper phân trang số dạng WhiteList
 function getPaginationItems(current, total) {
-  const delta = 1;
-  const range = [];
-  const rangeWithDots = [];
-  let l;
-  for (let i = 1; i <= total; i++) {
-    if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
-      range.push(i);
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  
+  const items = [];
+  items.push(1);
+  
+  if (current > 4) {
+    items.push('...');
+  }
+  
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  
+  for (let i = start; i <= end; i++) {
+    if (!items.includes(i)) {
+      items.push(i);
     }
   }
-  for (let i of range) {
-    if (l) {
-      if (i - l === 2) {
-        rangeWithDots.push(l + 1);
-      } else if (i - l > 2) {
-        rangeWithDots.push('...');
-      }
-    }
-    rangeWithDots.push(i);
-    l = i;
+  
+  if (current < total - 3) {
+    items.push('...');
   }
-  return rangeWithDots;
+  
+  if (total > 1) {
+    items.push(total);
+  }
+  
+  return items;
 }
 
 const UserDetail = () => {
@@ -212,6 +224,14 @@ const UserDetail = () => {
     }
     // eslint-disable-next-line
   }, [loginPagination.page, loginPagination.limit, accessPagination.page, accessPagination.limit]);
+
+  // Đặt mặc định accessPagination.limit = 10 khi mount hoặc khi chuyển tab sang nhật ký truy cập
+  useEffect(() => {
+    if (tabValue === 3 && accessPagination.limit !== 10) {
+      setAccessPagination(prev => ({ ...prev, limit: 10, page: 1 }));
+    }
+    // eslint-disable-next-line
+  }, [tabValue]);
 
   // Sửa fetchUserDetailData để nhận các tham số phân trang
   const fetchUserDetailData = async (id, loginPage = 1, loginLimit = 10, accessPage = 1, accessLimit = 15) => {
@@ -806,85 +826,217 @@ const UserDetail = () => {
                         </TableBody>
                       </Table>
                     </TableContainer>
-                    <Box sx={{ borderTop: '1px solid #f0f0f0', background: '#fafbfc' }}>
-                      <Box display="flex" alignItems="center" justifyContent="space-between" p={0.5}>
-                        <Typography variant="body2" color="#8a94a6" sx={{ fontWeight: 400, fontSize: '0.8rem', ml: 0.2, py: 0.1 }}>
-                          Hiển thị {((loginPagination.page - 1) * loginPagination.limit) + 1} - {Math.min(loginPagination.page * loginPagination.limit, loginPagination.total)} / {loginPagination.total} bản ghi
-                        </Typography>
-                        <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.7}>
-                          <Button size="small" variant="outlined" disabled={loginPagination.page === 1} onClick={() => setLoginPagination(prev => ({ ...prev, page: prev.page - 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'<'}</Button>
-                          {getPaginationItems(loginPagination.page, loginPagination.totalPages).map((item, idx) =>
-                            item === '...'
-                              ? <Box key={idx} sx={{ px: 0.4, color: '#b0b8c9', fontWeight: 500, fontSize: '0.9rem' }}>...</Box>
-                              : <Button
-                                  key={item}
-                                  variant={item === loginPagination.page ? 'contained' : 'outlined'}
-                                  color={item === loginPagination.page ? 'primary' : 'inherit'}
-                                  size="small"
-                                  sx={{
-                                    minWidth: 28,
-                                    height: 28,
-                                    borderRadius: 999,
-                                    border: item === loginPagination.page ? '2px solid #3b5bfd' : '1px solid #e0e7ff',
-                                    color: item === loginPagination.page ? '#3b5bfd' : '#222',
-                                    background: item === loginPagination.page ? '#e0e7ff' : 'white',
-                                    fontWeight: 500,
-                                    fontSize: '0.9rem',
-                                    p: 0,
-                                    mx: 0.1,
-                                    boxShadow: item === loginPagination.page ? '0 2px 8px rgba(59,91,253,0.08)' : 'none',
-                                    '&:hover': { background: '#f4f6ff' }
-                                  }}
-                                  onClick={() => setLoginPagination(prev => ({ ...prev, page: item }))}
-                                >
-                                  {item}
-                                </Button>
-                          )}
-                          <Button size="small" variant="outlined" disabled={loginPagination.page === loginPagination.totalPages || loginPagination.totalPages === 0} onClick={() => setLoginPagination(prev => ({ ...prev, page: prev.page + 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'>'}</Button>
-                          <Select
-                            value={loginPagination.limit}
-                            onChange={handleLoginRowsPerPageChange}
-                            sx={{ minWidth: 56, height: 28, borderRadius: 999, borderColor: '#e0e7ff', mx: 0.7, fontWeight: 500, fontSize: '0.9rem', background: 'white', px: 1, boxShadow: 'none' }}
-                            size="small"
-                            displayEmpty
-                            inputProps={{ 'aria-label': 'Số hàng mỗi trang' }}
-                            MenuProps={{ PaperProps: { sx: { borderRadius: 999 } } }}
-                            renderValue={v => `${v} / page`}
-                          >
-                            {[5, 10, 20, 50, 100].map(size => (
-                              <MenuItem key={size} value={size} sx={{ fontSize: '0.9rem' }}>{size} / page</MenuItem>
-                            ))}
-                          </Select>
-                          <Box display="flex" alignItems="center" gap={0.4}>
-                            <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.9rem', color: '#3b5bfd' }}>Go to</Typography>
-                            <InputBase
-                              value={loginGoto}
-                              onChange={e => setLoginGoto(e.target.value.replace(/[^0-9]/g, ''))}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  const page = parseInt(loginGoto, 10);
-                                  if (page && page >= 1 && page <= loginPagination.totalPages) {
-                                    setLoginPagination(prev => ({ ...prev, page }));
-                                    setLoginGoto('');
-                                  }
-                                }
-                              }}
-                              sx={{ width: 36, height: 28, border: '1px solid #e0e7ff', borderRadius: 999, px: 1, fontSize: '0.9rem', background: 'white', boxShadow: 'none', '&:focus-within': { boxShadow: '0 0 0 2px #e0e7ff' } }}
-                              inputProps={{ style: { textAlign: 'center' } }}
-                            />
-                            <Button size="small" variant="outlined" sx={{ minWidth: 32, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', textTransform: 'none', '&:hover': { background: '#f4f6ff' } }}
-                              onClick={() => {
-                                const page = parseInt(loginGoto, 10);
-                                if (page && page >= 1 && page <= loginPagination.totalPages) {
-                                  setLoginPagination(prev => ({ ...prev, page }));
-                                  setLoginGoto('');
-                                }
-                              }}
-                            >Page</Button>
-                          </Box>
-                        </Box>
-                      </Box>
-                    </Box>
+                    <Box sx={{ 
+  display: 'flex', 
+  flexDirection: { xs: 'column', md: 'row' },
+  alignItems: { xs: 'stretch', md: 'center' },
+  justifyContent: 'space-between',
+  gap: 2,
+  p: 2,
+  borderTop: '1px solid #e0e0e0',
+  backgroundColor: '#fafafa'
+}}>
+  {/* Thông tin hiển thị */}
+  <Typography 
+    variant="body2" 
+    color="text.secondary"
+    sx={{ fontWeight: 500 }}
+  >
+    Hiển thị <strong>{((loginPagination.page - 1) * loginPagination.limit) + 1}-{Math.min(loginPagination.page * loginPagination.limit, loginPagination.total)}</strong> của <strong>{loginPagination.total}</strong> bản ghi
+  </Typography>
+
+  {/* Controls phân trang */}
+  <Box sx={{ 
+    display: 'flex', 
+    flexDirection: { xs: 'column', sm: 'row' },
+    alignItems: 'center',
+    gap: 2
+  }}>
+    {/* Rows per page */}
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">
+        Hiển thị:
+      </Typography>
+      <Select
+        value={loginPagination.limit}
+        onChange={handleLoginRowsPerPageChange}
+        size="small"
+        sx={{
+          minWidth: 80,
+          '& .MuiSelect-select': {
+            py: 0.5,
+            fontSize: '0.875rem'
+          }
+        }}
+      >
+        {[5, 10, 20, 50, 100].map(size => (
+          <MenuItem key={size} value={size}>{size}</MenuItem>
+        ))}
+      </Select>
+    </Box>
+
+    {/* Navigation buttons */}
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      {/* First & Previous */}
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setLoginPagination(prev => ({ ...prev, page: 1 }))}
+        disabled={loginPagination.page === 1}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <FirstPage fontSize="small" />
+      </Button>
+      
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setLoginPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+        disabled={loginPagination.page === 1}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <ChevronLeft fontSize="small" />
+      </Button>
+
+      {/* Page numbers */}
+      {getPaginationItems(loginPagination.page, loginPagination.totalPages).map((item, idx) => (
+        item === '...' ? (
+          <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
+        ) : (
+          <Button
+            key={item}
+            variant={item === loginPagination.page ? 'contained' : 'outlined'}
+            size="small"
+            onClick={() => setLoginPagination(prev => ({ ...prev, page: item }))}
+            sx={{
+              minWidth: 32,
+              width: 32,
+              height: 32,
+              borderRadius: 1,
+              fontSize: '0.875rem',
+              fontWeight: item === loginPagination.page ? 600 : 400,
+              ...(item === loginPagination.page ? {
+                backgroundColor: '#1976d2',
+                color: 'white',
+                border: 'none',
+                '&:hover': { backgroundColor: '#1565c0' }
+              } : {
+                borderColor: '#e0e0e0',
+                color: '#666',
+                '&:hover': { 
+                  backgroundColor: '#f5f5f5',
+                  borderColor: '#1976d2'
+                }
+              })
+            }}
+          >
+            {item}
+          </Button>
+        )
+      ))}
+
+      {/* Next & Last */}
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setLoginPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+        disabled={loginPagination.page === loginPagination.totalPages || loginPagination.totalPages === 0}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <ChevronRight fontSize="small" />
+      </Button>
+      
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setLoginPagination(prev => ({ ...prev, page: loginPagination.totalPages }))}
+        disabled={loginPagination.page === loginPagination.totalPages || loginPagination.totalPages === 0}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <LastPage fontSize="small" />
+      </Button>
+    </Box>
+
+    {/* Go to page */}
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">
+        Đến trang:
+      </Typography>
+      <InputBase
+        value={loginGoto}
+        onChange={e => setLoginGoto(e.target.value.replace(/[^0-9]/g, ''))}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            const page = parseInt(loginGoto, 10);
+            if (page && page >= 1 && page <= loginPagination.totalPages) {
+              setLoginPagination(prev => ({ ...prev, page }));
+              setLoginGoto('');
+            }
+          }
+        }}
+        placeholder="1"
+        sx={{ 
+          width: 60, 
+          height: 32, 
+          border: '1px solid #e0e0e0', 
+          borderRadius: 1, 
+          px: 1, 
+          fontSize: '0.875rem',
+          '& input': { textAlign: 'center' }
+        }}
+      />
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => {
+          const page = parseInt(loginGoto, 10);
+          if (page && page >= 1 && page <= loginPagination.totalPages) {
+            setLoginPagination(prev => ({ ...prev, page }));
+            setLoginGoto('');
+          }
+        }}
+        disabled={!loginGoto || parseInt(loginGoto, 10) < 1 || parseInt(loginGoto, 10) > loginPagination.totalPages}
+        sx={{
+          minWidth: 'auto',
+          px: 2,
+          height: 32,
+          textTransform: 'none',
+          fontSize: '0.875rem'
+        }}
+      >
+        Đi
+      </Button>
+    </Box>
+  </Box>
+</Box>
                   </>
                 ) : (
                   <Alert severity="info">
@@ -946,85 +1098,217 @@ const UserDetail = () => {
                         </TableBody>
                       </Table>
                     </TableContainer>
-                    <Box sx={{ borderTop: '1px solid #f0f0f0', background: '#fafbfc' }}>
-                      <Box display="flex" alignItems="center" justifyContent="space-between" p={0.5}>
-                        <Typography variant="body2" color="#8a94a6" sx={{ fontWeight: 400, fontSize: '0.8rem', ml: 0.2, py: 0.1 }}>
-                          Hiển thị {((accessPagination.page - 1) * accessPagination.limit) + 1} - {Math.min(accessPagination.page * accessPagination.limit, accessPagination.total)} / {accessPagination.total} bản ghi
-                        </Typography>
-                        <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.7}>
-                          <Button size="small" variant="outlined" disabled={accessPagination.page === 1} onClick={() => setAccessPagination(prev => ({ ...prev, page: prev.page - 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'<'}</Button>
-                          {getPaginationItems(accessPagination.page, accessPagination.totalPages).map((item, idx) =>
-                            item === '...'
-                              ? <Box key={idx} sx={{ px: 0.4, color: '#b0b8c9', fontWeight: 500, fontSize: '0.9rem' }}>...</Box>
-                              : <Button
-                                  key={item}
-                                  variant={item === accessPagination.page ? 'contained' : 'outlined'}
-                                  color={item === accessPagination.page ? 'primary' : 'inherit'}
-                                  size="small"
-                                  sx={{
-                                    minWidth: 28,
-                                    height: 28,
-                                    borderRadius: 999,
-                                    border: item === accessPagination.page ? '2px solid #3b5bfd' : '1px solid #e0e7ff',
-                                    color: item === accessPagination.page ? '#3b5bfd' : '#222',
-                                    background: item === accessPagination.page ? '#e0e7ff' : 'white',
-                                    fontWeight: 500,
-                                    fontSize: '0.9rem',
-                                    p: 0,
-                                    mx: 0.1,
-                                    boxShadow: item === accessPagination.page ? '0 2px 8px rgba(59,91,253,0.08)' : 'none',
-                                    '&:hover': { background: '#f4f6ff' }
-                                  }}
-                                  onClick={() => setAccessPagination(prev => ({ ...prev, page: item }))}
-                                >
-                                  {item}
-                                </Button>
-                          )}
-                          <Button size="small" variant="outlined" disabled={accessPagination.page === accessPagination.totalPages || accessPagination.totalPages === 0} onClick={() => setAccessPagination(prev => ({ ...prev, page: prev.page + 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'>'}</Button>
-                          <Select
-                            value={accessPagination.limit}
-                            onChange={handleAccessRowsPerPageChange}
-                            sx={{ minWidth: 56, height: 28, borderRadius: 999, borderColor: '#e0e7ff', mx: 0.7, fontWeight: 500, fontSize: '0.9rem', background: 'white', px: 1, boxShadow: 'none' }}
-                            size="small"
-                            displayEmpty
-                            inputProps={{ 'aria-label': 'Số hàng mỗi trang' }}
-                            MenuProps={{ PaperProps: { sx: { borderRadius: 999 } } }}
-                            renderValue={v => `${v} / page`}
-                          >
-                            {[5, 10, 20, 50, 100].map(size => (
-                              <MenuItem key={size} value={size} sx={{ fontSize: '0.9rem' }}>{size} / page</MenuItem>
-                            ))}
-                          </Select>
-                          <Box display="flex" alignItems="center" gap={0.4}>
-                            <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.9rem', color: '#3b5bfd' }}>Go to</Typography>
-                            <InputBase
-                              value={accessGoto}
-                              onChange={e => setAccessGoto(e.target.value.replace(/[^0-9]/g, ''))}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  const page = parseInt(accessGoto, 10);
-                                  if (page && page >= 1 && page <= accessPagination.totalPages) {
-                                    setAccessPagination(prev => ({ ...prev, page }));
-                                    setAccessGoto('');
-                                  }
-                                }
-                              }}
-                              sx={{ width: 36, height: 28, border: '1px solid #e0e7ff', borderRadius: 999, px: 1, fontSize: '0.9rem', background: 'white', boxShadow: 'none', '&:focus-within': { boxShadow: '0 0 0 2px #e0e7ff' } }}
-                              inputProps={{ style: { textAlign: 'center' } }}
-                            />
-                            <Button size="small" variant="outlined" sx={{ minWidth: 32, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', textTransform: 'none', '&:hover': { background: '#f4f6ff' } }}
-                              onClick={() => {
-                                const page = parseInt(accessGoto, 10);
-                                if (page && page >= 1 && page <= accessPagination.totalPages) {
-                                  setAccessPagination(prev => ({ ...prev, page }));
-                                  setAccessGoto('');
-                                }
-                              }}
-                            >Page</Button>
-                          </Box>
-                        </Box>
-                      </Box>
-                    </Box>
+                   <Box sx={{ 
+  display: 'flex', 
+  flexDirection: { xs: 'column', md: 'row' },
+  alignItems: { xs: 'stretch', md: 'center' },
+  justifyContent: 'space-between',
+  gap: 2,
+  p: 2,
+  borderTop: '1px solid #e0e0e0',
+  backgroundColor: '#fafafa'
+}}>
+  {/* Thông tin hiển thị */}
+  <Typography 
+    variant="body2" 
+    color="text.secondary"
+    sx={{ fontWeight: 500 }}
+  >
+    Hiển thị <strong>{((accessPagination.page - 1) * accessPagination.limit) + 1}-{Math.min(accessPagination.page * accessPagination.limit, accessPagination.total)}</strong> của <strong>{accessPagination.total}</strong> bản ghi
+  </Typography>
+
+  {/* Controls phân trang */}
+  <Box sx={{ 
+    display: 'flex', 
+    flexDirection: { xs: 'column', sm: 'row' },
+    alignItems: 'center',
+    gap: 2
+  }}>
+    {/* Rows per page */}
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">
+        Hiển thị:
+      </Typography>
+      <Select
+        value={accessPagination.limit}
+        onChange={handleAccessRowsPerPageChange}
+        size="small"
+        sx={{
+          minWidth: 80,
+          '& .MuiSelect-select': {
+            py: 0.5,
+            fontSize: '0.875rem'
+          }
+        }}
+      >
+        {[5, 10, 20, 50, 100].map(size => (
+          <MenuItem key={size} value={size}>{size}</MenuItem>
+        ))}
+      </Select>
+    </Box>
+
+    {/* Navigation buttons */}
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      {/* First & Previous */}
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setAccessPagination(prev => ({ ...prev, page: 1 }))}
+        disabled={accessPagination.page === 1}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <FirstPage fontSize="small" />
+      </Button>
+      
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setAccessPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+        disabled={accessPagination.page === 1}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <ChevronLeft fontSize="small" />
+      </Button>
+
+      {/* Page numbers */}
+      {getPaginationItems(accessPagination.page, accessPagination.totalPages).map((item, idx) => (
+        item === '...' ? (
+          <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
+        ) : (
+          <Button
+            key={item}
+            variant={item === accessPagination.page ? 'contained' : 'outlined'}
+            size="small"
+            onClick={() => setAccessPagination(prev => ({ ...prev, page: item }))}
+            sx={{
+              minWidth: 32,
+              width: 32,
+              height: 32,
+              borderRadius: 1,
+              fontSize: '0.875rem',
+              fontWeight: item === accessPagination.page ? 600 : 400,
+              ...(item === accessPagination.page ? {
+                backgroundColor: '#1976d2',
+                color: 'white',
+                border: 'none',
+                '&:hover': { backgroundColor: '#1565c0' }
+              } : {
+                borderColor: '#e0e0e0',
+                color: '#666',
+                '&:hover': { 
+                  backgroundColor: '#f5f5f5',
+                  borderColor: '#1976d2'
+                }
+              })
+            }}
+          >
+            {item}
+          </Button>
+        )
+      ))}
+
+      {/* Next & Last */}
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setAccessPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+        disabled={accessPagination.page === accessPagination.totalPages || accessPagination.totalPages === 0}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <ChevronRight fontSize="small" />
+      </Button>
+      
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => setAccessPagination(prev => ({ ...prev, page: accessPagination.totalPages }))}
+        disabled={accessPagination.page === accessPagination.totalPages || accessPagination.totalPages === 0}
+        sx={{ 
+          minWidth: 32, 
+          width: 32, 
+          height: 32,
+          border: '1px solid #e0e0e0',
+          borderRadius: 1,
+          p: 0
+        }}
+      >
+        <LastPage fontSize="small" />
+      </Button>
+    </Box>
+
+    {/* Go to page */}
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">
+        Đến trang:
+      </Typography>
+      <InputBase
+        value={accessGoto}
+        onChange={e => setAccessGoto(e.target.value.replace(/[^0-9]/g, ''))}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            const page = parseInt(accessGoto, 10);
+            if (page && page >= 1 && page <= accessPagination.totalPages) {
+              setAccessPagination(prev => ({ ...prev, page }));
+              setAccessGoto('');
+            }
+          }
+        }}
+        placeholder="1"
+        sx={{ 
+          width: 60, 
+          height: 32, 
+          border: '1px solid #e0e0e0', 
+          borderRadius: 1, 
+          px: 1, 
+          fontSize: '0.875rem',
+          '& input': { textAlign: 'center' }
+        }}
+      />
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => {
+          const page = parseInt(accessGoto, 10);
+          if (page && page >= 1 && page <= accessPagination.totalPages) {
+            setAccessPagination(prev => ({ ...prev, page }));
+            setAccessGoto('');
+          }
+        }}
+        disabled={!accessGoto || parseInt(accessGoto, 10) < 1 || parseInt(accessGoto, 10) > accessPagination.totalPages}
+        sx={{
+          minWidth: 'auto',
+          px: 2,
+          height: 32,
+          textTransform: 'none',
+          fontSize: '0.875rem'
+        }}
+      >
+        Đi
+      </Button>
+    </Box>
+  </Box>
+</Box>
                   </>
                 ) : (
                   <Alert severity="info">

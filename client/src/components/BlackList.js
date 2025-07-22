@@ -5,7 +5,7 @@ import {
   IconButton, Typography, Grid, FormControl, InputLabel, Select, MenuItem, 
   Chip, Alert, CircularProgress, Card, CardContent, Tooltip, Tabs, Tab, 
   Checkbox, Breadcrumbs,  FormHelperText, InputAdornment, Snackbar, 
-  Paper, Stack, Avatar
+  Paper, Stack, Avatar, InputBase
 } from '@mui/material';
 import {
    CalendarToday as CalendarIcon, 
@@ -15,7 +15,7 @@ import {
    Image as ImageIcon, Warning as WarningIcon, 
   Block as BlockIcon, Visibility as VisibilityIcon, Edit as EditIcon, 
   Delete as DeleteIcon, PhotoCamera as PhotoCameraIcon, Close as CloseIcon,
-  Download as DownloadIcon
+  Download as DownloadIcon, FirstPage, LastPage, ChevronLeft, ChevronRight, MoreHoriz
 } from '@mui/icons-material';
 import { FaTrash, FaPlus, FaExclamationTriangle, FaShieldAlt, FaClock, FaSave } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
@@ -1136,6 +1136,18 @@ const handleDateIconClick = (field) => {
     }
   }, [openModal]);
 
+  // Thêm vào đầu component BlackList:
+  const [gotoPage, setGotoPage] = useState('');
+  // ... existing code ...
+  // Reset gotoPage khi currentPage thay đổi
+  useEffect(() => { setGotoPage(''); }, [currentPage]);
+  // ... existing code ...
+
+  const handleItemsPerPageChange = (event) => {
+    setItemsPerPage(parseInt(event.target.value));
+    setCurrentPage(1);
+  };
+
   return (
     <Box sx={{ 
       minHeight: '100vh',
@@ -1616,93 +1628,32 @@ const handleDateIconClick = (field) => {
                 </Table>
               </TableContainer>
               {/* Enhanced Pagination - Đặt ở đây, ngay dưới bảng */}
-              <Box sx={{ 
-                borderTop: '1px solid rgba(0, 0, 0, 0.1)',
-                background: 'rgba(0, 0, 0, 0.02)'
-              }}>
-                <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
-                  Hiển thị {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} / {totalItems} bản ghi
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: 2, p: 2, borderTop: '1px solid #e0e0e0', backgroundColor: '#fafafa' }}>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                  Hiển thị <strong>{((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, totalItems)}</strong> của <strong>{totalItems}</strong> bản ghi
                 </Typography>
-                <Box display="flex" justifyContent="space-between" alignItems="center" p={3}>
-                  <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500, mr: 1 }}>
-                      Hiển thị
-                    </Typography>
-                    <Select
-                      value={itemsPerPage}
-                      onChange={e => {
-                        const value = Number(e.target.value);
-                        setItemsPerPage(value);
-                        setCurrentPage(1);
-                      }}
-                      sx={{ minWidth: 60, mx: 0.5 }}
-                      size="small"
-                    >
-                      {[5, 10, 20, 50, 100].map(size => (
-                        <MenuItem key={size} value={size}>{size}</MenuItem>
-                      ))}
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
+                    <Select value={itemsPerPage} onChange={handleItemsPerPageChange} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}>
+                      {[5, 10, 20, 50, 100].map(size => (<MenuItem key={size} value={size}>{size}</MenuItem>))}
                     </Select>
-                    <Typography variant="body2" sx={{ fontWeight: 500, ml: 1 }}>
-                      hàng
-                    </Typography>
-                  </FormControl>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'<<'}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(prev => prev - 1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'<'}
-                    </Button>
-                    {getPaginationItems(currentPage, totalPages).map((item, idx) =>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><FirstPage fontSize="small" /></Button>
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronLeft fontSize="small" /></Button>
+                    {getPaginationItems(currentPage, totalPages).map((item, idx) => (
                       item === '...'
-                        ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
-                        : <Button
-                            key={item}
-                            variant={item === currentPage ? 'contained' : 'outlined'}
-                            color={item === currentPage ? 'primary' : 'inherit'}
-                            size="small"
-                            sx={{ 
-                              minWidth: 36, 
-                              fontWeight: 600, 
-                              borderRadius: 2, 
-                              mx: 0.25,
-                              ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' })
-                            }}
-                            onClick={() => setCurrentPage(item)}
-                          >
-                            {item}
-                          </Button>
-                    )}
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      onClick={() => setCurrentPage(prev => prev + 1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'>'}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      onClick={() => setCurrentPage(totalPages)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'>>'}
-                    </Button>
+                        ? <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
+                        : <Button key={item} variant={item === currentPage ? 'contained' : 'outlined'} size="small" onClick={() => setCurrentPage(item)} sx={{ minWidth: 32, width: 32, height: 32, borderRadius: 1, fontSize: '0.875rem', fontWeight: item === currentPage ? 600 : 400, ...(item === currentPage ? { backgroundColor: '#1976d2', color: 'white', border: 'none', '&:hover': { backgroundColor: '#1565c0' } } : { borderColor: '#e0e0e0', color: '#666', '&:hover': { backgroundColor: '#f5f5f5', borderColor: '#1976d2' } }) }}>{item}</Button>
+                    ))}
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages || totalPages === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronRight fontSize="small" /></Button>
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages || totalPages === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><LastPage fontSize="small" /></Button>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" color="text.secondary">Đến trang:</Typography>
+                    <InputBase value={gotoPage} onChange={e => setGotoPage(e.target.value.replace(/[^0-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter') { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page); setGotoPage(''); } } }} placeholder="1" sx={{ width: 60, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, px: 1, fontSize: '0.875rem', '& input': { textAlign: 'center' } }} />
+                    <Button size="small" variant="outlined" onClick={() => { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page); setGotoPage(''); } }} disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > totalPages} sx={{ minWidth: 'auto', px: 2, height: 32, textTransform: 'none', fontSize: '0.875rem' }}>Đi</Button>
                   </Box>
                 </Box>
               </Box>

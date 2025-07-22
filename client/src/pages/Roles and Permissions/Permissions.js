@@ -14,7 +14,8 @@ import {
   Download as DownloadIcon,
   Upload as UploadIcon,
   ViewColumn as ViewColumnIcon,
-  Group as GroupIcon
+  Group as GroupIcon,
+  FirstPage, LastPage, ChevronLeft, ChevronRight
 } from '@mui/icons-material';
 import { 
   Button, 
@@ -46,7 +47,8 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow
+  TableRow,
+  InputBase
 } from '@mui/material';
 import {
   FaSave,
@@ -226,9 +228,9 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated, setAle
         </Box>
       </DialogTitle>
       
-      <DialogContent sx={{ pt: 3 }}>
-        <Grid container spacing={3}>
-          <Grid item xs={12} sm={6}>
+      <DialogContent sx={{ pt: 3, px: 3, pb: 2, zIndex: 1301, background: 'white' }}>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} sx={{ pt: 5 }}>
             <TextField
               fullWidth
               label="Module"
@@ -660,6 +662,9 @@ const Permissions = () => {
   const [historyData, setHistoryData] = useState([]);
   const [alertBox, setAlertBox] = useState({ open: false, error: false, msg: '' });
   const token = localStorage.getItem('token');
+  const [gotoPage, setGotoPage] = useState('');
+
+  useEffect(() => { setGotoPage(''); }, [filters.page]);
 
   // Fetch permissions and filter options from API
   const fetchPermissions = useCallback(async () => {
@@ -1278,93 +1283,33 @@ const Permissions = () => {
             </TableContainer>
             
             {/* Enhanced Pagination */}
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', px: 3, pt: 2, pb: 0 }}>
-              <Typography variant="body2" sx={{ fontWeight: 500, color: '#1976d2', fontSize: 15 }}>
-                {pagination.totalPermissions > 0
-                  ? `Hiển thị ${((filters.page - 1) * filters.perPage) + 1} - ${Math.min(filters.page * filters.perPage, pagination.totalPermissions)} / ${pagination.totalPermissions} quyền`
-                  : 'Không có quyền nào để hiển thị'}
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: 2, p: 2, borderTop: '1px solid #e0e0e0', backgroundColor: '#fafafa' }}>
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                Hiển thị <strong>{((filters.page - 1) * filters.perPage) + 1}-{Math.min(filters.page * filters.perPage, pagination.totalPermissions)}</strong> của <strong>{pagination.totalPermissions}</strong> quyền
               </Typography>
-            </Box>
-            <Box display="flex" justifyContent="space-between" alignItems="center" p={3} sx={{
-              borderTop: '1px solid rgba(0, 0, 0, 0.1)',
-              background: 'rgba(0, 0, 0, 0.02)',
-            }}>
-              {/* Page size selector bottom left */}
-              <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
-                <Typography variant="body2" sx={{ fontWeight: 500, mr: 1 }}>
-                  Hiển thị
-                </Typography>
-                <Select
-                  value={filters.perPage}
-                  onChange={e => {
-                    const value = e.target.value;
-                    setFilters(prev => ({ ...prev, perPage: value, page: 1 }));
-                  }}
-                  sx={{ minWidth: 60, mx: 0.5 }}
-                  size="small"
-                  displayEmpty
-                  inputProps={{ 'aria-label': 'Số quyền mỗi trang' }}
-                >
-                  {[5, 10, 20, 50, 100].map(size => (
-                    <MenuItem key={size} value={size}>{size}</MenuItem>
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
+                  <Select value={filters.perPage} onChange={e => setFilters(prev => ({ ...prev, perPage: e.target.value, page: 1 }))} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}>
+                    {[5, 10, 20, 50, 100].map(size => (<MenuItem key={size} value={size}>{size}</MenuItem>))}
+                  </Select>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Button size="small" variant="outlined" onClick={() => setFilters(prev => ({ ...prev, page: 1 }))} disabled={filters.page === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><FirstPage fontSize="small" /></Button>
+                  <Button size="small" variant="outlined" onClick={() => setFilters(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))} disabled={filters.page === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronLeft fontSize="small" /></Button>
+                  {getPaginationItems(filters.page, pagination.totalPages || 1).map((item, idx) => (
+                    item === '...'
+                      ? <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
+                      : <Button key={item} variant={item === filters.page ? 'contained' : 'outlined'} size="small" onClick={() => setFilters(prev => ({ ...prev, page: item }))} sx={{ minWidth: 32, width: 32, height: 32, borderRadius: 1, fontSize: '0.875rem', fontWeight: item === filters.page ? 600 : 400, ...(item === filters.page ? { backgroundColor: '#1976d2', color: 'white', border: 'none', '&:hover': { backgroundColor: '#1565c0' } } : { borderColor: '#e0e0e0', color: '#666', '&:hover': { backgroundColor: '#f5f5f5', borderColor: '#1976d2' } }) }}>{item}</Button>
                   ))}
-                </Select>
-                <Typography variant="body2" sx={{ fontWeight: 500, ml: 1 }}>
-                  quyền
-                </Typography>
-              </FormControl>
-              {/* Pagination right */}
-              <Box display="flex" alignItems="center" gap={1}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  disabled={filters.page === 1}
-                  onClick={() => setFilters(prev => ({ ...prev, page: 1 }))}
-                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                >
-                  {'<<'}
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  disabled={filters.page === 1}
-                  onClick={() => setFilters(prev => ({ ...prev, page: prev.page - 1 }))}
-                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                >
-                  {'<'}
-                </Button>
-                {getPaginationItems(filters.page, pagination.totalPages || 1).map((item, idx) =>
-                  item === '...'
-                    ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
-                    : <Button
-                        key={item}
-                        variant={item === filters.page ? 'contained' : 'outlined'}
-                        color={item === filters.page ? 'primary' : 'inherit'}
-                        size="small"
-                        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25, ...(item === filters.page && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' }) }}
-                        onClick={() => setFilters(prev => ({ ...prev, page: item }))}
-                      >
-                        {item}
-                      </Button>
-                )}
-                <Button
-                  size="small"
-                  variant="outlined"
-                  disabled={filters.page === (pagination.totalPages || 1)}
-                  onClick={() => setFilters(prev => ({ ...prev, page: prev.page + 1 }))}
-                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                >
-                  {'>'}
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  disabled={filters.page === (pagination.totalPages || 1)}
-                  onClick={() => setFilters(prev => ({ ...prev, page: (pagination.totalPages || 1) }))}
-                  sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                >
-                  {'>>'}
-                </Button>
+                  <Button size="small" variant="outlined" onClick={() => setFilters(prev => ({ ...prev, page: Math.min(pagination.totalPages || 1, prev.page + 1) }))} disabled={filters.page === (pagination.totalPages || 1)} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronRight fontSize="small" /></Button>
+                  <Button size="small" variant="outlined" onClick={() => setFilters(prev => ({ ...prev, page: (pagination.totalPages || 1) }))} disabled={filters.page === (pagination.totalPages || 1)} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><LastPage fontSize="small" /></Button>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" color="text.secondary">Đến trang:</Typography>
+                  <InputBase value={gotoPage} onChange={e => setGotoPage(e.target.value.replace(/[^0-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter') { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= (pagination.totalPages || 1)) { setFilters(prev => ({ ...prev, page })); setGotoPage(''); } } }} placeholder="1" sx={{ width: 60, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, px: 1, fontSize: '0.875rem', '& input': { textAlign: 'center' } }} />
+                  <Button size="small" variant="outlined" onClick={() => { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= (pagination.totalPages || 1)) { setFilters(prev => ({ ...prev, page })); setGotoPage(''); } }} disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > (pagination.totalPages || 1)} sx={{ minWidth: 'auto', px: 2, height: 32, textTransform: 'none', fontSize: '0.875rem' }}>Đi</Button>
+                </Box>
               </Box>
             </Box>
           </Card>

@@ -41,7 +41,8 @@ import {
   AccordionSummary,
   AccordionDetails,
   FormGroup,
-  Breadcrumbs
+  Breadcrumbs,
+  InputBase
 } from '@mui/material';
 
 import {
@@ -69,7 +70,11 @@ import {
   Notifications as NotificationsIcon,
   VpnKey as VpnKeyIcon,
   Home as HomeIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  FirstPage,
+  LastPage,
+  ChevronLeft,
+  ChevronRight
 } from '@mui/icons-material';
 
 import { 
@@ -174,6 +179,7 @@ const RoleManagement = () => {
   const [dialogType, setDialogType] = useState('create');
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [expandedModule, setExpandedModule] = useState(null);
+  const [gotoPage, setGotoPage] = useState('');
 
   // Form state
   const [formData, setFormData] = useState({
@@ -309,6 +315,10 @@ const RoleManagement = () => {
   useEffect(() => {
     fetchRoles();
   }, [fetchRoles]);
+
+  useEffect(() => {
+    setGotoPage('');
+  }, [currentPage]);
 
   // Auto-select dependent permissions
   const getRequiredPermissions = (module, action, selectedPermissions) => {
@@ -635,87 +645,36 @@ const RoleManagement = () => {
     const totalPages = Math.ceil(totalRoles / rowsPerPage);
     const from = totalRoles === 0 ? 0 : currentPage * rowsPerPage + 1;
     const to = Math.min((currentPage + 1) * rowsPerPage, totalRoles);
-
     return (
-      <>
-        <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
-          Hiển thị {from} - {to} / {totalRoles} vai trò
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: 2, p: 2, borderTop: '1px solid #e0e0e0', backgroundColor: '#fafafa' }}>
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+          Hiển thị <strong>{from}-{to}</strong> của <strong>{totalRoles}</strong> vai trò
         </Typography>
-        <Box display="flex" justifyContent="space-between" alignItems="center" p={3} sx={{
-          borderTop: '1px solid rgba(0, 0, 0, 0.1)',
-          background: 'rgba(0, 0, 0, 0.02)',
-        }}>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel id="per-page-label">Bản ghi/trang</InputLabel>
-            <Select
-              labelId="per-page-label"
-              value={rowsPerPage}
-              label="Bản ghi/trang"
-              onChange={e => {
-                setRowsPerPage(Number(e.target.value));
-                setCurrentPage(0);
-              }}
-            >
-              {[5, 10, 20, 50, 100].map(size => (
-                <MenuItem key={size} value={size}>{size}</MenuItem>
-              ))}
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
+            <Select value={rowsPerPage} onChange={e => { setRowsPerPage(Number(e.target.value)); setCurrentPage(0); }} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}>
+              {[5, 10, 20, 50, 100].map(size => (<MenuItem key={size} value={size}>{size}</MenuItem>))}
             </Select>
-          </FormControl>
-          {/* Pagination right */}
-          <Box display="flex" alignItems="center" gap={1}>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={currentPage === 0}
-              onClick={() => setCurrentPage(0)}
-              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-            >
-              {'<<'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={currentPage === 0}
-              onClick={() => setCurrentPage(prev => prev - 1)}
-              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-            >
-              {'<'}
-            </Button>
-            {getPaginationItems(currentPage + 1, totalPages).map((item, idx) =>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Button size="small" variant="outlined" onClick={() => setCurrentPage(0)} disabled={currentPage === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><FirstPage fontSize="small" /></Button>
+            <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))} disabled={currentPage === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronLeft fontSize="small" /></Button>
+            {getPaginationItems(currentPage + 1, totalPages).map((item, idx) => (
               item === '...'
-                ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
-                : <Button
-                    key={item}
-                    variant={item === currentPage + 1 ? 'contained' : 'outlined'}
-                    color={item === currentPage + 1 ? 'primary' : 'inherit'}
-                    size="small"
-                    sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25, ...(item === currentPage + 1 && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' }) }}
-                    onClick={() => setCurrentPage(item - 1)}
-                  >
-                    {item}
-                  </Button>
-            )}
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={currentPage === totalPages - 1 || totalPages === 0}
-              onClick={() => setCurrentPage(prev => prev + 1)}
-              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-            >
-              {'>'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={currentPage === totalPages - 1 || totalPages === 0}
-              onClick={() => setCurrentPage(totalPages - 1)}
-              sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-            >
-              {'>>'}
-            </Button>
+                ? <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
+                : <Button key={item} variant={item === currentPage + 1 ? 'contained' : 'outlined'} size="small" onClick={() => setCurrentPage(item - 1)} sx={{ minWidth: 32, width: 32, height: 32, borderRadius: 1, fontSize: '0.875rem', fontWeight: item === currentPage + 1 ? 600 : 400, ...(item === currentPage + 1 ? { backgroundColor: '#1976d2', color: 'white', border: 'none', '&:hover': { backgroundColor: '#1565c0' } } : { borderColor: '#e0e0e0', color: '#666', '&:hover': { backgroundColor: '#f5f5f5', borderColor: '#1976d2' } }) }}>{item}</Button>
+            ))}
+            <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.min(totalPages - 1, prev + 1))} disabled={currentPage === totalPages - 1 || totalPages === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronRight fontSize="small" /></Button>
+            <Button size="small" variant="outlined" onClick={() => setCurrentPage(totalPages - 1)} disabled={currentPage === totalPages - 1 || totalPages === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><LastPage fontSize="small" /></Button>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">Đến trang:</Typography>
+            <InputBase value={gotoPage} onChange={e => setGotoPage(e.target.value.replace(/[^0-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter') { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page - 1); setGotoPage(''); } } }} placeholder="1" sx={{ width: 60, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, px: 1, fontSize: '0.875rem', '& input': { textAlign: 'center' } }} />
+            <Button size="small" variant="outlined" onClick={() => { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page - 1); setGotoPage(''); } }} disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > totalPages} sx={{ minWidth: 'auto', px: 2, height: 32, textTransform: 'none', fontSize: '0.875rem' }}>Đi</Button>
           </Box>
         </Box>
-      </>
+      </Box>
     );
   };
 

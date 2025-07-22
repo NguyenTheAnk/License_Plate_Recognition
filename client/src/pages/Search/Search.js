@@ -4,9 +4,10 @@ import {
   TablePagination
 } from '@mui/material';
 import { 
-  Search as SearchIcon, DirectionsCar, Person, Phone, Email, LocationOn, CheckCircle, Block, History, CameraAlt, Info, Event, Description, Close as CloseIcon, FilterList, Refresh, TuneRounded, ExpandMore, ExpandLess, Visibility, ArrowForward, Timeline, Security, LocationSearching
+  Search as SearchIcon, DirectionsCar, Person, Phone, Email, LocationOn, CheckCircle, Block, History, CameraAlt, Info, Event, Description, Close as CloseIcon, FilterList, Refresh, TuneRounded, ExpandMore, ExpandLess, Visibility, ArrowForward, Timeline, Security, LocationSearching, FirstPage, LastPage, ChevronLeft, ChevronRight
 } from '@mui/icons-material';
 import { fetchDataFromAPI } from '../../utils/auth';
+import { InputBase } from '@mui/material';
 
 function SearchPage() {
   const theme = useTheme();
@@ -183,6 +184,10 @@ function SearchPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Thêm state gotoPage và reset khi currentPage thay đổi:
+  const [gotoPage, setGotoPage] = useState('');
+  useEffect(() => { setGotoPage(''); }, [currentPage]);
 
   // Fetch locations from API on mount
   useEffect(() => {
@@ -1976,96 +1981,34 @@ useEffect(() => {
                   </Table>
                 </TableContainer>
 
-               <Box sx={{ 
-  borderTop: '1px solid rgba(0, 0, 0, 0.1)',
-  background: 'rgba(0, 0, 0, 0.02)'
-}}>
-  <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
+               <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: 2, p: 2, borderTop: '1px solid #e0e0e0', backgroundColor: '#fafafa' }}>
+  <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
     {totalItems === 0
       ? 'Hiển thị 0/0 bản ghi'
-      : `Hiển thị ${((currentPage - 1) * itemsPerPage) + 1} - ${Math.min(currentPage * itemsPerPage, totalItems)} / ${totalItems} bản ghi`
-    }
+      : `Hiển thị ${((currentPage - 1) * itemsPerPage) + 1}-${Math.min(currentPage * itemsPerPage, totalItems)} / ${totalItems} bản ghi`}
   </Typography>
-  <Box display="flex" justifyContent="space-between" alignItems="center" p={3}>
-    <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
-      <Typography variant="body2" sx={{ fontWeight: 500, mr: 1 }}>
-        Hiển thị
-      </Typography>
-      <Select
-        value={itemsPerPage}
-        onChange={handleItemsPerPageChange}
-        sx={{ minWidth: 60, mx: 0.5 }}
-        size="small"
-        displayEmpty
-        inputProps={{ 'aria-label': 'Số hàng mỗi trang' }}
-      >
-        {[5, 10, 20, 50, 100].map(size => (
-          <MenuItem key={size} value={size}>{size}</MenuItem>
-        ))}
+  <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
+      <Select value={itemsPerPage} onChange={handleItemsPerPageChange} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}>
+        {[5, 10, 20, 50, 100].map(size => (<MenuItem key={size} value={size}>{size}</MenuItem>))}
       </Select>
-      <Typography variant="body2" sx={{ fontWeight: 500, ml: 1 }}>
-        hàng
-      </Typography>
-    </FormControl>
-    
-    {/* Always show pagination controls */}
-    <Box display="flex" alignItems="center" gap={1}>
-      <Button
-        size="small"
-        variant="outlined"
-        disabled={currentPage === 1}
-        onClick={() => setCurrentPage(1)}
-        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-      >
-        {'<<'}
-      </Button>
-      <Button
-        size="small"
-        variant="outlined"
-        disabled={currentPage === 1}
-        onClick={() => setCurrentPage(prev => prev - 1)}
-        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-      >
-        {'<'}
-      </Button>
-      {getPaginationItems(currentPage, totalPages).map((item, idx) =>
+    </Box>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <Button size="small" variant="outlined" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><FirstPage fontSize="small" /></Button>
+      <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronLeft fontSize="small" /></Button>
+      {getPaginationItems(currentPage, totalPages).map((item, idx) => (
         item === '...'
-          ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
-          : <Button
-              key={item}
-              variant={item === currentPage ? 'contained' : 'outlined'}
-              color={item === currentPage ? 'primary' : 'inherit'}
-              size="small"
-              sx={{ 
-                minWidth: 36, 
-                fontWeight: 600, 
-                borderRadius: 2, 
-                mx: 0.25,
-                ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' })
-              }}
-              onClick={() => setCurrentPage(item)}
-            >
-              {item}
-            </Button>
-      )}
-      <Button
-        size="small"
-        variant="outlined"
-        disabled={currentPage === totalPages || totalPages === 0}
-        onClick={() => setCurrentPage(prev => prev + 1)}
-        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-      >
-        {'>'}
-      </Button>
-      <Button
-        size="small"
-        variant="outlined"
-        disabled={currentPage === totalPages || totalPages === 0}
-        onClick={() => setCurrentPage(totalPages)}
-        sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-      >
-        {'>>'}
-      </Button>
+          ? <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
+          : <Button key={item} variant={item === currentPage ? 'contained' : 'outlined'} size="small" onClick={() => setCurrentPage(item)} sx={{ minWidth: 32, width: 32, height: 32, borderRadius: 1, fontSize: '0.875rem', fontWeight: item === currentPage ? 600 : 400, ...(item === currentPage ? { backgroundColor: '#1976d2', color: 'white', border: 'none', '&:hover': { backgroundColor: '#1565c0' } } : { borderColor: '#e0e0e0', color: '#666', '&:hover': { backgroundColor: '#f5f5f5', borderColor: '#1976d2' } }) }}>{item}</Button>
+      ))}
+      <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronRight fontSize="small" /></Button>
+      <Button size="small" variant="outlined" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><LastPage fontSize="small" /></Button>
+    </Box>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Typography variant="body2" color="text.secondary">Đến trang:</Typography>
+      <InputBase value={gotoPage} onChange={e => setGotoPage(e.target.value.replace(/[^0-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter') { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page); setGotoPage(''); } } }} placeholder="1" sx={{ width: 60, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, px: 1, fontSize: '0.875rem', '& input': { textAlign: 'center' } }} />
+      <Button size="small" variant="outlined" onClick={() => { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page); setGotoPage(''); } }} disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > totalPages} sx={{ minWidth: 'auto', px: 2, height: 32, textTransform: 'none', fontSize: '0.875rem' }}>Đi</Button>
     </Box>
   </Box>
 </Box>
