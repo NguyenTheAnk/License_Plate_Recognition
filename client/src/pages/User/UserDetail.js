@@ -1,9 +1,10 @@
 // User detail page for viewing user info, roles, and permissions
-import React, { useState, useEffect, useContext} from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
   Grid, Typography, Box, Card, Divider, Avatar, Chip,
   Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  Breadcrumbs, Alert, CircularProgress, Tabs, Tab, Checkbox
+  Breadcrumbs, Alert, CircularProgress, Tabs, Tab, Checkbox, TablePagination,
+  FormControl, Select, MenuItem, InputBase
 } from '@mui/material';
 import { 
 FaUserTag, FaEnvelope, FaPhone, FaArrowLeft, FaHistory, 
@@ -121,6 +122,31 @@ function TabPanel({ children, value, index, ...other }) {
   );
 }
 
+// Helper phân trang số dạng WhiteList
+function getPaginationItems(current, total) {
+  const delta = 1;
+  const range = [];
+  const rangeWithDots = [];
+  let l;
+  for (let i = 1; i <= total; i++) {
+    if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
+      range.push(i);
+    }
+  }
+  for (let i of range) {
+    if (l) {
+      if (i - l === 2) {
+        rangeWithDots.push(l + 1);
+      } else if (i - l > 2) {
+        rangeWithDots.push('...');
+      }
+    }
+    rangeWithDots.push(i);
+    l = i;
+  }
+  return rangeWithDots;
+}
+
 const UserDetail = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -134,27 +160,71 @@ const UserDetail = () => {
   const [tabValue, setTabValue] = useState(0);
   const [permissionsByModule, setPermissionsByModule] = useState({});
   const [actionLabels, setActionLabels] = useState({});
+  const [loginHistory, setLoginHistory] = useState([]);
+  const [loginPagination, setLoginPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
+  const [accessLogs, setAccessLogs] = useState([]);
+  const [accessPagination, setAccessPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
+  // State cho input go to page
+  const [loginGoto, setLoginGoto] = useState('');
+  const [accessGoto, setAccessGoto] = useState('');
 
   // Get user data from location state or fetch from API
   const userFromState = location.state?.user;
   const userId = userFromState?.id || params?.id;
 
+  const firstLoadRef = useRef(true);
+
   useEffect(() => {
     if (userId) {
-      fetchUserDetail(userId);
+      fetchUserDetailData(userId);
     } else {
       // Redirect if no user ID
-      navigate('/users');
+      navigate('/user');
     }
   }, [userId, navigate]);
 
-  const fetchUserDetail = async (id) => {
+  // useEffect gọi lại API khi phân trang thay đổi, nhưng tránh lặp vô hạn khi set lại state từ response
+  useEffect(() => {
+    if (userId) {
+      if (firstLoadRef.current) {
+        fetchUserDetailData(userId, loginPagination.page, loginPagination.limit, accessPagination.page, accessPagination.limit);
+        firstLoadRef.current = false;
+      }
+    }
+    // eslint-disable-next-line
+  }, [userId]);
+
+  // Chỉ gọi lại khi người dùng thực sự đổi trang hoặc đổi số dòng/trang
+  const prevLogin = useRef({ page: 1, limit: 10 });
+  const prevAccess = useRef({ page: 1, limit: 10 });
+  useEffect(() => {
+    if (!firstLoadRef.current && userId) {
+      if (
+        loginPagination.page !== prevLogin.current.page ||
+        loginPagination.limit !== prevLogin.current.limit ||
+        accessPagination.page !== prevAccess.current.page ||
+        accessPagination.limit !== prevAccess.current.limit
+      ) {
+        fetchUserDetailData(userId, loginPagination.page, loginPagination.limit, accessPagination.page, accessPagination.limit);
+        prevLogin.current = { page: loginPagination.page, limit: loginPagination.limit };
+        prevAccess.current = { page: accessPagination.page, limit: accessPagination.limit };
+      }
+    }
+    // eslint-disable-next-line
+  }, [loginPagination.page, loginPagination.limit, accessPagination.page, accessPagination.limit]);
+
+  // Sửa fetchUserDetailData để nhận các tham số phân trang
+  const fetchUserDetailData = async (id, loginPage = 1, loginLimit = 10, accessPage = 1, accessLimit = 15) => {
     setLoading(true);
     context.setProgress?.(20);
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetchDataFromAPI(`/api/user/${id}/detailed`, token);
+      
+      // FIXED: Use correct API endpoint that matches the backend route
+      const response = await fetchDataFromAPI(`/api/user/${id}/detailed?loginPage=${loginPage}&loginLimit=${loginLimit}&accessPage=${accessPage}&accessLimit=${accessLimit}`, token);
+      
+      console.log('API Response:', response); // Debug log
       
       if (response.success && response.data) {
         setUserDetail(response.data);
@@ -174,27 +244,37 @@ const UserDetail = () => {
         
         // Build action label mapping from user.roles/modules
         const labelMap = {};
-        response.data.user.roles.forEach(role => {
-          const modules = role.modules || {};
-          Object.values(modules).forEach(actionsArr => {
-            actionsArr.forEach(action => {
-              if (!labelMap[action]) {
-                // Capitalize first letter, replace camelCase with spaces
-                labelMap[action] = action.charAt(0).toUpperCase() + action.slice(1).replace(/([A-Z])/g, ' $1');
+        if (response.data.user.roles) {
+          response.data.user.roles.forEach(role => {
+            const modules = role.modules || {};
+            Object.values(modules).forEach(actionsArr => {
+              if (Array.isArray(actionsArr)) {
+                actionsArr.forEach(action => {
+                  if (!labelMap[action]) {
+                    // Capitalize first letter, replace camelCase with spaces
+                    labelMap[action] = action.charAt(0).toUpperCase() + action.slice(1).replace(/([A-Z])/g, ' $1');
+                  }
+                });
               }
             });
           });
-        });
+        }
         setActionLabels(labelMap);
+        
+        setLoginHistory(response.data.loginHistory || []);
+        setLoginPagination(response.data.loginPagination || { page: 1, limit: 10, total: 0, totalPages: 1 });
+        setAccessLogs(response.data.accessLogs || []);
+        setAccessPagination(response.data.accessPagination || { page: 1, limit: 10, total: 0, totalPages: 1 });
         
         context.setProgress?.(100);
       } else {
+        console.error('API Error:', response);
         context.setAlertBox?.({
           open: true,
           error: true,
           msg: response.message || 'Lỗi khi tải thông tin chi tiết người dùng!'
         });
-        navigate('/users');
+        navigate('/user');
       }
     } catch (error) {
       console.error('Error fetching user detail:', error);
@@ -203,7 +283,7 @@ const UserDetail = () => {
         error: true,
         msg: handleErrorResponse(error)
       });
-      navigate('/users');
+      navigate('/user');
     } finally {
       setLoading(false);
     }
@@ -229,9 +309,25 @@ const UserDetail = () => {
     'deleteImg': 'Xóa ảnh',
     'export': 'Xuất'
   };
+  
   const getActionText = (action) => {
     if (actionViMap[action]) return actionViMap[action];
     return actionLabels[action] || (action.charAt(0).toUpperCase() + action.slice(1).replace(/([A-Z])/g, ' $1'));
+  };
+
+  // Hàm chuyển trang và đổi số dòng/trang cho login logs
+  const handleLoginPageChange = (event, newPage) => {
+    setLoginPagination(prev => ({ ...prev, page: newPage + 1 }));
+  };
+  const handleLoginRowsPerPageChange = (event) => {
+    setLoginPagination(prev => ({ ...prev, page: 1, limit: parseInt(event.target.value, 10) }));
+  };
+  // Hàm chuyển trang và đổi số dòng/trang cho access logs
+  const handleAccessPageChange = (event, newPage) => {
+    setAccessPagination(prev => ({ ...prev, page: newPage + 1 }));
+  };
+  const handleAccessRowsPerPageChange = (event) => {
+    setAccessPagination(prev => ({ ...prev, page: 1, limit: parseInt(event.target.value, 10) }));
   };
 
   if (loading) {
@@ -269,7 +365,7 @@ const UserDetail = () => {
     );
   }
 
-  const { loginHistory, accessLogs, activityStats } = userDetail;
+  const { activityStats } = userDetail;
 
   // Gộp quyền từ tất cả roles
   const mergedModules = {};
@@ -277,7 +373,9 @@ const UserDetail = () => {
     const modules = role.modules || {};
     Object.entries(modules).forEach(([module, actions]) => {
       if (!mergedModules[module]) mergedModules[module] = new Set();
-      actions.forEach(action => mergedModules[module].add(action));
+      if (Array.isArray(actions)) {
+        actions.forEach(action => mergedModules[module].add(action));
+      }
     });
   });
   const moduleNames = Object.keys(mergedModules);
@@ -625,17 +723,7 @@ const UserDetail = () => {
                       ))}
                     </Box>
                   );
-                  // Merge all permissions from all roles
-                  const mergedModules = {};
-                  user.roles.forEach(role => {
-                    const modules = role.modules || {};
-                    Object.entries(modules).forEach(([module, actions]) => {
-                      if (!mergedModules[module]) mergedModules[module] = new Set();
-                      actions.forEach(action => mergedModules[module].add(action));
-                    });
-                  });
-                  const moduleNames = Object.keys(mergedModules);
-                  const allActions = Array.from(new Set(Object.values(mergedModules).flatMap(set => Array.from(set))));
+                  
                   if (moduleNames.length === 0 || allActions.length === 0) {
                     return <>{rolesSummary}<Alert severity="info">Người dùng chưa có quyền hạn nào</Alert></>;
                   }
@@ -683,40 +771,121 @@ const UserDetail = () => {
                   Lịch sử đăng nhập gần đây
                 </Typography>
                 {loginHistory && loginHistory.length > 0 ? (
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
-                          <TableCell>Thời gian</TableCell>
-                          <TableCell>Trạng thái</TableCell>
-                          <TableCell>IP Address</TableCell>
-                          <TableCell>User Agent</TableCell>
-                          <TableCell>Lý do thất bại</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {loginHistory.slice(0, 10).map((login, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{formatDateTime(login.created_at)}</TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={login.status === 'success' ? 'Thành công' : 'Thất bại'} 
-                                color={login.status === 'success' ? 'success' : 'error'} 
-                                size="small" 
-                              />
-                            </TableCell>
-                            <TableCell>{login.ip_address}</TableCell>
-                            <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {login.user_agent}
-                            </TableCell>
-                            <TableCell>
-                              {login.failure_reason || '-'}
-                            </TableCell>
+                  <>
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
+                            <TableCell>Thời gian</TableCell>
+                            <TableCell>Trạng thái</TableCell>
+                            <TableCell>IP Address</TableCell>
+                            <TableCell>User Agent</TableCell>
+                            <TableCell>Lý do thất bại</TableCell>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                        </TableHead>
+                        <TableBody>
+                          {loginHistory.slice(0, loginPagination.limit).map((login, index) => (
+                            <TableRow key={index}>
+                              <TableCell>{formatDateTime(login.created_at)}</TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={login.status === 'success' ? 'Thành công' : 'Thất bại'} 
+                                  color={login.status === 'success' ? 'success' : 'error'} 
+                                  size="small" 
+                                />
+                              </TableCell>
+                              <TableCell>{login.ip_address}</TableCell>
+                              <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {login.user_agent}
+                              </TableCell>
+                              <TableCell>
+                                {login.failure_reason || '-'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <Box sx={{ borderTop: '1px solid #f0f0f0', background: '#fafbfc' }}>
+                      <Box display="flex" alignItems="center" justifyContent="space-between" p={0.5}>
+                        <Typography variant="body2" color="#8a94a6" sx={{ fontWeight: 400, fontSize: '0.8rem', ml: 0.2, py: 0.1 }}>
+                          Hiển thị {((loginPagination.page - 1) * loginPagination.limit) + 1} - {Math.min(loginPagination.page * loginPagination.limit, loginPagination.total)} / {loginPagination.total} bản ghi
+                        </Typography>
+                        <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.7}>
+                          <Button size="small" variant="outlined" disabled={loginPagination.page === 1} onClick={() => setLoginPagination(prev => ({ ...prev, page: prev.page - 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'<'}</Button>
+                          {getPaginationItems(loginPagination.page, loginPagination.totalPages).map((item, idx) =>
+                            item === '...'
+                              ? <Box key={idx} sx={{ px: 0.4, color: '#b0b8c9', fontWeight: 500, fontSize: '0.9rem' }}>...</Box>
+                              : <Button
+                                  key={item}
+                                  variant={item === loginPagination.page ? 'contained' : 'outlined'}
+                                  color={item === loginPagination.page ? 'primary' : 'inherit'}
+                                  size="small"
+                                  sx={{
+                                    minWidth: 28,
+                                    height: 28,
+                                    borderRadius: 999,
+                                    border: item === loginPagination.page ? '2px solid #3b5bfd' : '1px solid #e0e7ff',
+                                    color: item === loginPagination.page ? '#3b5bfd' : '#222',
+                                    background: item === loginPagination.page ? '#e0e7ff' : 'white',
+                                    fontWeight: 500,
+                                    fontSize: '0.9rem',
+                                    p: 0,
+                                    mx: 0.1,
+                                    boxShadow: item === loginPagination.page ? '0 2px 8px rgba(59,91,253,0.08)' : 'none',
+                                    '&:hover': { background: '#f4f6ff' }
+                                  }}
+                                  onClick={() => setLoginPagination(prev => ({ ...prev, page: item }))}
+                                >
+                                  {item}
+                                </Button>
+                          )}
+                          <Button size="small" variant="outlined" disabled={loginPagination.page === loginPagination.totalPages || loginPagination.totalPages === 0} onClick={() => setLoginPagination(prev => ({ ...prev, page: prev.page + 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'>'}</Button>
+                          <Select
+                            value={loginPagination.limit}
+                            onChange={handleLoginRowsPerPageChange}
+                            sx={{ minWidth: 56, height: 28, borderRadius: 999, borderColor: '#e0e7ff', mx: 0.7, fontWeight: 500, fontSize: '0.9rem', background: 'white', px: 1, boxShadow: 'none' }}
+                            size="small"
+                            displayEmpty
+                            inputProps={{ 'aria-label': 'Số hàng mỗi trang' }}
+                            MenuProps={{ PaperProps: { sx: { borderRadius: 999 } } }}
+                            renderValue={v => `${v} / page`}
+                          >
+                            {[5, 10, 20, 50, 100].map(size => (
+                              <MenuItem key={size} value={size} sx={{ fontSize: '0.9rem' }}>{size} / page</MenuItem>
+                            ))}
+                          </Select>
+                          <Box display="flex" alignItems="center" gap={0.4}>
+                            <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.9rem', color: '#3b5bfd' }}>Go to</Typography>
+                            <InputBase
+                              value={loginGoto}
+                              onChange={e => setLoginGoto(e.target.value.replace(/[^0-9]/g, ''))}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const page = parseInt(loginGoto, 10);
+                                  if (page && page >= 1 && page <= loginPagination.totalPages) {
+                                    setLoginPagination(prev => ({ ...prev, page }));
+                                    setLoginGoto('');
+                                  }
+                                }
+                              }}
+                              sx={{ width: 36, height: 28, border: '1px solid #e0e7ff', borderRadius: 999, px: 1, fontSize: '0.9rem', background: 'white', boxShadow: 'none', '&:focus-within': { boxShadow: '0 0 0 2px #e0e7ff' } }}
+                              inputProps={{ style: { textAlign: 'center' } }}
+                            />
+                            <Button size="small" variant="outlined" sx={{ minWidth: 32, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', textTransform: 'none', '&:hover': { background: '#f4f6ff' } }}
+                              onClick={() => {
+                                const page = parseInt(loginGoto, 10);
+                                if (page && page >= 1 && page <= loginPagination.totalPages) {
+                                  setLoginPagination(prev => ({ ...prev, page }));
+                                  setLoginGoto('');
+                                }
+                              }}
+                            >Page</Button>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </>
                 ) : (
                   <Alert severity="info">
                     Chưa có lịch sử đăng nhập
@@ -730,52 +899,133 @@ const UserDetail = () => {
                   Nhật ký truy cập gần đây
                 </Typography>
                 {accessLogs && accessLogs.length > 0 ? (
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
-                          <TableCell>Thời gian</TableCell>
-                          <TableCell>Hành động</TableCell>
-                          <TableCell>Đối tượng</TableCell>
-                          <TableCell>Trạng thái</TableCell>
-                          <TableCell>IP Address</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {accessLogs.slice(0, 15).map((log, index) => (
-                          <TableRow key={index}>
-                            <TableCell>{formatDateTime(log.created_at)}</TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={log.action_type} 
-                                size="small" 
-                                variant="outlined"
-                                color="primary"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {log.object_type}
-                                {log.object_id && (
-                                  <Typography variant="caption" color="text.secondary" display="block">
-                                    ID: {log.object_id}
-                                  </Typography>
-                                )}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip 
-                                label={log.status} 
-                                color={log.status === 'SUCCESS' ? 'success' : 'error'} 
-                                size="small" 
-                              />
-                            </TableCell>
-                            <TableCell>{log.ip_address}</TableCell>
+                  <>
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
+                            <TableCell>Thời gian</TableCell>
+                            <TableCell>Hành động</TableCell>
+                            <TableCell>Đối tượng</TableCell>
+                            <TableCell>Trạng thái</TableCell>
+                            <TableCell>IP Address</TableCell>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                        </TableHead>
+                        <TableBody>
+                          {accessLogs.slice(0, accessPagination.limit).map((log, index) => (
+                            <TableRow key={index}>
+                              <TableCell>{formatDateTime(log.created_at)}</TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={log.action_type} 
+                                  size="small" 
+                                  variant="outlined"
+                                  color="primary"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2">
+                                  {log.object_type}
+                                  {log.object_id && (
+                                    <Typography variant="caption" color="text.secondary" display="block">
+                                      ID: {log.object_id}
+                                    </Typography>
+                                  )}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={log.status} 
+                                  color={log.status === 'SUCCESS' ? 'success' : 'error'} 
+                                  size="small" 
+                                />
+                              </TableCell>
+                              <TableCell>{log.ip_address}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <Box sx={{ borderTop: '1px solid #f0f0f0', background: '#fafbfc' }}>
+                      <Box display="flex" alignItems="center" justifyContent="space-between" p={0.5}>
+                        <Typography variant="body2" color="#8a94a6" sx={{ fontWeight: 400, fontSize: '0.8rem', ml: 0.2, py: 0.1 }}>
+                          Hiển thị {((accessPagination.page - 1) * accessPagination.limit) + 1} - {Math.min(accessPagination.page * accessPagination.limit, accessPagination.total)} / {accessPagination.total} bản ghi
+                        </Typography>
+                        <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.7}>
+                          <Button size="small" variant="outlined" disabled={accessPagination.page === 1} onClick={() => setAccessPagination(prev => ({ ...prev, page: prev.page - 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'<'}</Button>
+                          {getPaginationItems(accessPagination.page, accessPagination.totalPages).map((item, idx) =>
+                            item === '...'
+                              ? <Box key={idx} sx={{ px: 0.4, color: '#b0b8c9', fontWeight: 500, fontSize: '0.9rem' }}>...</Box>
+                              : <Button
+                                  key={item}
+                                  variant={item === accessPagination.page ? 'contained' : 'outlined'}
+                                  color={item === accessPagination.page ? 'primary' : 'inherit'}
+                                  size="small"
+                                  sx={{
+                                    minWidth: 28,
+                                    height: 28,
+                                    borderRadius: 999,
+                                    border: item === accessPagination.page ? '2px solid #3b5bfd' : '1px solid #e0e7ff',
+                                    color: item === accessPagination.page ? '#3b5bfd' : '#222',
+                                    background: item === accessPagination.page ? '#e0e7ff' : 'white',
+                                    fontWeight: 500,
+                                    fontSize: '0.9rem',
+                                    p: 0,
+                                    mx: 0.1,
+                                    boxShadow: item === accessPagination.page ? '0 2px 8px rgba(59,91,253,0.08)' : 'none',
+                                    '&:hover': { background: '#f4f6ff' }
+                                  }}
+                                  onClick={() => setAccessPagination(prev => ({ ...prev, page: item }))}
+                                >
+                                  {item}
+                                </Button>
+                          )}
+                          <Button size="small" variant="outlined" disabled={accessPagination.page === accessPagination.totalPages || accessPagination.totalPages === 0} onClick={() => setAccessPagination(prev => ({ ...prev, page: prev.page + 1 }))} sx={{ minWidth: 28, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', '&:hover': { background: '#f4f6ff' } }}>{'>'}</Button>
+                          <Select
+                            value={accessPagination.limit}
+                            onChange={handleAccessRowsPerPageChange}
+                            sx={{ minWidth: 56, height: 28, borderRadius: 999, borderColor: '#e0e7ff', mx: 0.7, fontWeight: 500, fontSize: '0.9rem', background: 'white', px: 1, boxShadow: 'none' }}
+                            size="small"
+                            displayEmpty
+                            inputProps={{ 'aria-label': 'Số hàng mỗi trang' }}
+                            MenuProps={{ PaperProps: { sx: { borderRadius: 999 } } }}
+                            renderValue={v => `${v} / page`}
+                          >
+                            {[5, 10, 20, 50, 100].map(size => (
+                              <MenuItem key={size} value={size} sx={{ fontSize: '0.9rem' }}>{size} / page</MenuItem>
+                            ))}
+                          </Select>
+                          <Box display="flex" alignItems="center" gap={0.4}>
+                            <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.9rem', color: '#3b5bfd' }}>Go to</Typography>
+                            <InputBase
+                              value={accessGoto}
+                              onChange={e => setAccessGoto(e.target.value.replace(/[^0-9]/g, ''))}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const page = parseInt(accessGoto, 10);
+                                  if (page && page >= 1 && page <= accessPagination.totalPages) {
+                                    setAccessPagination(prev => ({ ...prev, page }));
+                                    setAccessGoto('');
+                                  }
+                                }
+                              }}
+                              sx={{ width: 36, height: 28, border: '1px solid #e0e7ff', borderRadius: 999, px: 1, fontSize: '0.9rem', background: 'white', boxShadow: 'none', '&:focus-within': { boxShadow: '0 0 0 2px #e0e7ff' } }}
+                              inputProps={{ style: { textAlign: 'center' } }}
+                            />
+                            <Button size="small" variant="outlined" sx={{ minWidth: 32, height: 28, borderRadius: 999, borderColor: '#e0e7ff', color: '#3b5bfd', fontWeight: 500, fontSize: '0.9rem', p: 0, mx: 0.1, background: 'white', boxShadow: 'none', textTransform: 'none', '&:hover': { background: '#f4f6ff' } }}
+                              onClick={() => {
+                                const page = parseInt(accessGoto, 10);
+                                if (page && page >= 1 && page <= accessPagination.totalPages) {
+                                  setAccessPagination(prev => ({ ...prev, page }));
+                                  setAccessGoto('');
+                                }
+                              }}
+                            >Page</Button>
+                          </Box>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </>
                 ) : (
                   <Alert severity="info">
                     Chưa có nhật ký truy cập

@@ -626,7 +626,7 @@ def detect_plate_yolov5(image_path, model):
                 return plate_crop, bbox, img0
         
         return None, None, img0
-    
+        
     except Exception as e:
         print(f"Error in detect_plate_yolov5: {e}")
         return None, None, None
@@ -662,7 +662,7 @@ def save_detected_plate_image(plate_img, original_image_path):
                 return relative_path
         
         return None
-    
+        
     except Exception as e:
         print(f"Error saving detected plate image: {e}")
         return None
@@ -778,11 +778,11 @@ def comprehensive_plate_recognition(image_path, model=None):
                     detected_plate_image = save_detected_plate_image(plate_crop, image_path)
                     
                     return {
-                        'success': True,
+                    'success': True,
                         'text': text,
                         'vehicle_type': vehicle_type,
-                        'bbox': bbox,
-                        'detected_plate_image': detected_plate_image,
+                    'bbox': bbox,
+                    'detected_plate_image': detected_plate_image,
                         'method': 'yolov5_detection_paddleocr_comprehensive',
                         'confidence': confidence * validation_score,
                         'detection_confidence': float(bbox['confidence']),
@@ -879,11 +879,11 @@ def main():
         
         # Output kết quả
         print(json.dumps(result, ensure_ascii=False))
-        
+            
     except Exception as e:
         error_result = {
-            'success': False,
-            'message': str(e),
+            'success': False, 
+            'message': str(e), 
             'error_type': type(e).__name__,
             'method': 'main_error'
         }
@@ -898,4 +898,4 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and '--test' in sys.argv:
         test_plate_classification_logic()
     else:
-        main()
+    main()

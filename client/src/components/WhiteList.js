@@ -1156,6 +1156,7 @@ const handleDateIconClickBackup = (field) => {
                           }}
                         />
                       </TableCell>
+                      <TableCell sx={{ width: 60 }}>STT</TableCell>
                       <TableCell>Biển số</TableCell>
                       <TableCell>Ảnh biển số</TableCell>
                       <TableCell>Khu vực</TableCell>
@@ -1193,7 +1194,7 @@ const handleDateIconClickBackup = (field) => {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      whitelist.map((item) => (
+                      whitelist.map((item, idx) => (
                         <TableRow 
                           key={item.id} 
                           hover
@@ -1214,6 +1215,7 @@ const handleDateIconClickBackup = (field) => {
                               sx={{ '&.Mui-checked': { color: '#1976d2' } }}
                             />
                           </TableCell>
+                          <TableCell>{idx + 1}</TableCell>
                           <TableCell>
                             <Box display="flex" alignItems="center" gap={2}>
                               <Avatar sx={{ 
@@ -1747,9 +1749,9 @@ const handleDateIconClickBackup = (field) => {
                   />
                   <Box display="flex" gap={2}>
                     <Box position="relative" flex={1}>
-                      <TextField
-                        fullWidth
-                        label="Có hiệu lực từ"
+                    <TextField
+                      fullWidth
+                      label="Có hiệu lực từ"
                         placeholder="dd/MM/yyyy"
                         value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
                         onChange={(e) => {
@@ -1783,8 +1785,8 @@ const handleDateIconClickBackup = (field) => {
                             </InputAdornment>
                           ),
                         }}
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                      />
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                    />
                       <input
                         ref={validFromDateRef}
                         type="date"
@@ -1802,9 +1804,9 @@ const handleDateIconClickBackup = (field) => {
                       />
                     </Box>
                     <Box position="relative" flex={1}>
-                      <TextField
-                        fullWidth
-                        label="Có hiệu lực đến"
+                    <TextField
+                      fullWidth
+                      label="Có hiệu lực đến"
                         placeholder="dd/MM/yyyy"
                         value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
                         onChange={(e) => {
@@ -1838,8 +1840,8 @@ const handleDateIconClickBackup = (field) => {
                             </InputAdornment>
                           ),
                         }}
-                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                      />
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                    />
                       <input
                         ref={validToDateRef}
                         type="date"

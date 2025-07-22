@@ -1134,6 +1134,7 @@ const Permissions = () => {
                         }}
                       />
                     </TableCell>
+                    <TableCell sx={{ width: 60 }}>STT</TableCell>
                     {visibleColumns.module && <TableCell>Module</TableCell>}
                     {visibleColumns.action && <TableCell>Hành động</TableCell>}
                     {visibleColumns.code && <TableCell>Mã quyền</TableCell>}
@@ -1182,6 +1183,7 @@ const Permissions = () => {
                             }}
                           />
                         </TableCell>
+                        <TableCell>{(filters.page - 1) * filters.perPage + index + 1}</TableCell>
                         {visibleColumns.module && <TableCell>
                           <Box display="flex" alignItems="center" gap={2}>
                             <Avatar sx={{ 

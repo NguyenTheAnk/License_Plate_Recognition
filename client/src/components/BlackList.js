@@ -1452,6 +1452,7 @@ const handleDateIconClick = (field) => {
                           }}
                         />
                       </TableCell>
+                      <TableCell sx={{ width: 60 }}>STT</TableCell>
                       <TableCell>Biển số</TableCell>
                       <TableCell sx={{ width: 120 }}>Ảnh biển số</TableCell>
                       <TableCell>Khu vực</TableCell>
@@ -1489,7 +1490,7 @@ const handleDateIconClick = (field) => {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      blacklist.map((item) => (
+                      blacklist.map((item, idx) => (
                         <TableRow key={item.id} hover sx={{
                           '&:hover': {
                             backgroundColor: 'rgba(211, 47, 47, 0.04)',
@@ -1506,7 +1507,7 @@ const handleDateIconClick = (field) => {
                               sx={{ '&.Mui-checked': { color: '#d32f2f' } }}
                             />
                           </TableCell>
-                          
+                          <TableCell>{idx + 1}</TableCell>
                           <TableCell>
                             <Typography variant="subtitle2" fontWeight="bold">
                               {item.plate_number}

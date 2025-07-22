@@ -18,12 +18,6 @@ const {createUserValidator, updateUserValidator, deleteUserValidator } = require
 // Import auth controller for login/register
 const authController = require('../controllers/authController');
 
-// Authentication routes
-// router.post('/register', registerValidator, authController.registerUser);
-// router.post('/login', loginValidator, authController.loginUser);
-// router.post('/refresh-token', authController.refreshToken);
-// router.post('/logout', auth, authController.logoutUser);
-
 // User profile routes
 router.get('/profile', auth, getUserProfile);
 router.put('/profile', auth, updateUser);
@@ -38,11 +32,10 @@ router.post('/create',
     createUser
 );
 
-router.get('/', 
-    auth, 
-    getAllUsers
-);
+// FIXED: Reorder routes to avoid conflicts
+// More specific routes should come before generic ones
 
+// Statistics and summary routes (before generic ID routes)
 router.get('/statistics', 
     auth, 
     getUserStatistics
@@ -58,34 +51,7 @@ router.get('/summary',
     getUsersWithRolePermissionSummary
 );
 
-router.get('/:id', 
-    auth, 
-    getUserById
-);
-
-router.get('/:id/detailed', 
-    auth, 
-    getUserDetailedView
-);
-
-router.put('/:id', 
-    auth, 
-    updateUserValidator, 
-    updateUser
-);
-
-router.put('/:id/status', 
-    auth, 
-    updateUserStatus
-);
-
-router.delete('/:id', 
-    auth, 
-    deleteUserValidator, 
-    deleteUser
-);
-
-// Search and filter routes
+// Search routes (before generic ID routes)
 router.get('/search/users', 
     auth, 
     searchUsers
@@ -106,27 +72,71 @@ router.get('/permission/:permissionCode',
     getUsersByPermission
 );
 
+// Generic routes (these should come after specific routes)
+router.get('/', 
+    auth, 
+    getAllUsers
+);
 
-/// Từ đây chưa tiến hành test api do chưa biết có sử dụng hay không
+// FIXED: Specific ID-based routes
+router.get('/:id/detailed', 
+    auth, 
+    getUserDetailedView
+);
+
+router.get('/:id', 
+    auth, 
+    getUserById
+);
+
+router.put('/:id', 
+    auth, 
+    updateUserValidator, 
+    updateUser
+);
+
+router.put('/:id/status', 
+    auth, 
+    updateUserStatus
+);
+
+router.delete('/:id', 
+    auth, 
+    deleteUserValidator, 
+    deleteUser
+);
+
+// Password reset routes
+router.post('/:id/reset-password', 
+    auth, 
+    // onlyAdminAccess, 
+    // checkPermission('user.update'), 
+    resetUserPassword
+);
+
 // Role management routes
 router.post('/:id/assign-role', 
     auth, 
     // onlyAdminAccess, 
     // checkPermission('users.update'), 
     async (req, res) => {
-        const db = require('../db');
-        const connection = await db.promise();
+        let connection;
         
         try {
-            const userId = req.params.id;
+            const db = require('../db');
+            connection = await db.promise();
+            
+            const userId = parseInt(req.params.id);
             const { roleId } = req.body;
 
-            if (!roleId) {
+            if (!roleId || isNaN(parseInt(roleId))) {
                 return res.status(400).json({
                     success: false,
-                    message: 'ID vai trò là bắt buộc'
+                    message: 'ID vai trò là bắt buộc và phải hợp lệ'
                 });
             }
+
+            const roleIdInt = parseInt(roleId);
 
             // Check if user exists
             const [user] = await connection.execute('SELECT id FROM users WHERE id = ?', [userId]);
@@ -138,7 +148,7 @@ router.post('/:id/assign-role',
             }
 
             // Check if role exists
-            const [role] = await connection.execute('SELECT id FROM roles WHERE id = ? AND is_active = 1', [roleId]);
+            const [role] = await connection.execute('SELECT id FROM roles WHERE id = ? AND is_active = 1', [roleIdInt]);
             if (role.length === 0) {
                 return res.status(404).json({
                     success: false,
@@ -148,24 +158,28 @@ router.post('/:id/assign-role',
 
             // Assign role
             await connection.execute(
-                `INSERT INTO user_roles (user_id, role_id, assigned_by) VALUES (?, ?, ?)
+                `INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at, is_active) 
+                 VALUES (?, ?, ?, NOW(), 1)
                  ON DUPLICATE KEY UPDATE is_active = 1, assigned_at = NOW(), assigned_by = ?`,
-                [userId, roleId, req.user.userId, req.user.userId]
+                [userId, roleIdInt, req.user.userId, req.user.userId]
             );
 
             // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'ASSIGN_ROLE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    userId,
-                    JSON.stringify({ roleId }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            try {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, new_values, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'ASSIGN_ROLE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        req.user.userId,
+                        userId,
+                        JSON.stringify({ roleId: roleIdInt }),
+                        req.ip || 'unknown',
+                        req.get('User-Agent') || 'unknown'
+                    ]
+                );
+            } catch (logError) {
+                console.warn('Failed to log access:', logError);
+            }
 
             res.status(200).json({
                 success: true,
@@ -188,24 +202,28 @@ router.post('/:id/remove-role',
     // onlyAdminAccess, 
     // checkPermission('users.update'), 
     async (req, res) => {
-        const db = require('../db');
-        const connection = await db.promise();
+        let connection;
         
         try {
-            const userId = req.params.id;
+            const db = require('../db');
+            connection = await db.promise();
+            
+            const userId = parseInt(req.params.id);
             const { roleId } = req.body;
 
-            if (!roleId) {
+            if (!roleId || isNaN(parseInt(roleId))) {
                 return res.status(400).json({
                     success: false,
-                    message: 'ID vai trò là bắt buộc'
+                    message: 'ID vai trò là bắt buộc và phải hợp lệ'
                 });
             }
+
+            const roleIdInt = parseInt(roleId);
 
             // Check if user-role assignment exists
             const [userRole] = await connection.execute(
                 'SELECT id FROM user_roles WHERE user_id = ? AND role_id = ? AND is_active = 1',
-                [userId, roleId]
+                [userId, roleIdInt]
             );
 
             if (userRole.length === 0) {
@@ -218,22 +236,25 @@ router.post('/:id/remove-role',
             // Remove role
             await connection.execute(
                 'UPDATE user_roles SET is_active = 0 WHERE user_id = ? AND role_id = ?',
-                [userId, roleId]
+                [userId, roleIdInt]
             );
 
             // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'REMOVE_ROLE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    userId,
-                    JSON.stringify({ roleId }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            try {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'REMOVE_ROLE', 'USER', ?, ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        req.user.userId,
+                        userId,
+                        JSON.stringify({ roleId: roleIdInt }),
+                        req.ip || 'unknown',
+                        req.get('User-Agent') || 'unknown'
+                    ]
+                );
+            } catch (logError) {
+                console.warn('Failed to log access:', logError);
+            }
 
             res.status(200).json({
                 success: true,
@@ -257,10 +278,12 @@ router.post('/bulk/delete',
     // onlyAdminAccess, 
     // checkPermission('users.delete'), 
     async (req, res) => {
-        const db = require('../config/db');
-        const connection = await db.promise();
+        let connection;
         
         try {
+            const db = require('../db');
+            connection = await db.promise();
+            
             const { userIds } = req.body;
 
             if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
@@ -270,8 +293,18 @@ router.post('/bulk/delete',
                 });
             }
 
+            // Convert and validate user IDs
+            const validUserIds = userIds.map(id => parseInt(id)).filter(id => !isNaN(id));
+            
+            if (validUserIds.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Không có ID người dùng hợp lệ'
+                });
+            }
+
             // Prevent self-deletion
-            if (userIds.includes(req.user.userId)) {
+            if (validUserIds.includes(req.user.userId)) {
                 return res.status(400).json({
                     success: false,
                     message: 'Không thể xóa tài khoản của chính mình'
@@ -279,35 +312,38 @@ router.post('/bulk/delete',
             }
 
             // Bulk soft delete
-            const placeholders = userIds.map(() => '?').join(',');
+            const placeholders = validUserIds.map(() => '?').join(',');
             await connection.execute(
                 `UPDATE users SET status = 'inactive', updated_at = NOW() WHERE id IN (${placeholders})`,
-                userIds
+                validUserIds
             );
 
             // Deactivate roles
             await connection.execute(
                 `UPDATE user_roles SET is_active = 0 WHERE user_id IN (${placeholders})`,
-                userIds
+                validUserIds
             );
 
             // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'BULK_DELETE', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    JSON.stringify({ userIds, count: userIds.length }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            try {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'BULK_DELETE', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        req.user.userId,
+                        JSON.stringify({ userIds: validUserIds, count: validUserIds.length }),
+                        req.ip || 'unknown',
+                        req.get('User-Agent') || 'unknown'
+                    ]
+                );
+            } catch (logError) {
+                console.warn('Failed to log access:', logError);
+            }
 
             res.status(200).json({
                 success: true,
-                message: `Xóa thành công ${userIds.length} người dùng`,
-                data: { deletedCount: userIds.length }
+                message: `Xóa thành công ${validUserIds.length} người dùng`,
+                data: { deletedCount: validUserIds.length }
             });
 
         } catch (error) {
@@ -326,10 +362,12 @@ router.post('/bulk/assign-role',
     // onlyAdminAccess, 
     // checkPermission('users.update'), 
     async (req, res) => {
-        const db = require('../config/db');
-        const connection = await db.promise();
+        let connection;
         
         try {
+            const db = require('../db');
+            connection = await db.promise();
+            
             const { userIds, roleId } = req.body;
 
             if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
@@ -339,15 +377,25 @@ router.post('/bulk/assign-role',
                 });
             }
 
-            if (!roleId) {
+            if (!roleId || isNaN(parseInt(roleId))) {
                 return res.status(400).json({
                     success: false,
-                    message: 'ID vai trò là bắt buộc'
+                    message: 'ID vai trò là bắt buộc và phải hợp lệ'
+                });
+            }
+
+            const roleIdInt = parseInt(roleId);
+            const validUserIds = userIds.map(id => parseInt(id)).filter(id => !isNaN(id));
+
+            if (validUserIds.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Không có ID người dùng hợp lệ'
                 });
             }
 
             // Check if role exists
-            const [role] = await connection.execute('SELECT id FROM roles WHERE id = ? AND is_active = 1', [roleId]);
+            const [role] = await connection.execute('SELECT id FROM roles WHERE id = ? AND is_active = 1', [roleIdInt]);
             if (role.length === 0) {
                 return res.status(404).json({
                     success: false,
@@ -356,29 +404,33 @@ router.post('/bulk/assign-role',
             }
 
             // Bulk assign role
-            const values = userIds.map(userId => `(${userId}, ${roleId}, ${req.user.userId})`).join(', ');
+            const values = validUserIds.map(userId => `(${userId}, ${roleIdInt}, ${req.user.userId}, NOW(), 1)`).join(', ');
+            
             await connection.execute(
-                `INSERT INTO user_roles (user_id, role_id, assigned_by) VALUES ${values}
+                `INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at, is_active) VALUES ${values}
                  ON DUPLICATE KEY UPDATE is_active = 1, assigned_at = NOW(), assigned_by = ${req.user.userId}`
             );
 
             // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'BULK_ASSIGN_ROLE', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    JSON.stringify({ userIds, roleId, count: userIds.length }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            try {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'BULK_ASSIGN_ROLE', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        req.user.userId,
+                        JSON.stringify({ userIds: validUserIds, roleId: roleIdInt, count: validUserIds.length }),
+                        req.ip || 'unknown',
+                        req.get('User-Agent') || 'unknown'
+                    ]
+                );
+            } catch (logError) {
+                console.warn('Failed to log access:', logError);
+            }
 
             res.status(200).json({
                 success: true,
-                message: `Gán vai trò thành công cho ${userIds.length} người dùng`,
-                data: { assignedCount: userIds.length }
+                message: `Gán vai trò thành công cho ${validUserIds.length} người dùng`,
+                data: { assignedCount: validUserIds.length }
             });
 
         } catch (error) {
@@ -397,10 +449,12 @@ router.post('/bulk/update-status',
     // onlyAdminAccess, 
     // checkPermission('users.update'), 
     async (req, res) => {
-        const db = require('../config/db');
-        const connection = await db.promise();
+        let connection;
         
         try {
+            const db = require('../db');
+            connection = await db.promise();
+            
             const { userIds, status } = req.body;
 
             if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
@@ -417,8 +471,17 @@ router.post('/bulk/update-status',
                 });
             }
 
+            const validUserIds = userIds.map(id => parseInt(id)).filter(id => !isNaN(id));
+
+            if (validUserIds.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Không có ID người dùng hợp lệ'
+                });
+            }
+
             // Prevent changing own status
-            if (userIds.includes(req.user.userId)) {
+            if (validUserIds.includes(req.user.userId)) {
                 return res.status(400).json({
                     success: false,
                     message: 'Không thể thay đổi trạng thái tài khoản của chính mình'
@@ -426,29 +489,32 @@ router.post('/bulk/update-status',
             }
 
             // Bulk update status
-            const placeholders = userIds.map(() => '?').join(',');
+            const placeholders = validUserIds.map(() => '?').join(',');
             await connection.execute(
                 `UPDATE users SET status = ?, updated_at = NOW() WHERE id IN (${placeholders})`,
-                [status, ...userIds]
+                [status, ...validUserIds]
             );
 
             // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'BULK_UPDATE_STATUS', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    JSON.stringify({ userIds, status, count: userIds.length }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
+            try {
+                await connection.execute(
+                    `INSERT INTO access_logs (user_id, action_type, object_type, new_values, status, ip_address, user_agent, created_at)
+                     VALUES (?, 'BULK_UPDATE_STATUS', 'USERS', ?, 'SUCCESS', ?, ?, NOW())`,
+                    [
+                        req.user.userId,
+                        JSON.stringify({ userIds: validUserIds, status, count: validUserIds.length }),
+                        req.ip || 'unknown',
+                        req.get('User-Agent') || 'unknown'
+                    ]
+                );
+            } catch (logError) {
+                console.warn('Failed to log access:', logError);
+            }
 
             res.status(200).json({
                 success: true,
-                message: `Cập nhật trạng thái thành công cho ${userIds.length} người dùng`,
-                data: { updatedCount: userIds.length }
+                message: `Cập nhật trạng thái thành công cho ${validUserIds.length} người dùng`,
+                data: { updatedCount: validUserIds.length }
             });
 
         } catch (error) {
@@ -462,16 +528,17 @@ router.post('/bulk/update-status',
     }
 );
 
-
 // Password reset routes
 router.post('/forgot-password', async (req, res) => {
-    const db = require('../db');
-    const connection = await db.promise();
+    let connection;
     
     try {
+        const db = require('../db');
+        connection = await db.promise();
+        
         const { email } = req.body;
 
-        if (!email) {
+        if (!email || !email.trim()) {
             return res.status(400).json({
                 success: false,
                 message: 'Email là bắt buộc'
@@ -479,7 +546,10 @@ router.post('/forgot-password', async (req, res) => {
         }
 
         // Check if user exists
-        const [users] = await connection.execute('SELECT id, name FROM users WHERE email = ? AND status = ?', [email, 'active']);
+        const [users] = await connection.execute(
+            'SELECT id, name FROM users WHERE email = ? AND status = ?', 
+            [email.trim(), 'active']
+        );
         
         if (users.length === 0) {
             // Don't reveal if email exists or not for security
@@ -504,18 +574,10 @@ router.post('/forgot-password', async (req, res) => {
         console.error('Error in forgot password:', error);
         res.status(500).json({
             success: false,
-            message: 'Lỗi khi xử lý yêu cầu đặt lại mật khẩu'
+            message: 'Lỗi khi xử lý yêu cầu đặt lại mật khẩu',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
-
-// Thêm route reset password cho admin
-router.post('/:id/reset-password', 
-    auth, 
-    // onlyAdminAccess, 
-    // checkPermission('user.update'), 
-    resetUserPassword
-);
-
 
 module.exports = router;
