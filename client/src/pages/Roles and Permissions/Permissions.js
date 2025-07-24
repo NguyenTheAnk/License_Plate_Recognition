@@ -869,6 +869,14 @@ const Permissions = () => {
     }
   }, [historyDialog]);
 
+  const getActiveChip = (isActive) => {
+    if (isActive) {
+      return <Chip label="Hoạt động" size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' }} />;
+    } else {
+      return <Chip label="Không hoạt động" size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' }} />;
+    }
+  };
+
   return (
     <Box sx={{ 
       minHeight: '100vh',
@@ -1233,26 +1241,7 @@ const Permissions = () => {
                         </TableCell>}
                         {visibleColumns.is_active && (
                           <TableCell>
-                            <Chip
-                              size="small"
-                              icon={permission.is_active ? <CheckCircleIcon /> : <CancelIcon />}
-                              label={permission.is_active ? 'Hoạt động' : 'Không hoạt động'}
-                              sx={{
-                                backgroundColor: permission.is_active ? '#e8f5e8' : '#ffebee',
-                                color: permission.is_active ? '#2e7d32' : '#c62828',
-                                fontWeight: 600,
-                                '& .MuiChip-icon': {
-                                  color: permission.is_active ? '#2e7d32' : '#c62828',
-                                },
-                                cursor: 'pointer'
-                              }}
-                              onClick={async () => {
-                                // Quick toggle active status
-                                const token = localStorage.getItem('token');
-                                await editData(`/api/permissions/${permission.id}`, { ...permission, isActive: !permission.is_active }, token);
-                                fetchPermissions();
-                              }}
-                            />
+                            {getActiveChip(permission.is_active)}
                           </TableCell>
                         )}
                         <TableCell align="center">

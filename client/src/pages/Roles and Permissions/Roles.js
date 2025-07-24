@@ -74,7 +74,9 @@ import {
   FirstPage,
   LastPage,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  CheckCircle,
+  Pause
 } from '@mui/icons-material';
 
 import { 
@@ -716,6 +718,14 @@ const RoleManagement = () => {
     }
   };
 
+  const getActiveChip = (isActive) => {
+    if (isActive) {
+      return <Chip label="Hoạt động" size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' }} />;
+    } else {
+      return <Chip label="Tạm dừng" size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' }} />;
+    }
+  };
+
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       <RoleHeader onAdd={() => openDialog('create')} />
@@ -1011,11 +1021,7 @@ const RoleManagement = () => {
                       />
                     </TableCell>
                     <TableCell align="center">
-                      <Chip
-                        label={role.is_active ? 'Hoạt động' : 'Tạm dừng'}
-                        color={role.is_active ? 'success' : 'default'}
-                        size="small"
-                      />
+                      {getActiveChip(role.is_active)}
                     </TableCell>
                   <TableCell align="center">
                     <Box display="flex" justifyContent="center" gap={1}>

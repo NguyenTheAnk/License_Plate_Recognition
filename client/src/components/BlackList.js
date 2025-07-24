@@ -15,7 +15,8 @@ import {
    Image as ImageIcon, Warning as WarningIcon, 
   Block as BlockIcon, Visibility as VisibilityIcon, Edit as EditIcon, 
   Delete as DeleteIcon, PhotoCamera as PhotoCameraIcon, Close as CloseIcon,
-  Download as DownloadIcon, FirstPage, LastPage, ChevronLeft, ChevronRight, MoreHoriz
+  Download as DownloadIcon, FirstPage, LastPage, ChevronLeft, ChevronRight, MoreHoriz,
+  Cancel, AccessTime, Info, CheckCircle, WarningAmber as WarningAmberIcon
 } from '@mui/icons-material';
 import { FaTrash, FaPlus, FaExclamationTriangle, FaShieldAlt, FaClock, FaSave } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
@@ -1062,36 +1063,36 @@ const handleDateIconClick = (field) => {
   // Status and chip components
   const getStatusChip = (status) => {
     const statusConfig = {
-      'active': { color: 'error', label: 'Đang chặn' },
-      'inactive': { color: 'default', label: 'Không hoạt động' },
-      'expired': { color: 'warning', label: 'Hết hạn' }
+      'active': { label: 'Đang chặn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'inactive': { label: 'Không hoạt động', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } },
+      'expired': { label: 'Hết hạn', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } }
     };
-    const config = statusConfig[status] || { color: 'default', label: status };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   const getViolationTypeChip = (type) => {
     const typeConfig = {
-      'unauthorized': { color: 'warning', label: 'Không được phép' },
-      'security_threat': { color: 'error', label: 'Đe dọa an ninh' },
-      'unpaid_fine': { color: 'info', label: 'Chưa nộp phạt' },
-      'banned': { color: 'default', label: 'Bị cấm' },
-      'suspicious': { color: 'warning', label: 'Đáng ngờ' },
-      'other': { color: 'default', label: 'Khác' }
+      'unauthorized': { label: 'Không được phép', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'security_threat': { label: 'Nguy cơ an ninh', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'unpaid_fine': { label: 'Chưa nộp phạt', sx: { bgcolor: '#e3f2fd', color: '#1976d2', border: '1px solid #64b5f6' } },
+      'banned': { label: 'Bị cấm', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } },
+      'suspicious': { label: 'Đáng ngờ', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'other': { label: 'Khác', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
     };
-    const config = typeConfig[type] || { color: 'default', label: type };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = typeConfig[type] || { label: type, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   const getSeverityChip = (severity) => {
     const severityConfig = {
-      'low': { color: 'success', label: 'Thấp' },
-      'medium': { color: 'warning', label: 'Trung bình' },
-      'high': { color: 'error', label: 'Cao' },
-      'critical': { color: 'default', label: 'Nghiêm trọng' }
+      'low': { label: 'Thấp', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'medium': { label: 'Trung bình', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'high': { label: 'Cao', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'critical': { label: 'Nghiêm trọng', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
     };
-    const config = severityConfig[severity] || { color: 'default', label: severity };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = severityConfig[severity] || { label: severity, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   // Thêm hàm helper phân trang giống WhiteList

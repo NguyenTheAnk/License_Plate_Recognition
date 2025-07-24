@@ -767,23 +767,23 @@ const handleDateIconClickBackup = (field) => {
 
   const getStatusChip = (status) => {
     const statusConfig = {
-      'valid': { color: 'success', label: 'Có hiệu lực' },
-      'expired': { color: 'error', label: 'Hết hạn' },
-      'future': { color: 'warning', label: 'Chưa có hiệu lực' },
-      'permanent': { color: 'info', label: 'Vĩnh viễn' }
+      'valid': { label: 'Có hiệu lực', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'expired': { label: 'Hết hạn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'future': { label: 'Chưa có hiệu lực', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'permanent': { label: 'Vĩnh viễn', sx: { bgcolor: '#e3f2fd', color: '#1976d2', border: '1px solid #64b5f6' } }
     };
-    const config = statusConfig[status] || { color: 'default', label: status };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   const getApprovalChip = (status) => {
     const statusConfig = {
-      'approved': { color: 'success', label: 'Đã phê duyệt' },
-      'pending': { color: 'warning', label: 'Chờ phê duyệt' },
-      'rejected': { color: 'error', label: 'Từ chối' }
+      'approved': { label: 'Đã phê duyệt', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'pending': { label: 'Chờ phê duyệt', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'rejected': { label: 'Từ chối', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } }
     };
-    const config = statusConfig[status] || { color: 'default', label: status };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   const handleDateChange = (field, value) => {

@@ -59,7 +59,10 @@ import {
   FirstPage,
   LastPage,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  CheckCircle,
+  Cancel,
+  Pause
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 
@@ -1224,13 +1227,14 @@ const UsersManagement = () => {
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'active': return 'success';
-      case 'inactive': return 'default';
-      case 'suspended': return 'error';
-      default: return 'default';
-    }
+  const getStatusChip = (status) => {
+    const statusConfig = {
+      'active': { label: 'Hoạt động', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'inactive': { label: 'Tạm dừng', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } },
+      'suspended': { label: 'Đình chỉ', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } }
+    };
+    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   const getStatusText = (status) => {
@@ -1718,17 +1722,7 @@ const UsersManagement = () => {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Chip
-                          label={getStatusText(user.status)}
-                          color={getStatusColor(user.status)}
-                          size="small"
-                          sx={{
-                            fontWeight: 600,
-                            fontSize: '0.75rem',
-                            height: 24,
-                            minWidth: 80,
-                          }}
-                        />
+                        {getStatusChip(user.status)}
                       </TableCell>
                       <TableCell align="center">
                         <Box display="flex" justifyContent="center" gap={1}>

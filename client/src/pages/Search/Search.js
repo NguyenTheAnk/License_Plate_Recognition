@@ -7,7 +7,7 @@ import {
   Search as SearchIcon, DirectionsCar, Person, Phone, Email, LocationOn, CheckCircle, Block, History, CameraAlt, Info, Event, Description, Close as CloseIcon, FilterList, Refresh, TuneRounded, ExpandMore, ExpandLess, Visibility, ArrowForward, Timeline, Security, LocationSearching, FirstPage, LastPage, ChevronLeft, ChevronRight
 } from '@mui/icons-material';
 import { fetchDataFromAPI } from '../../utils/auth';
-import { InputBase } from '@mui/material';
+import { InputBase, InputAdornment } from '@mui/material';
 
 function SearchPage() {
   const theme = useTheme();
@@ -432,475 +432,196 @@ function getPaginationItems(current, total) {
 
   // Enhanced filter rendering based on tab
   const renderFilters = () => {
-    const commonFilters = (
-      <>
-        <Grid item xs={12} md={3}>
-          <TextField 
-            label="Biển số xe" 
-            value={filters.plate_number} 
-            onChange={e => handleFilterChange('plate_number', e.target.value)} 
-            fullWidth 
-            size="small" 
-            InputProps={{ 
-              startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} /> 
-            }}
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                borderRadius: 2,
-                '&:hover fieldset': {
-                  borderColor: theme.palette.primary.main,
-                },
-              }
-            }}
-          />
-        </Grid>
-      </>
-    );
-
-    if (tab === 'journey') {
-      return (
-        <>
-          {commonFilters}
-          <Grid item xs={12} md={3}>
-            <TextField 
-              label="Ngày lộ trình" 
-              type="date" 
-              value={filters.journey_date || ''} 
-              onChange={e => handleFilterChange('journey_date', e.target.value)} 
-              fullWidth 
-              size="small" 
-              InputLabelProps={{ shrink: true }}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            />
-          </Grid>
-        </>
-      );
-    }
-
-    if (tab === 'plate') {
-      return (
-        <>
-          {commonFilters}
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Camera</InputLabel>
-              <Select 
-                value={filters.camera_id} 
-                label="Camera" 
-                onChange={e => handleFilterChange('camera_id', e.target.value)}
-                sx={{ borderRadius: 2 }}
-              >
-                <MenuItem value="">Tất cả</MenuItem>
-                {cameras.map(cam => (
-                  <MenuItem key={cam.id} value={cam.id}>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <CameraAlt sx={{ fontSize: 16 }} />
-                      {cam.name}
-                      <Chip 
-                        label={cam.status} 
-                        size="small" 
-                        color={cam.status === 'online' ? 'success' : 'error'}
-                        sx={{ ml: 1 }}
-                      />
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Khu vực</InputLabel>
-              <Select 
-                value={filters.location_id} 
-                label="Khu vực" 
-                onChange={e => handleFilterChange('location_id', e.target.value)}
-                sx={{ borderRadius: 2 }}
-              >
-                <MenuItem value="">Tất cả</MenuItem>
-                {locations.map(loc => (
-                  <MenuItem key={loc.id} value={loc.id}>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <LocationOn sx={{ fontSize: 16 }} />
-                      {loc.name}
-                      <Chip label={`${loc.camera_count} camera`} size="small" sx={{ ml: 1 }} />
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <TextField 
-              label="Từ ngày" 
-              type="date" 
-              value={filters.date_from || ''} 
-              onChange={e => handleFilterChange('date_from', e.target.value)} 
-              fullWidth 
-              size="small" 
-              InputLabelProps={{ shrink: true }}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            />
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <TextField 
-              label="Đến ngày" 
-              type="date" 
-              value={filters.date_to || ''} 
-              onChange={e => handleFilterChange('date_to', e.target.value)} 
-              fullWidth 
-              size="small" 
-              InputLabelProps={{ shrink: true }}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-            />
-          </Grid>
-        </>
-      );
-    }
-    // Thêm vào hàm renderFilters(), sau case 'access':
-if (tab === 'location') {
-  return (
-    <>
-      <Grid item xs={12} md={3}>
-        <TextField 
-          label="Tên khu vực" 
-          value={filters.location_name || ''} 
-          onChange={e => handleFilterChange('location_name', e.target.value)} 
-          fullWidth 
-          size="small" 
-          InputProps={{ 
-            startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} /> 
-          }}
-          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-        />
-      </Grid>
-      <Grid item xs={12} md={3}>
-        <TextField 
-          label="Mã khu vực" 
-          value={filters.location_code || ''} 
-          onChange={e => handleFilterChange('location_code', e.target.value)} 
-          fullWidth 
-          size="small" 
-          sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-        />
-      </Grid>
-      <Grid item xs={12} md={2}>
-        <FormControl fullWidth size="small">
-          <InputLabel>Loại khu vực</InputLabel>
-          <Select 
-            value={filters.zone_type || ''} 
-            label="Loại khu vực" 
-            onChange={e => handleFilterChange('zone_type', e.target.value)}
-            sx={{ borderRadius: 2 }}
-          >
-            <MenuItem value="">Tất cả</MenuItem>
-            <MenuItem value="entry">Cổng vào</MenuItem>
-            <MenuItem value="exit">Cổng ra</MenuItem>
-            <MenuItem value="parking">Bãi xe</MenuItem>
-            <MenuItem value="internal">Nội bộ</MenuItem>
-          </Select>
-        </FormControl>
-      </Grid>
-      <Grid item xs={12} md={2}>
-        <FormControl fullWidth size="small">
-          <InputLabel>Trạng thái</InputLabel>
-          <Select 
-            value={filters.is_active || ''} 
-            label="Trạng thái" 
-            onChange={e => handleFilterChange('is_active', e.target.value)}
-            sx={{ borderRadius: 2 }}
-          >
-            <MenuItem value="">Tất cả</MenuItem>
-            <MenuItem value="true">
-              <Chip label="Hoạt động" color="success" size="small" />
-            </MenuItem>
-            <MenuItem value="false">
-              <Chip label="Tạm dừng" color="default" size="small" />
-            </MenuItem>
-          </Select>
-        </FormControl>
-      </Grid>
-    </>
-  );
-}
-    if (tab === 'access') {
-      return (
-        <>
-          {commonFilters}
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Loại danh sách</InputLabel>
-              <Select 
-                value={filters.list_type || ''} 
-                label="Loại danh sách" 
-                onChange={e => handleFilterChange('list_type', e.target.value)}
-                sx={{ borderRadius: 2 }}
-              >
-                {accessListTypes.map(opt => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    <Chip label={opt.label} color={opt.color} size="small" />
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Khu vực</InputLabel>
-              <Select 
-                value={filters.location_id} 
-                label="Khu vực" 
-                onChange={e => handleFilterChange('location_id', e.target.value)}
-                sx={{ borderRadius: 2 }}
-              >
-                <MenuItem value="">Tất cả</MenuItem>
-                {locations.map(loc => (
-                  <MenuItem key={loc.id} value={loc.id}>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <LocationOn sx={{ fontSize: 16 }} />
-                      {loc.name}
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Trạng thái</InputLabel>
-              <Select 
-                value={filters.is_active || ''} 
-                label="Trạng thái" 
-                onChange={e => handleFilterChange('is_active', e.target.value)}
-                sx={{ borderRadius: 2 }}
-              >
-                <MenuItem value="">Tất cả</MenuItem>
-                <MenuItem value="true">
-                  <Chip label="Hoạt động" color="success" size="small" />
-                </MenuItem>
-                <MenuItem value="false">
-                  <Chip label="Tạm dừng" color="default" size="small" />
-                </MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-        </>
-      );
-    }
-
-    // Default comprehensive filters
     return (
       <>
-        {commonFilters}
-        <Grid item xs={12} md={2}>
-          <TextField 
-            label="Chủ xe" 
-            value={filters.owner_name} 
-            onChange={e => handleFilterChange('owner_name', e.target.value)} 
-            fullWidth 
-            size="small" 
-            InputProps={{ 
-              startAdornment: <Person sx={{ mr: 1, color: 'text.secondary' }} /> 
-            }}
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-          />
+        {/* Main filters row */}
+        <Grid container spacing={3} alignItems="center" sx={{ mb: 0 }}>
+          <Grid item xs={12} md={3}>
+            <TextField
+              label="Biển số xe"
+              value={filters.plate_number}
+              onChange={e => handleFilterChange('plate_number', e.target.value)}
+              fullWidth
+              size="medium"
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><SearchIcon color="primary" sx={{ fontSize: 22 }} /></InputAdornment>,
+                sx: { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }
+              }}
+              InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
+            />
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <TextField
+              label="Chủ xe"
+              value={filters.owner_name}
+              onChange={e => handleFilterChange('owner_name', e.target.value)}
+              fullWidth
+              size="medium"
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><Person color="secondary" sx={{ fontSize: 22 }} /></InputAdornment>,
+                sx: { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }
+              }}
+              InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
+            />
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+              <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Khu vực</InputLabel>
+              <Select
+                value={filters.location_id}
+                label="Khu vực"
+                onChange={e => handleFilterChange('location_id', e.target.value)}
+                startAdornment={<LocationOn color="info" sx={{ mr: 1, fontSize: 22 }} />}
+                sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 16, fontWeight: 600, '& .MuiSelect-icon': { fontSize: 22 } }}
+              >
+                <MenuItem value="">Tất cả</MenuItem>
+                {locations.map(loc => (
+                  <MenuItem key={loc.id} value={loc.id}>{loc.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+              <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Trạng thái</InputLabel>
+              <Select
+                value={filters.status}
+                label="Trạng thái"
+                onChange={e => handleFilterChange('status', e.target.value)}
+                sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 16, fontWeight: 600, '& .MuiSelect-icon': { fontSize: 22 } }}
+              >
+                {statusOptions.map(opt => (
+                  <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
         </Grid>
-        <Grid item xs={12} md={2}>
-          <TextField 
-            label="Số điện thoại" 
-            value={filters.owner_phone} 
-            onChange={e => handleFilterChange('owner_phone', e.target.value)} 
-            fullWidth 
-            size="small" 
-            InputProps={{ 
-              startAdornment: <Phone sx={{ mr: 1, color: 'text.secondary' }} /> 
-            }}
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-          />
-        </Grid>
-        <Grid item xs={12} md={2}>
-          <FormControl fullWidth size="small">
-            <InputLabel>Khu vực</InputLabel>
-            <Select 
-              value={filters.location_id} 
-              label="Khu vực" 
-              onChange={e => handleFilterChange('location_id', e.target.value)}
-              sx={{ borderRadius: 2 }}
-            >
-              <MenuItem value="">Tất cả</MenuItem>
-              {locations.map(loc => (
-                <MenuItem key={loc.id} value={loc.id}>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <LocationOn sx={{ fontSize: 16, color: 'primary.main' }} />
-                    {loc.name}
-                    <Chip label={loc.zone_type} size="small" sx={{ ml: 1 }} />
-                  </Box>
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-        
-        {/* Advanced Filters - Collapsible */}
-        <Grid item xs={12}>
-          <Button
-            variant="text"
-            startIcon={showAdvancedFilters ? <ExpandLess /> : <ExpandMore />}
-            onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-            sx={{ 
-              textTransform: 'none',
-              color: 'text.secondary',
-              '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.04) }
-            }}
-          >
-            Bộ lọc nâng cao
-          </Button>
-        </Grid>
-        
+        {/* Advanced filters collapsible */}
+        <Divider sx={{ my: 2 }} />
+        <Button
+          variant="text"
+          startIcon={showAdvancedFilters ? <ExpandLess /> : <ExpandMore />}
+          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+          sx={{ textTransform: 'none', color: 'primary.main', fontWeight: 600, mb: 1 }}
+        >
+          Bộ lọc nâng cao
+        </Button>
         <Collapse in={showAdvancedFilters} timeout="auto" unmountOnExit>
-          <Grid container spacing={2} sx={{ mt: 0 }}>
+          <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Trạng thái</InputLabel>
-                <Select 
-                  value={filters.status} 
-                  label="Trạng thái" 
-                  onChange={e => handleFilterChange('status', e.target.value)}
-                  sx={{ borderRadius: 2 }}
-                >
-                  {statusOptions.map(opt => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      <Chip label={opt.label} color={opt.color} size="small" />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Hiệu lực</InputLabel>
-                <Select 
-                  value={filters.valid_status} 
-                  label="Hiệu lực" 
+              <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Hiệu lực</InputLabel>
+                <Select
+                  value={filters.valid_status}
+                  label="Hiệu lực"
                   onChange={e => handleFilterChange('valid_status', e.target.value)}
-                  sx={{ borderRadius: 2 }}
+                  sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
                 >
                   {validStatusOptions.map(opt => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      <Chip label={opt.label} color={opt.color} size="small" />
-                    </MenuItem>
+                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Phê duyệt</InputLabel>
-                <Select 
-                  value={filters.approval_status} 
-                  label="Phê duyệt" 
+              <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Phê duyệt</InputLabel>
+                <Select
+                  value={filters.approval_status}
+                  label="Phê duyệt"
                   onChange={e => handleFilterChange('approval_status', e.target.value)}
-                  sx={{ borderRadius: 2 }}
+                  sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
                 >
                   {approvalOptions.map(opt => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      <Chip label={opt.label} color={opt.color} size="small" />
-                    </MenuItem>
+                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Loại vi phạm</InputLabel>
-                <Select 
-                  value={filters.violation_type} 
-                  label="Loại vi phạm" 
+              <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Loại vi phạm</InputLabel>
+                <Select
+                  value={filters.violation_type}
+                  label="Loại vi phạm"
                   onChange={e => handleFilterChange('violation_type', e.target.value)}
-                  sx={{ borderRadius: 2 }}
+                  sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
                 >
                   {violationTypes.map(opt => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      <Chip label={opt.label} color={opt.color} size="small" />
-                    </MenuItem>
+                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Mức độ</InputLabel>
-                <Select 
-                  value={filters.severity} 
-                  label="Mức độ" 
+              <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Mức độ</InputLabel>
+                <Select
+                  value={filters.severity}
+                  label="Mức độ"
                   onChange={e => handleFilterChange('severity', e.target.value)}
-                  sx={{ borderRadius: 2 }}
+                  sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
                 >
                   {severityOptions.map(opt => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      <Chip label={opt.label} color={opt.color} size="small" />
-                    </MenuItem>
+                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} md={2}>
-              <TextField 
-                label="Từ ngày" 
-                type="date" 
-                value={filters.date_from} 
-                onChange={e => handleFilterChange('date_from', e.target.value)} 
-                fullWidth 
-                size="small" 
-                InputLabelProps={{ shrink: true }}
-                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+              <TextField
+                label="Từ ngày"
+                type="date"
+                value={filters.date_from}
+                onChange={e => handleFilterChange('date_from', e.target.value)}
+                fullWidth
+                size="medium"
+                InputLabelProps={{ shrink: true, sx: { fontWeight: 700, fontSize: 15 } }}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' } }}
               />
             </Grid>
             <Grid item xs={12} md={2}>
-              <TextField 
-                label="Đến ngày" 
-                type="date" 
-                value={filters.date_to} 
-                onChange={e => handleFilterChange('date_to', e.target.value)} 
-                fullWidth 
-                size="small" 
-                InputLabelProps={{ shrink: true }}
-                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+              <TextField
+                label="Đến ngày"
+                type="date"
+                value={filters.date_to}
+                onChange={e => handleFilterChange('date_to', e.target.value)}
+                fullWidth
+                size="medium"
+                InputLabelProps={{ shrink: true, sx: { fontWeight: 700, fontSize: 15 } }}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' } }}
               />
             </Grid>
             <Grid item xs={12} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Camera</InputLabel>
-                <Select 
-                  value={filters.camera_id} 
-                  label="Camera" 
+              <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Camera</InputLabel>
+                <Select
+                  value={filters.camera_id}
+                  label="Camera"
                   onChange={e => handleFilterChange('camera_id', e.target.value)}
-                  sx={{ borderRadius: 2 }}
+                  sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
                 >
                   <MenuItem value="">Tất cả</MenuItem>
                   {cameras.map(cam => (
-                    <MenuItem key={cam.id} value={cam.id}>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <CameraAlt sx={{ fontSize: 16 }} />
-                        {cam.name}
-                      </Box>
-                    </MenuItem>
+                    <MenuItem key={cam.id} value={cam.id}>{cam.name}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} md={4}>
-              <TextField 
-                label="Tìm kiếm toàn văn" 
-                value={filters.q} 
-                onChange={e => handleFilterChange('q', e.target.value)} 
-                fullWidth 
-                size="small" 
+              <TextField
+                label="Tìm kiếm toàn văn"
+                value={filters.q}
+                onChange={e => handleFilterChange('q', e.target.value)}
+                fullWidth
+                size="medium"
                 placeholder="Nhập từ khóa tìm kiếm..."
-                InputProps={{ 
-                  startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} /> 
-                }}
-                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon color="primary" /></InputAdornment> }}
+                InputLabelProps={{ sx: { fontWeight: 700, fontSize: 15 } }}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' } }}
               />
             </Grid>
           </Grid>
@@ -1012,14 +733,14 @@ useEffect(() => {
         case 'whitelist':
           data = await fetchDataFromAPI(`/api/whitelist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          totalCountFromAPI = data.pagination?.total || data.pagination?.total_records || data.total || (Array.isArray(data.data) ? data.data.length : 0) || (Array.isArray(data) ? data.length : 0);
+          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
           break;
         case 'blacklist':
           data = await fetchDataFromAPI(`/api/blacklist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          totalCountFromAPI = data.pagination?.total || data.pagination?.total_records || data.total || (Array.isArray(data.data) ? data.data.length : 0) || (Array.isArray(data) ? data.length : 0);
+          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
           break;
         case 'camera':
           data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
@@ -1114,14 +835,14 @@ useEffect(() => {
         case 'whitelist':
           data = await fetchDataFromAPI(`/api/whitelist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          totalCountFromAPI = data.pagination?.total || data.pagination?.total_records || data.total || (Array.isArray(data.data) ? data.data.length : 0) || (Array.isArray(data) ? data.length : 0);
+          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
           break;
         case 'blacklist':
           data = await fetchDataFromAPI(`/api/blacklist`, token, { params });
           setResults(data.data || []);
-          totalCountFromAPI = data.pagination?.total || data.total || 0; // Sửa: lấy từ pagination.total nếu có
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
+          totalCountFromAPI = data.pagination?.total || data.pagination?.total_records || data.total || (Array.isArray(data.data) ? data.data.length : 0) || (Array.isArray(data) ? data.length : 0);
+          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
           break;
         case 'camera':
           data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
@@ -1244,82 +965,66 @@ useEffect(() => {
     }
   };
 
+  const getStatusChip = (status) => {
+    const statusConfig = {
+      'valid': { label: 'Có hiệu lực', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'expired': { label: 'Hết hạn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'future': { label: 'Chưa có hiệu lực', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'permanent': { label: 'Vĩnh viễn', sx: { bgcolor: '#e3f2fd', color: '#1976d2', border: '1px solid #64b5f6' } },
+      'active': { label: 'Đang chặn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'inactive': { label: 'Không hoạt động', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
+    };
+    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
+  };
+  const getApprovalChip = (status) => {
+    const statusConfig = {
+      'approved': { label: 'Đã phê duyệt', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'pending': { label: 'Chờ phê duyệt', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'rejected': { label: 'Từ chối', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } }
+    };
+    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
+  };
+  const getViolationTypeChip = (type) => {
+    const typeConfig = {
+      'unauthorized': { label: 'Không được phép', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'security_threat': { label: 'Nguy cơ an ninh', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'unpaid_fine': { label: 'Chưa nộp phạt', sx: { bgcolor: '#e3f2fd', color: '#1976d2', border: '1px solid #64b5f6' } },
+      'banned': { label: 'Bị cấm', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } },
+      'suspicious': { label: 'Đáng ngờ', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'other': { label: 'Khác', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
+    };
+    const config = typeConfig[type] || { label: type, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
+  };
+  const getSeverityChip = (severity) => {
+    const severityConfig = {
+      'low': { label: 'Thấp', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'medium': { label: 'Trung bình', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'high': { label: 'Cao', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'critical': { label: 'Nghiêm trọng', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
+    };
+    const config = severityConfig[severity] || { label: severity, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
+  };
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8f9fa', py: 3 }}>
       {/* Enhanced Header */}
       <Box sx={{ px: 3, mb: 3 }}>
-        <Card 
-          sx={{ 
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
-            color: 'white', 
-            borderRadius: 4, 
-            boxShadow: '0 10px 30px rgba(102, 126, 234, 0.3)',
-            overflow: 'hidden',
-            position: 'relative'
-          }}
-        >
-          <Box 
-            sx={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              width: '200px',
-              height: '200px',
-              background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)',
-              borderRadius: '50%',
-              transform: 'translate(50%, -50%)'
-            }}
-          />
-          <CardContent sx={{ p: 4, position: 'relative' }}>
-            <Box display="flex" alignItems="center" gap={3}>
-              <Avatar 
-                sx={{ 
-                  bgcolor: 'rgba(255, 255, 255, 0.2)', 
-                  color: 'white', 
-                  width: 80, 
-                  height: 80,
-                  backdropFilter: 'blur(10px)'
-                }}
-              >
-                <SearchIcon sx={{ fontSize: 40 }} />
-              </Avatar>
-              <Box flex={1}>
-                <Typography variant="h3" fontWeight={700} sx={{ mb: 1 }}>
-                  Hệ thống tra cứu thông minh
-                </Typography>
-                <Typography variant="h6" sx={{ opacity: 0.9, mb: 2 }}>
-                  Tìm kiếm và quản lý thông tin phương tiện, biển số, lịch sử ra vào một cách toàn diện
-                </Typography>
-                <Box display="flex" gap={2} flexWrap="wrap">
-                  <Chip 
-                    label="Tìm kiếm thông minh" 
-                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white', fontWeight: 600 }}
-                  />
-                  <Chip 
-                    label="Báo cáo chi tiết" 
-                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white', fontWeight: 600 }}
-                  />
-                  <Chip 
-                    label="Theo dõi realtime" 
-                    sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white', fontWeight: 600 }}
-                  />
-                </Box>
-              </Box>
-              {searchHistory.length > 0 && (
-                <Box>
-                  <Typography variant="body2" sx={{ opacity: 0.8, mb: 1 }}>
-                    Tìm kiếm gần đây
-                  </Typography>
-                  {searchHistory.slice(0, 3).map((search, index) => (
-                    <Box key={index} display="flex" alignItems="center" gap={1} mb={0.5}>
-                      <History sx={{ fontSize: 14, opacity: 0.7 }} />
-                      <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                        {search.term} ({search.results} kết quả)
-                      </Typography>
-                    </Box>
-                  ))}
-                </Box>
-              )}
+        <Card sx={{ background: '#fff', color: '#222', borderRadius: 5, boxShadow: '0 4px 24px rgba(25, 118, 210, 0.06)', p: 0, mb: 3 }}>
+          <CardContent sx={{ p: { xs: 3, md: 5 }, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <Avatar sx={{ bgcolor: '#e3f2fd', color: '#1976d2', width: 48, height: 48, boxShadow: '0 2px 8px rgba(25,118,210,0.08)', mb: 2 }}>
+              <SearchIcon sx={{ fontSize: 28 }} />
+            </Avatar>
+            <Typography variant="h5" fontWeight={700} sx={{ color: '#1976d2', mb: 2, textAlign: 'center', letterSpacing: 0.5 }}>
+              Tìm kiếm & quản lý phương tiện, biển số, lịch sử ra vào một cách toàn diện
+            </Typography>
+            <Box display="flex" gap={2} flexWrap="wrap" justifyContent="center" mb={1}>
+              <Chip label="Tìm kiếm thông minh" variant="outlined" sx={{ fontWeight: 600, color: '#1976d2', borderColor: '#90caf9', bgcolor: '#f5fafd' }} />
+              <Chip label="Báo cáo chi tiết" variant="outlined" sx={{ fontWeight: 600, color: '#1976d2', borderColor: '#90caf9', bgcolor: '#f5fafd' }} />
+              <Chip label="Theo dõi realtime" variant="outlined" sx={{ fontWeight: 600, color: '#1976d2', borderColor: '#90caf9', bgcolor: '#f5fafd' }} />
             </Box>
           </CardContent>
         </Card>
@@ -1327,83 +1032,210 @@ useEffect(() => {
 
       {/* Enhanced Filter Section */}
       <Box sx={{ px: 3, mb: 3 }}>
-        <Card sx={{ borderRadius: 3, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
-          <CardContent sx={{ p: 3 }}>
+        <Card sx={{ borderRadius: 5, boxShadow: '0 8px 32px rgba(25, 118, 210, 0.12)', background: '#fff', p: 0, overflow: 'visible' }}>
+          <CardContent sx={{ p: { xs: 2, md: 5 }, borderRadius: 5, background: 'transparent' }}>
             <Box display="flex" alignItems="center" gap={2} mb={3}>
-              <Avatar sx={{ bgcolor: 'primary.main', width: 32, height: 32 }}>
-                <TuneRounded sx={{ fontSize: 18 }} />
+              <Avatar sx={{ bgcolor: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)', width: 48, height: 48, boxShadow: '0 2px 8px rgba(25,118,210,0.12)' }}>
+                <TuneRounded sx={{ fontSize: 28, color: 'white' }} />
               </Avatar>
-              <Typography variant="h6" fontWeight={600}>
+              <Typography variant="h5" fontWeight={800} sx={{ background: 'linear-gradient(90deg, #1976d2 0%, #42a5f5 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: 1 }}>
                 Bộ lọc tìm kiếm
               </Typography>
-              <Chip 
-                label={`Tab: ${tabList.find(t => t.value === tab)?.label}`}
-                color="primary"
-                size="small"
-                sx={{ ml: 'auto' }}
-              />
+              <Box flex={1} />
+              <Chip label={`Tab: ${tabList.find(t => t.value === tab)?.label}`} color="primary" size="small" sx={{ fontWeight: 700, fontSize: 15, px: 2, py: 1, borderRadius: 2 }} />
             </Box>
             
-            <Grid container spacing={2}>
-              {renderFilters()}
-              
-              {/* Action Buttons */}
-              <Grid item xs={12} display="flex" alignItems="center" gap={2} mt={2}>
-                <Button 
-                  variant="contained" 
-                  color="primary" 
-                  startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <SearchIcon />}
-                  onClick={handleSearch} 
-                  sx={{ 
-                    borderRadius: 3, 
-                    px: 4, 
-                    py: 1.5,
-                    fontWeight: 600,
-                    textTransform: 'none',
-                    minWidth: 140,
-                    boxShadow: '0 4px 15px rgba(25, 118, 210, 0.3)',
-                    '&:hover': {
-                      boxShadow: '0 6px 20px rgba(25, 118, 210, 0.4)',
-                      transform: 'translateY(-1px)'
-                    }
-                  }} 
-                  disabled={loading}
-                >
-                  {loading ? 'Đang tìm...' : 'Tìm kiếm'}
-                </Button>
-                
-                <Button 
-                  variant="outlined" 
-                  color="secondary" 
-                  startIcon={<Refresh />}
-                  onClick={handleClearFilters} 
-                  sx={{ 
-                    borderRadius: 3, 
-                    px: 3, 
-                    py: 1.5,
-                    fontWeight: 600,
-                    textTransform: 'none',
-                    borderWidth: 2,
-                    '&:hover': {
-                      borderWidth: 2,
-                      transform: 'translateY(-1px)'
-                    }
-                  }} 
-                  disabled={loading}
-                >
-                  Làm mới
-                </Button>
-
-                {Object.values(filters).some(value => value !== '') && (
-                  <Chip 
-                    label="Đang áp dụng bộ lọc"
-                    color="warning"
-                    onDelete={handleClearFilters}
-                    sx={{ ml: 2 }}
-                  />
-                )}
+            <Grid container spacing={3} alignItems="center" sx={{ mb: 0 }}>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  label="Biển số xe"
+                  value={filters.plate_number}
+                  onChange={e => handleFilterChange('plate_number', e.target.value)}
+                  fullWidth
+                  size="medium"
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start"><SearchIcon color="primary" sx={{ fontSize: 22 }} /></InputAdornment>,
+                    sx: { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }
+                  }}
+                  InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
+                />
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  label="Chủ xe"
+                  value={filters.owner_name}
+                  onChange={e => handleFilterChange('owner_name', e.target.value)}
+                  fullWidth
+                  size="medium"
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start"><Person color="secondary" sx={{ fontSize: 22 }} /></InputAdornment>,
+                    sx: { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }
+                  }}
+                  InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
+                />
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Khu vực</InputLabel>
+                  <Select
+                    value={filters.location_id}
+                    label="Khu vực"
+                    onChange={e => handleFilterChange('location_id', e.target.value)}
+                    startAdornment={<LocationOn color="info" sx={{ mr: 1, fontSize: 22 }} />}
+                    sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 16, fontWeight: 600, '& .MuiSelect-icon': { fontSize: 22 } }}
+                  >
+                    <MenuItem value="">Tất cả</MenuItem>
+                    {locations.map(loc => (
+                      <MenuItem key={loc.id} value={loc.id}>{loc.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Trạng thái</InputLabel>
+                  <Select
+                    value={filters.status}
+                    label="Trạng thái"
+                    onChange={e => handleFilterChange('status', e.target.value)}
+                    sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 16, fontWeight: 600, '& .MuiSelect-icon': { fontSize: 22 } }}
+                  >
+                    {statusOptions.map(opt => (
+                      <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Grid>
             </Grid>
+            {/* Advanced filters collapsible */}
+            <Divider sx={{ my: 2 }} />
+            <Button
+              variant="text"
+              startIcon={showAdvancedFilters ? <ExpandLess /> : <ExpandMore />}
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              sx={{ textTransform: 'none', color: 'primary.main', fontWeight: 600, mb: 1 }}
+            >
+              Bộ lọc nâng cao
+            </Button>
+            <Collapse in={showAdvancedFilters} timeout="auto" unmountOnExit>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12} md={2}>
+                  <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Hiệu lực</InputLabel>
+                    <Select
+                      value={filters.valid_status}
+                      label="Hiệu lực"
+                      onChange={e => handleFilterChange('valid_status', e.target.value)}
+                      sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                    >
+                      {validStatusOptions.map(opt => (
+                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Phê duyệt</InputLabel>
+                    <Select
+                      value={filters.approval_status}
+                      label="Phê duyệt"
+                      onChange={e => handleFilterChange('approval_status', e.target.value)}
+                      sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                    >
+                      {approvalOptions.map(opt => (
+                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Loại vi phạm</InputLabel>
+                    <Select
+                      value={filters.violation_type}
+                      label="Loại vi phạm"
+                      onChange={e => handleFilterChange('violation_type', e.target.value)}
+                      sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                    >
+                      {violationTypes.map(opt => (
+                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Mức độ</InputLabel>
+                    <Select
+                      value={filters.severity}
+                      label="Mức độ"
+                      onChange={e => handleFilterChange('severity', e.target.value)}
+                      sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                    >
+                      {severityOptions.map(opt => (
+                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <TextField
+                    label="Từ ngày"
+                    type="date"
+                    value={filters.date_from}
+                    onChange={e => handleFilterChange('date_from', e.target.value)}
+                    fullWidth
+                    size="medium"
+                    InputLabelProps={{ shrink: true, sx: { fontWeight: 700, fontSize: 15 } }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' } }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <TextField
+                    label="Đến ngày"
+                    type="date"
+                    value={filters.date_to}
+                    onChange={e => handleFilterChange('date_to', e.target.value)}
+                    fullWidth
+                    size="medium"
+                    InputLabelProps={{ shrink: true, sx: { fontWeight: 700, fontSize: 15 } }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' } }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Camera</InputLabel>
+                    <Select
+                      value={filters.camera_id}
+                      label="Camera"
+                      onChange={e => handleFilterChange('camera_id', e.target.value)}
+                      sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                    >
+                      <MenuItem value="">Tất cả</MenuItem>
+                      {cameras.map(cam => (
+                        <MenuItem key={cam.id} value={cam.id}>{cam.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    label="Tìm kiếm toàn văn"
+                    value={filters.q}
+                    onChange={e => handleFilterChange('q', e.target.value)}
+                    fullWidth
+                    size="medium"
+                    placeholder="Nhập từ khóa tìm kiếm..."
+                    InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon color="primary" /></InputAdornment> }}
+                    InputLabelProps={{ sx: { fontWeight: 700, fontSize: 15 } }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' } }}
+                  />
+                </Grid>
+              </Grid>
+            </Collapse>
           </CardContent>
         </Card>
       </Box>
@@ -1630,11 +1462,7 @@ useEffect(() => {
                               <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
                               <TableCell>{item.location_name || item.location || ''}</TableCell>
                               <TableCell>
-                                <Chip 
-                                  label={item.connection_status === 'online' || item.status === 'online' ? 'Hoạt động' : 'Tạm dừng'}
-                                  color={item.connection_status === 'online' || item.status === 'online' ? 'success' : 'default'}
-                                  size="small"
-                                />
+                                {getStatusChip(item.connection_status || item.status)}
                               </TableCell>
                               <TableCell>
                                 <Button 
@@ -1688,11 +1516,7 @@ useEffect(() => {
                                         <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
                                         <TableCell>{item.location_name || item.location || ''}</TableCell>
                                         <TableCell>
-                                          <Chip 
-                                            label={item.connection_status === 'online' || item.status === 'online' ? 'Hoạt động' : 'Tạm dừng'}
-                                            color={item.connection_status === 'online' || item.status === 'online' ? 'success' : 'default'}
-                                            size="small"
-                                          />
+                                          {getStatusChip(item.connection_status || item.status)}
                                         </TableCell>
                                         <TableCell>
                                           <Button 
@@ -1734,12 +1558,7 @@ useEffect(() => {
                                       />
                                     </TableCell>
                                     <TableCell>
-                                      <Chip 
-                                        label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
-                                        color={item.is_active ? 'success' : 'default'} 
-                                        size="small"
-                                        sx={{ fontWeight: 600 }}
-                                      />
+                                      {getStatusChip(item.is_active ? 'active' : 'inactive')}
                                     </TableCell>
                                     <TableCell>
                                       <Button 
@@ -1770,11 +1589,7 @@ useEffect(() => {
                                       </Typography>
                                     </TableCell>
                                     <TableCell>
-                                      <Chip 
-                                        label={item.vehicle_type || 'Không xác định'} 
-                                        color="info" 
-                                        size="small"
-                                      />
+                                      {getSeverityChip(item.vehicle_type || 'unknown')}
                                     </TableCell>
                                     <TableCell>
                                       <Button 
@@ -1848,12 +1663,7 @@ useEffect(() => {
                                       </Typography>
                                     </TableCell>
                                     <TableCell>
-                                      <Chip 
-                                        label={item.list_type === 'whitelist' ? 'Whitelist' : 'Blacklist'} 
-                                        color={item.list_type === 'whitelist' ? 'success' : 'error'} 
-                                        size="small"
-                                        sx={{ fontWeight: 600 }}
-                                      />
+                                      <Chip label='Đã phê duyệt' size='small' sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' }} />
                                     </TableCell>
                                     <TableCell>
                                       <Box display="flex" alignItems="center" gap={1}>
@@ -1872,12 +1682,7 @@ useEffect(() => {
                                       </Box>
                                     </TableCell>
                                     <TableCell>
-                                      <Chip 
-                                        label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
-                                        color={item.is_active ? 'success' : 'default'} 
-                                        size="small"
-                                        sx={{ fontWeight: 600 }}
-                                      />
+                                      {getStatusChip(item.is_active ? 'active' : 'inactive')}
                                     </TableCell>
                                     <TableCell>
                                       <Button 
@@ -1935,30 +1740,10 @@ useEffect(() => {
                                       </Box>
                                     </TableCell>
                                     <TableCell>
-                                      {item.current_status && (
-                                        <Chip 
-                                          label={
-                                            item.current_status === 'valid' ? 'Còn hiệu lực' :
-                                            item.current_status === 'expired' ? 'Hết hạn' :
-                                            item.current_status === 'future' ? 'Chưa hiệu lực' : 'Vĩnh viễn'
-                                          }
-                                          color={
-                                            item.current_status === 'valid' ? 'success' :
-                                            item.current_status === 'expired' ? 'error' :
-                                            item.current_status === 'future' ? 'warning' : 'info'
-                                          }
-                                          size="small"
-                                          sx={{ fontWeight: 600 }}
-                                        />
-                                      )}
+                                      {getStatusChip(item.current_status)}
                                     </TableCell>
                                     <TableCell>
-                                      <Chip 
-                                        label={item.approval_status === 'approved' ? 'Đã duyệt' : item.approval_status === 'pending' ? 'Chờ duyệt' : 'Từ chối'}
-                                        color={item.approval_status === 'approved' ? 'success' : item.approval_status === 'pending' ? 'warning' : 'error'}
-                                        size="small"
-                                        sx={{ fontWeight: 600, fontSize: 13 }}
-                                      />
+                                      {getApprovalChip(item.approval_status)}
                                     </TableCell>
                                     <TableCell>
                                       <Button 
@@ -2245,7 +2030,7 @@ useEffect(() => {
                                   <Typography variant="body2" color="text.secondary">Loại vi phạm</Typography>
                                   <Typography variant="body1">
                                     {selectedItem.violation_type ? 
-                                      violationTypes.find(v => v.value === selectedItem.violation_type)?.label || selectedItem.violation_type
+                                      getViolationTypeChip(selectedItem.violation_type)
                                       : 'Không có vi phạm'
                                     }
                                   </Typography>
