@@ -648,13 +648,17 @@ const RoleManagement = () => {
     return (
       <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: 2, p: 2, borderTop: '1px solid #e0e0e0', backgroundColor: '#fafafa' }}>
         <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-          Hiển thị <strong>{from}-{to}</strong> của <strong>{totalRoles}</strong> vai trò
+          Hiển thị <strong>{from} - {to}</strong> của <strong>{totalRoles}</strong> vai trò
         </Typography>
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
-            <Select value={rowsPerPage} onChange={e => { setRowsPerPage(Number(e.target.value)); setCurrentPage(0); }} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}>
-              {[5, 10, 20, 50, 100].map(size => (<MenuItem key={size} value={size}>{size}</MenuItem>))}
+            <Select value={rowsPerPage} onChange={e => { setRowsPerPage(Number(e.target.value)); setCurrentPage(0); }} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}
+              renderValue={v => `${v}/ trang`}
+            >
+              {[5, 10, 20, 50, 100].map(size => (
+                <MenuItem key={size} value={size}>{size}/ trang</MenuItem>
+              ))}
             </Select>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

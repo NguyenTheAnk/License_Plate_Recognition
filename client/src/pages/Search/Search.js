@@ -1985,13 +1985,21 @@ useEffect(() => {
   <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
     {totalItems === 0
       ? 'Hiển thị 0/0 bản ghi'
-      : `Hiển thị ${((currentPage - 1) * itemsPerPage) + 1}-${Math.min(currentPage * itemsPerPage, totalItems)} / ${totalItems} bản ghi`}
+      : `Hiển thị ${((currentPage - 1) * itemsPerPage) + 1} - ${Math.min(currentPage * itemsPerPage, totalItems)} của ${totalItems} bản ghi`}
   </Typography>
   <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
-      <Select value={itemsPerPage} onChange={handleItemsPerPageChange} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}>
-        {[5, 10, 20, 50, 100].map(size => (<MenuItem key={size} value={size}>{size}</MenuItem>))}
+      <Select 
+        value={itemsPerPage} 
+        onChange={handleItemsPerPageChange} 
+        size="small" 
+        sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}
+        renderValue={v => `${v}/ trang`}
+      >
+        {[5, 10, 20, 50, 100].map(size => (
+          <MenuItem key={size} value={size}>{size}/ trang</MenuItem>
+        ))}
       </Select>
     </Box>
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

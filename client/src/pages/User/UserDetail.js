@@ -265,19 +265,19 @@ const UserDetail = () => {
         // Build action label mapping from user.roles/modules
         const labelMap = {};
         if (response.data.user.roles) {
-          response.data.user.roles.forEach(role => {
-            const modules = role.modules || {};
-            Object.values(modules).forEach(actionsArr => {
+        response.data.user.roles.forEach(role => {
+          const modules = role.modules || {};
+          Object.values(modules).forEach(actionsArr => {
               if (Array.isArray(actionsArr)) {
-                actionsArr.forEach(action => {
-                  if (!labelMap[action]) {
-                    // Capitalize first letter, replace camelCase with spaces
-                    labelMap[action] = action.charAt(0).toUpperCase() + action.slice(1).replace(/([A-Z])/g, ' $1');
-                  }
-                });
+            actionsArr.forEach(action => {
+              if (!labelMap[action]) {
+                // Capitalize first letter, replace camelCase with spaces
+                labelMap[action] = action.charAt(0).toUpperCase() + action.slice(1).replace(/([A-Z])/g, ' $1');
               }
             });
+              }
           });
+        });
         }
         setActionLabels(labelMap);
         
@@ -394,7 +394,7 @@ const UserDetail = () => {
     Object.entries(modules).forEach(([module, actions]) => {
       if (!mergedModules[module]) mergedModules[module] = new Set();
       if (Array.isArray(actions)) {
-        actions.forEach(action => mergedModules[module].add(action));
+      actions.forEach(action => mergedModules[module].add(action));
       }
     });
   });
@@ -792,40 +792,40 @@ const UserDetail = () => {
                 </Typography>
                 {loginHistory && loginHistory.length > 0 ? (
                   <>
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
-                            <TableCell>Thời gian</TableCell>
-                            <TableCell>Trạng thái</TableCell>
-                            <TableCell>IP Address</TableCell>
-                            <TableCell>User Agent</TableCell>
-                            <TableCell>Lý do thất bại</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
+                          <TableCell>Thời gian</TableCell>
+                          <TableCell>Trạng thái</TableCell>
+                          <TableCell>IP Address</TableCell>
+                          <TableCell>User Agent</TableCell>
+                          <TableCell>Lý do thất bại</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
                           {loginHistory.slice(0, loginPagination.limit).map((login, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{formatDateTime(login.created_at)}</TableCell>
-                              <TableCell>
-                                <Chip 
-                                  label={login.status === 'success' ? 'Thành công' : 'Thất bại'} 
-                                  color={login.status === 'success' ? 'success' : 'error'} 
-                                  size="small" 
-                                />
-                              </TableCell>
-                              <TableCell>{login.ip_address}</TableCell>
-                              <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {login.user_agent}
-                              </TableCell>
-                              <TableCell>
-                                {login.failure_reason || '-'}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                          <TableRow key={index}>
+                            <TableCell>{formatDateTime(login.created_at)}</TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={login.status === 'success' ? 'Thành công' : 'Thất bại'} 
+                                color={login.status === 'success' ? 'success' : 'error'} 
+                                size="small" 
+                              />
+                            </TableCell>
+                            <TableCell>{login.ip_address}</TableCell>
+                            <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {login.user_agent}
+                            </TableCell>
+                            <TableCell>
+                              {login.failure_reason || '-'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                     <Box sx={{ 
   display: 'flex', 
   flexDirection: { xs: 'column', md: 'row' },
@@ -1052,52 +1052,52 @@ const UserDetail = () => {
                 </Typography>
                 {accessLogs && accessLogs.length > 0 ? (
                   <>
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
-                            <TableCell>Thời gian</TableCell>
-                            <TableCell>Hành động</TableCell>
-                            <TableCell>Đối tượng</TableCell>
-                            <TableCell>Trạng thái</TableCell>
-                            <TableCell>IP Address</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ '& th': { fontWeight: 600, bgcolor: '#f5f5f5' } }}>
+                          <TableCell>Thời gian</TableCell>
+                          <TableCell>Hành động</TableCell>
+                          <TableCell>Đối tượng</TableCell>
+                          <TableCell>Trạng thái</TableCell>
+                          <TableCell>IP Address</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
                           {accessLogs.slice(0, accessPagination.limit).map((log, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{formatDateTime(log.created_at)}</TableCell>
-                              <TableCell>
-                                <Chip 
-                                  label={log.action_type} 
-                                  size="small" 
-                                  variant="outlined"
-                                  color="primary"
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="body2">
-                                  {log.object_type}
-                                  {log.object_id && (
-                                    <Typography variant="caption" color="text.secondary" display="block">
-                                      ID: {log.object_id}
-                                    </Typography>
-                                  )}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Chip 
-                                  label={log.status} 
-                                  color={log.status === 'SUCCESS' ? 'success' : 'error'} 
-                                  size="small" 
-                                />
-                              </TableCell>
-                              <TableCell>{log.ip_address}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                          <TableRow key={index}>
+                            <TableCell>{formatDateTime(log.created_at)}</TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={log.action_type} 
+                                size="small" 
+                                variant="outlined"
+                                color="primary"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2">
+                                {log.object_type}
+                                {log.object_id && (
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    ID: {log.object_id}
+                                  </Typography>
+                                )}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={log.status} 
+                                color={log.status === 'SUCCESS' ? 'success' : 'error'} 
+                                size="small" 
+                              />
+                            </TableCell>
+                            <TableCell>{log.ip_address}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                    <Box sx={{ 
   display: 'flex', 
   flexDirection: { xs: 'column', md: 'row' },
