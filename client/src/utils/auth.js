@@ -41,7 +41,6 @@ function buildQueryString(params) {
 // Hàm lấy dữ liệu từ API (GET request) - Updated version
 export const fetchDataFromAPI = async (url, token = null, options = {}) => {
     try {
-        console.log('fetchDataFromAPI called with:', { url, hasToken: !!token, options });
         
         const headers = {};
         if (token && token.trim() !== '') {
@@ -53,15 +52,12 @@ export const fetchDataFromAPI = async (url, token = null, options = {}) => {
             fullUrl += buildQueryString(options.params);
         }
         
-        console.log('Making request to:', fullUrl);
-        console.log('Request headers:', headers);
         
         const response = await fetch(fullUrl, {
             method: 'GET',
             headers
         });
         
-        console.log('Response status:', response.status);
         
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
@@ -75,7 +71,6 @@ export const fetchDataFromAPI = async (url, token = null, options = {}) => {
         }
         
         const data = await response.json();
-        console.log('API Success Response:', data);
         return data;
     } catch (error) {
         console.error('fetchDataFromAPI error:', error);
@@ -117,12 +112,7 @@ export const uploadImage = async (url, formData, token) => {
 // SỬA: Kiểm tra chính xác hơn cho FormData
 export const postData = async (url, requestData, token = null, isMultipart = false) => {
     try {
-        console.log('postData called with:', { 
-            url, 
-            requestDataType: requestData.constructor.name, 
-            hasToken: !!token, 
-            isMultipart: isMultipart || requestData instanceof FormData 
-        });
+        
         
         let headers = {};
         let body;
@@ -200,8 +190,6 @@ export const editData = async (url, requestData, token = null) => {
             console.log('JSON body:', body);
         }
 
-        console.log('Request headers:', headers);
-        console.log('Request URL:', `${API_BASE_URL}/${cleanUrl(url)}`);
 
         const response = await fetch(`${API_BASE_URL}/${cleanUrl(url)}`, {
             method: 'PUT',
@@ -209,8 +197,6 @@ export const editData = async (url, requestData, token = null) => {
             body
         });
 
-        console.log('Response status:', response.status);
-        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
         const data = await response.json();
         console.log('Response data:', data);

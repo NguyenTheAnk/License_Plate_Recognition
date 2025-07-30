@@ -5,6 +5,7 @@ import "./hideVideoControls.css";
 const CameraViewer = ({ camera, actionBar, onClose }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const wsRetryTimeoutRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [recognitionResults, setRecognitionResults] = useState([]);
   const [detections, setDetections] = useState([]);
@@ -12,6 +13,13 @@ const CameraViewer = ({ camera, actionBar, onClose }) => {
   const wsRef = useRef(null);
   const wsRetryCount = useRef(0);
   const maxWsRetries = 3;
+  const [fps, setFps] = useState(0);
+  const frameCountRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const animationFrameRef = useRef(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const isRecognizingRef = useRef(false);
+  const [isUploadedVideo, setIsUploadedVideo] = useState(false);
 
   useEffect(() => {
     let hls;
@@ -23,81 +31,87 @@ const CameraViewer = ({ camera, actionBar, onClose }) => {
 
       const tryInitPlayer = () => {
         if (!camera.streamUrl || !video) return;
-        if (camera.streamUrl && videoRef.current) {
-          if (Hls.isSupported()) {
-            hls = new Hls({
-              maxBufferLength: 60,
-              maxMaxBufferLength: 120,
-              liveSyncDuration: 60,
-              liveMaxLatencyDuration: 120,
-              enableWorker: true,
-              fragLoadingTimeOut: 20000,
-              manifestLoadingTimeOut: 20000,
-              levelLoadingTimeOut: 20000,
-              nudgeOffset: 0.2,
-              maxFragLookUpTolerance: 0.3,
-              lowBufferWatchdogPeriod: 0.5,
+
+        // Kiểm tra định dạng của streamUrl (HLS hay MP4)
+        const isHls = camera.streamUrl.includes(".m3u8");
+        const isMp4 = camera.streamUrl.includes(".mp4");
+
+        if (isHls && Hls.isSupported()) {
+          // Xử lý stream HLS
+          hls = new Hls({
+            maxBufferLength: 60,
+            maxMaxBufferLength: 120,
+            liveSyncDuration: 60,
+            liveMaxLatencyDuration: 120,
+            enableWorker: true,
+            fragLoadingTimeOut: 20000,
+            manifestLoadingTimeOut: 20000,
+            levelLoadingTimeOut: 20000,
+            nudgeOffset: 0.2,
+            maxFragLookUpTolerance: 0.3,
+            lowBufferWatchdogPeriod: 0.5,
+          });
+
+          hls.loadSource(camera.streamUrl);
+          hls.attachMedia(video);
+
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            setLoading(false);
+            retryCount = 0;
+            video.play().catch((err) => {
+              console.error("Lỗi phát video HLS:", err);
+              setTimeout(() => video.play(), 2000);
             });
+          });
 
-            hls.loadSource(camera.streamUrl);
-            hls.attachMedia(video);
-
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              setLoading(false);
-              retryCount = 0;
-              video.play().catch((err) => {
-                console.error("Lỗi phát video:", err);
-                setTimeout(() => video.play(), 2000);
-              });
-            });
-
-            hls.on(Hls.Events.ERROR, (event, data) => {
-              console.error("Lỗi HLS:", data);
-              setLoading(false);
-              if (data.fatal) {
-                switch (data.type) {
-                  case Hls.ErrorTypes.NETWORK_ERROR:
-                    console.log("Lỗi mạng, thử khôi phục...");
-                    hls.startLoad();
-                    break;
-                  case Hls.ErrorTypes.MEDIA_ERROR:
-                    console.log("Lỗi media, khôi phục...");
-                    hls.recoverMediaError();
-                    break;
-                  default:
-                    console.log("Lỗi không khắc phục được, thử lại...");
-                    hls.destroy();
-                    if (retryCount < maxRetries) {
-                      retryCount++;
-                      setTimeout(tryInitPlayer, 3000);
-                    } else {
-                      alert("Không thể tải stream sau nhiều lần thử.");
-                    }
-                    break;
-                }
-              } else if (data.details === 'bufferStalledError') {
-                console.log("Bộ đệm bị kẹt, thử tải lại...");
-                hls.startLoad();
+          hls.on(Hls.Events.ERROR, (event, data) => {
+            console.error("Lỗi HLS:", data);
+            setLoading(false);
+            if (data.fatal) {
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  console.log("Lỗi mạng HLS, thử khôi phục...");
+                  hls.startLoad();
+                  break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  console.log("Lỗi media HLS, khôi phục...");
+                  hls.recoverMediaError();
+                  break;
+                default:
+                  console.log("Lỗi HLS không khắc phục được, thử lại...");
+                  hls.destroy();
+                  if (retryCount < maxRetries) {
+                    retryCount++;
+                    setTimeout(tryInitPlayer, 3000);
+                  } else {
+                    alert("Không thể tải stream HLS sau nhiều lần thử.");
+                  }
+                  break;
+              }
+            } else if (data.details === "bufferStalledError") {
+              console.log("Bộ đệm HLS bị kẹt, thử tải lại...");
+              hls.startLoad();
+            }
+          });
+        } else if (isMp4 || video.canPlayType("video/mp4")) {
+          // Xử lý video MP4
+          video.src = camera.streamUrl;
+          video.addEventListener("loadedmetadata", () => {
+            setLoading(false);
+            video.play().catch((err) => {
+              console.error("Lỗi phát video MP4:", err);
+              if (retryCount < maxRetries) {
+                retryCount++;
+                setTimeout(tryInitPlayer, 2000);
+              } else {
+                alert("Không thể tải video MP4 sau nhiều lần thử.");
               }
             });
-          } else if (
-            videoRef.current.canPlayType("application/vnd.apple.mpegurl")
-          ) {
-            videoRef.current.src = camera.streamUrl;
-            videoRef.current.addEventListener("loadedmetadata", () => {
-              videoRef.current.play().catch((err) => {
-                console.error("Lỗi phát:", err);
-                if (retryCount < maxRetries) {
-                  retryCount++;
-                  setTimeout(tryInitPlayer, 2000);
-                } else {
-                  alert("Không thể tải stream sau nhiều lần thử.");
-                }
-              });
-            });
-          } else {
-            alert("Trình duyệt không hỗ trợ HLS cho camera " + camera.id);
-          }
+          });
+        } else {
+          alert(
+            "Trình duyệt không hỗ trợ định dạng video cho camera " + camera.id
+          );
         }
       };
 
@@ -112,8 +126,9 @@ const CameraViewer = ({ camera, actionBar, onClose }) => {
         videoRef.current.src = "";
         videoRef.current.pause();
       }
-      if (wsRef.current) {
-        wsRef.current.close();
+      stopRecognition();
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
       }
     };
   }, [camera.streamUrl]);
@@ -123,116 +138,275 @@ const CameraViewer = ({ camera, actionBar, onClose }) => {
     const video = videoRef.current;
     if (!canvas || !video) return;
 
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const drawCanvas = () => {
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
-    const displayWidth = video.clientWidth;
-    const displayHeight = video.clientHeight;
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+      const displayWidth = video.clientWidth;
+      const displayHeight = video.clientHeight;
 
-    if (videoWidth && videoHeight) {
-      canvas.width = displayWidth;
-      canvas.height = displayHeight;
+      if (videoWidth && videoHeight) {
+        canvas.width = displayWidth;
+        canvas.height = displayHeight;
 
-      const scaleX = displayWidth / videoWidth;
-      const scaleY = displayHeight / videoHeight;
+        const scaleX = displayWidth / videoWidth;
+        const scaleY = displayHeight / videoHeight;
 
-      detections.forEach((detection) => {
-        const [x, y, w, h] = detection.object_bbox;
-        const left = x * scaleX;
-        const top = y * scaleY;
-        const width = w * scaleX;
-        const height = h * scaleY;
+        // Vẽ các detection
+        detections.forEach((detection) => {
+          const [x, y, w, h] = detection.object_bbox;
+          const left = x * scaleX;
+          const top = y * scaleY;
+          const width = w * scaleX;
+          const height = h * scaleY;
 
-        ctx.strokeStyle = "red";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(left, top, width, height);
-        ctx.fillStyle = "red";
-        ctx.font = "14px Arial";
-        ctx.fillText(detection.object_class, left, top > 10 ? top - 5 : 10);
-      });
-    }
-  }, [detections]);
+          ctx.strokeStyle = "red";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(left, top, width, height);
+          ctx.fillStyle = "red";
+          ctx.font = "14px Arial";
+          ctx.fillText(detection.object_class, left, top > 10 ? top - 5 : 10);
+        });
+
+        // Vẽ FPS ở góc phải trên
+        ctx.fillStyle = "yellow";
+        ctx.font = "16px Arial";
+        ctx.textAlign = "right";
+        ctx.fillText(`${fps.toFixed(1)} FPS`, canvas.width - 10, 20);
+
+        // Tính FPS
+        frameCountRef.current += 1;
+        const currentTime = performance.now();
+        const deltaTime = currentTime - lastTimeRef.current;
+
+        if (deltaTime >= 1000) {
+          setFps(frameCountRef.current / (deltaTime / 1000));
+          frameCountRef.current = 0;
+          lastTimeRef.current = currentTime;
+        }
+      }
+
+      // Tiếp tục vòng lặp vẽ
+      animationFrameRef.current = requestAnimationFrame(drawCanvas);
+    };
+
+    // Bắt đầu vòng lặp vẽ
+    drawCanvas();
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [detections, fps]);
+
+  useEffect(() => {
+    // Kiểm tra xem có phải video tải lên không
+    setIsUploadedVideo(camera.id.startsWith("upload-"));
+  }, [camera.id]);
+
+  const setRecognizing = (value) => {
+    setIsRecognizing(value);
+    isRecognizingRef.current = value;
+  };
 
   const startRecognition = () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+
+    // Kiểm tra loại nguồn
     if (!camera.id || !camera.streamUrl) {
       console.error("ID camera hoặc URL stream không hợp lệ");
       alert("Không thể bắt đầu nhận diện: Thiếu ID camera hoặc URL stream.");
+      setIsProcessing(false);
       return;
     }
 
-    const tryConnectWebSocket = () => {
-      if (wsRetryCount.current >= maxWsRetries) {
-        alert("Không thể kết nối WebSocket sau nhiều lần thử.");
-        setIsRecognizing(false);
-        return;
-      }
+    if (isRecognizing) {
+      console.log("Nhận diện đang chạy, không bắt đầu lại");
+      setIsProcessing(false);
+      return;
+    }
 
-      wsRef.current = new WebSocket('ws://localhost:5002/recognize-ws');
+    setRecognizing(true);
+    tryConnectWebSocket();
+    setIsProcessing(false);
+  };
 
-      wsRef.current.onopen = () => {
-        console.log("Kết nối WebSocket đã được thiết lập");
-        wsRetryCount.current = 0;
-        setTimeout(() => {
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ streamId: camera.id, rtspUrl: camera.streamUrl }));
-            console.log("Đã gửi thông điệp WebSocket:", { streamId: camera.id, rtspUrl: camera.streamUrl });
-          }
-        }, 100);
-      };
+  const tryConnectWebSocket = () => {
+    if (!isRecognizingRef.current) {
+      console.log("Nhận diện đã dừng, không thử kết nối lại");
+      return;
+    }
 
-      wsRef.current.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.error) {
-            console.error("Lỗi từ WebSocket:", data.error);
-            alert("Lỗi nhận diện: " + data.error);
-            setIsRecognizing(false);
-            return;
+    if (wsRetryCount.current >= maxWsRetries) {
+      alert("Không thể kết nối WebSocket sau nhiều lần thử.");
+      setRecognizing(false);
+      return;
+    }
+
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      console.log("Closing existing WebSocket connection...");
+      wsRef.current.close(1000, "New connection requested");
+      wsRef.current = null;
+    }
+
+    wsRef.current = new WebSocket("ws://localhost:5002/recognize-ws");
+
+    wsRef.current.onopen = () => {
+      console.log("Kết nối WebSocket đã được thiết lập");
+      wsRetryCount.current = 0;
+      setTimeout(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          if (isUploadedVideo) {
+            wsRef.current.send(
+              JSON.stringify({
+                streamId: camera.id,
+                videoUrl: camera.streamUrl,
+              })
+            );
+          } else {
+            wsRef.current.send(
+              JSON.stringify({
+                streamId: camera.id,
+                rtspUrl: camera.streamUrl,
+              })
+            );
           }
-          if (data.objects) {
-            setDetections(data.objects);
-            setRecognitionResults((prev) => [
-              ...prev,
-              { timestamp: new Date().toLocaleTimeString(), objects: data.objects }
-            ].slice(-5));
-          }
-        } catch (error) {
-          console.error("Lỗi xử lý thông điệp WebSocket:", error);
-          setIsRecognizing(false);
+          console.log("Đã gửi thông điệp WebSocket:", {
+            streamId: camera.id,
+            rtspUrl: camera.streamUrl,
+          });
         }
-      };
-
-      wsRef.current.onerror = (error) => {
-        console.error("Lỗi WebSocket:", error);
-        wsRetryCount.current++;
-        setTimeout(tryConnectWebSocket, 2000);
-      };
-
-      wsRef.current.onclose = (event) => {
-        console.log("Kết nối WebSocket đã đóng, lý do:", event.reason, "mã:", event.code);
-        if (event.code === 1005 && wsRetryCount.current < maxWsRetries) {
-          wsRetryCount.current++;
-          setTimeout(tryConnectWebSocket, 2000);
-        } else {
-          alert("Kết nối WebSocket thất bại. Vui lòng kiểm tra server.");
-          setIsRecognizing(false);
-        }
-      };
+      }, 100);
     };
 
-    setIsRecognizing(true);
-    tryConnectWebSocket();
+    wsRef.current.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          console.error("Lỗi từ WebSocket:", data.error);
+          alert("Lỗi nhận diện: " + data.error);
+          setRecognizing(false);
+          return;
+        }
+        if (data.objects) {
+          setDetections(data.objects);
+          setRecognitionResults((prev) =>
+            [
+              ...prev,
+              {
+                timestamp: new Date().toLocaleTimeString(),
+                objects: data.objects,
+              },
+            ].slice(-5)
+          );
+        }
+      } catch (error) {
+        console.error("Lỗi xử lý thông điệp WebSocket:", error);
+        setRecognizing(false);
+      }
+    };
+
+    wsRef.current.onerror = (error) => {
+      console.error("Lỗi WebSocket:", error);
+      wsRetryCount.current++;
+
+      // Hủy timeout cũ nếu có
+      if (wsRetryTimeoutRef.current) {
+        clearTimeout(wsRetryTimeoutRef.current);
+      }
+
+      // Chỉ retry nếu vẫn đang trong chế độ nhận diện
+      if (isRecognizing && wsRetryCount.current < maxWsRetries) {
+        wsRetryTimeoutRef.current = setTimeout(tryConnectWebSocket, 2000);
+      } else {
+        setRecognizing(false);
+      }
+    };
+
+    wsRef.current.onclose = (event) => {
+      console.log(
+        "Kết nối WebSocket đã đóng, lý do:",
+        event.reason,
+        "mã:",
+        event.code
+      );
+
+      // Chỉ retry nếu vẫn đang trong chế độ nhận diện
+      if (
+        isRecognizing &&
+        event.code !== 1000 &&
+        wsRetryCount.current < maxWsRetries
+      ) {
+        wsRetryCount.current++;
+        if (wsRetryTimeoutRef.current) {
+          clearTimeout(wsRetryTimeoutRef.current);
+        }
+        wsRetryTimeoutRef.current = setTimeout(tryConnectWebSocket, 2000);
+      } else if (event.code !== 1000) {
+        setRecognizing(false);
+      }
+    };
   };
 
   const stopRecognition = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-    setIsRecognizing(false);
+    if (isProcessing) return;
+    setIsProcessing(true);
+    console.log("Đang dừng nhận diện...");
+
+    setRecognizing(false);
     setDetections([]);
+    setRecognitionResults([]);
+
+    if (wsRef.current) {
+      try {
+        if (
+          wsRef.current.readyState === WebSocket.OPEN ||
+          wsRef.current.readyState === WebSocket.CONNECTING
+        ) {
+          wsRef.current.close(1000, "Recognition stopped by user");
+          console.log("WebSocket đã được yêu cầu đóng");
+        } else {
+          console.log("WebSocket đã ở trạng thái đóng hoặc đang đóng");
+        }
+      } catch (error) {
+        console.error("Lỗi khi đóng WebSocket:", error);
+      }
+      wsRef.current = null;
+    } else {
+      console.log("Không có WebSocket để đóng");
+    }
+
+    if (wsRetryTimeoutRef.current) {
+      clearTimeout(wsRetryTimeoutRef.current);
+      wsRetryTimeoutRef.current = null;
+    }
+
+    // Đóng kết nối WebSocket nếu có
+    if (wsRef.current) {
+      try {
+        if (
+          [WebSocket.OPEN, WebSocket.CONNECTING].includes(
+            wsRef.current.readyState
+          )
+        ) {
+          wsRef.current.close(1000, "Recognition stopped by user");
+        }
+        wsRef.current = null;
+      } catch (error) {
+        console.error("Lỗi khi đóng WebSocket:", error);
+      }
+    }
+
     wsRetryCount.current = 0;
+    setRecognizing(false);
+    setDetections([]);
+    setRecognitionResults([]);
+    console.log("Nhận diện đã dừng, trạng thái đã được reset");
+    setIsProcessing(false);
   };
 
   return (
@@ -260,7 +434,13 @@ const CameraViewer = ({ camera, actionBar, onClose }) => {
           Đang tải video...
         </div>
       )}
-      <div style={{ position: "relative", width: "100%", height: "calc(100% - 50px)" }}>
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          height: "calc(100% - 50px)",
+        }}
+      >
         <video
           id={`video-${camera.id}`}
           ref={videoRef}
@@ -291,7 +471,14 @@ const CameraViewer = ({ camera, actionBar, onClose }) => {
           }}
         />
       </div>
-      <div style={{ width: "100%" }}>{actionBar({ startRecognition, stopRecognition, isRecognizing })}</div>
+      <div style={{ width: "100%" }}>
+        {actionBar({
+          startRecognition,
+          stopRecognition,
+          isRecognizing,
+          isProcessing,
+        })}
+      </div>
       {recognitionResults.length > 0 && (
         <div
           style={{

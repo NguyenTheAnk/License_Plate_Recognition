@@ -33,6 +33,7 @@ import {
   SmartToy as AiIcon,
   Videocam as CameraIcon,
   PlayCircleOutline as PlayIcon,
+  VideoLibrary as VideoIcon, // Thêm icon cho video
 } from "@mui/icons-material";
 import { fetchDataFromAPI } from '../utils/auth';
 
@@ -77,7 +78,9 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   // State cho việc mở/đóng submenu
   const [openSubmenus, setOpenSubmenus] = useState({});
   const [isCameraListOpen, setIsCameraListOpen] = useState(false);
+  const [isVideoListOpen, setIsVideoListOpen] = useState(false); // State cho danh sách video
   const [cameras, setCameras] = useState([]);
+  const [videos, setVideos] = useState([]); // State cho danh sách video
 
   // Camera state
   const totalCameras = 46;
@@ -96,7 +99,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
           (camera) => camera.connection_status === "online"
         );
         if (activeCamerasList.length === 0) {
-          // Nếu không có camera online, hiển thị tất cả camera để debug
           activeCamerasList = cameraList;
         }
         setCameras(activeCamerasList);
@@ -105,6 +107,23 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
       }
     };
     fetchCameras();
+  }, []);
+
+  // Fetch videos data
+  useEffect(() => {
+    const fetchVideos = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const response = await fetchDataFromAPI('/api/videos/list-videos', token);
+        if (response.success) {
+          setVideos(response.data || []);
+        }
+      } catch (error) {
+        console.error("Sidebar Error fetching videos:", error);
+        setVideos([]);
+      }
+    };
+    fetchVideos();
   }, []);
 
   // Hàm toggle submenu
@@ -119,14 +138,24 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
     setIsCameraListOpen(!isCameraListOpen);
   };
 
-  const handleCameraSelect = (cameraId) => {
+  const handleVideoToggle = () => {
+    setIsVideoListOpen(!isVideoListOpen);
+  };
 
-    // Gọi hàm từ SamplePage để mở luồng mới
+  const handleCameraSelect = (cameraId) => {
     if (window.startCameraStream) {
       window.startCameraStream(cameraId.toString());
     }
+    if (currentPath !== "/route-monitoring") {
+      navigate("/route-monitoring");
+    }
+  };
 
-    // Chuyển hướng nếu cần
+  const handleVideoSelect = (videoId) => {
+    // Gọi hàm từ SamplePage để mở luồng video (giả sử window.startVideoStream tồn tại)
+    if (window.startVideoStream) {
+      window.startVideoStream(videoId); // Cần định nghĩa startVideoStream trong SamplePage.js
+    }
     if (currentPath !== "/route-monitoring") {
       navigate("/route-monitoring");
     }
@@ -150,7 +179,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   // Filter menu items based on permissions (hiện tại hiển thị tất cả)
   const filterMenuItems = (items) => {
     return items.filter(item => {
-      // Hiển thị tất cả menu items
       return true;
     });
   };
@@ -159,7 +187,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   const getDisplayName = () => {
     if (!user) return 'Đang tải...';
     
-    // Ưu tiên: name -> username -> email
     if (user.name && user.name.trim()) {
       return user.name;
     }
@@ -179,7 +206,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
       return user.avatar;
     }
     
-    // Tạo initials từ name hoặc username
     const name = user?.name || user?.username || user?.email || 'U';
     const initials = name
       .split(' ')
@@ -283,7 +309,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
           {getDisplayName()}
         </Typography>
         
-        {/* Hiển thị role nếu có */}
         {user?.roles && user.roles.length > 0 && (
           <Chip 
             label={user.roles[0].name} 
@@ -515,6 +540,134 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
               <ListItem>
                 <ListItemText
                   primary="Không có camera nào hoạt động"
+                  primaryTypographyProps={{
+                    color: "#757575",
+                    fontSize: 12,
+                    textAlign: "center",
+                  }}
+                />
+              </ListItem>
+            )}
+          </List>
+        </Collapse>
+      </Paper>
+
+      {/* Progress video */}
+      <Paper elevation={0} sx={{ 
+        mx: 1, 
+        mb: 2, 
+        p: 1.5, 
+        borderRadius: 3, 
+        bgcolor: '#eceff1',
+        border: '1px solid #cfd8dc',
+        transition: 'all 0.3s ease',
+        '&:hover': {
+          transform: 'translateY(-1px)',
+          boxShadow: '0 3px 8px rgba(0, 0, 0, 0.1)'
+        }
+      }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            mb: 1,
+            cursor: "pointer",
+            "&:hover": {
+              "& .MuiTypography-root": {
+                color: "#0288d1",
+              },
+            },
+          }}
+          onClick={handleVideoToggle}
+        >
+          <VideoIcon sx={{ color: "#0288d1", mr: 1, fontSize: 18 }} />
+          <Typography
+            variant="caption"
+            sx={{
+              fontWeight: 600,
+              fontSize: 12,
+              color: "#01579b",
+              flex: 1,
+            }}
+          >
+            Danh sách video
+          </Typography>
+          {isVideoListOpen ? <ExpandLess /> : <ExpandMore />}
+        </Box>
+        <LinearProgress 
+          variant="determinate" 
+          value={videos.length > 0 ? 100 : 0} // Giả định nếu có video thì hiển thị 100%
+          sx={{ 
+            my: 1, 
+            height: 8, 
+            borderRadius: 4, 
+            bgcolor: '#e0f7fa',
+            '& .MuiLinearProgress-bar': {
+              borderRadius: 4,
+              background: 'linear-gradient(90deg, #0288d1, #03a9f4)'
+            }
+          }} 
+        />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="caption" sx={{ 
+            fontWeight: 500, 
+            fontSize: 11,
+            color: '#01579b'
+          }}>
+            {videos.length} video
+          </Typography>
+          <Typography variant="caption" sx={{ 
+            fontWeight: 600, 
+            fontSize: 11,
+            color: '#0288d1'
+          }}>
+            {videos.length > 0 ? '100%' : '0%'}
+          </Typography>
+        </Box>
+        <Collapse in={isVideoListOpen} timeout="auto" unmountOnExit>
+          <List dense sx={{ mt: 1, maxHeight: 200, overflowY: "auto" }}>
+            {videos && videos.length > 0 ? (
+              videos.map((video) => (
+                <ListItem
+                  key={video.id}
+                  button
+                  onClick={() => handleVideoSelect(video.id)}
+                  sx={{
+                    borderRadius: 2,
+                    mb: 0.5,
+                    pl: 2,
+                    pr: 1,
+                    py: 0.5,
+                    transition: "all 0.3s ease",
+                    "&:hover": {
+                      bgcolor: "#e1f5fe",
+                      transform: "translateX(4px)",
+                      boxShadow: "0 2px 8px rgba(0, 136, 209, 0.2)",
+                    },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 24 }}>
+                    <PlayIcon sx={{ fontSize: 16, color: "#0288d1" }} />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={video.name || `Video ${video.id}`}
+                    secondary={`ID: ${video.id}`}
+                    primaryTypographyProps={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: "#333",
+                    }}
+                    secondaryTypographyProps={{
+                      fontSize: 11,
+                      color: "#666",
+                    }}
+                  />
+                </ListItem>
+              ))
+            ) : (
+              <ListItem>
+                <ListItemText
+                  primary="Không có video nào"
                   primaryTypographyProps={{
                     color: "#757575",
                     fontSize: 12,

@@ -92,3 +92,21 @@
     flex-grow: 1;
     max-width: 200px;
   }
+
+  .recognize-btn.recognizing {
+  background-color: #ff0000; /* Màu đỏ khi đang nhận diện */
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    background-color: #ff0000;
+  }
+  50% {
+    background-color: #990000;
+  }
+  100% {
+    background-color: #ff0000;
+  }
+}

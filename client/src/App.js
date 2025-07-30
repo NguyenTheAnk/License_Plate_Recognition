@@ -39,7 +39,6 @@ function MyContextProvider({ children }) {
           const parsedUser = JSON.parse(storedUser);
           setToken(storedToken);
           setUser(parsedUser);
-          console.log('Auth initialized from localStorage:', { user: parsedUser, token: storedToken });
         }
       } catch (error) {
         console.error('Error initializing auth from localStorage:', error);

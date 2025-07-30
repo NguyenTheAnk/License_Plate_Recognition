@@ -3,7 +3,7 @@ import CameraConfigurationPage from "./CameraConfigurationPage";
 import CameraActionBar from "./CameraActionBar";
 import "./SamplePage.css";
 import ReactDOM from "react-dom";
-import { fetchDataFromAPI, postData } from '../../utils/auth';
+import { fetchDataFromAPI, postData } from "../../utils/auth";
 import CameraViewer from "../../components/CameraViewer";
 
 const SamplePage = () => {
@@ -20,19 +20,36 @@ const SamplePage = () => {
   const camerasRef = useRef([]);
   const resizeRefs = useRef({});
   const [cameraSizes, setCameraSizes] = useState({});
+  const [uploadedVideos, setUploadedVideos] = useState({});
+  const [videos, setVideos] = useState([]); // Thêm state videos
 
   useEffect(() => {
     camerasRef.current = cameras;
-  }, [cameras]);
-
-  useEffect(() => {
-    fetchCameras();
+    // Định nghĩa window.startCameraStream và window.startVideoStream
     window.startCameraStream = handleCameraClick;
+    window.startVideoStream = (videoId) => {
+      const streamId = `video-${videoId}-${Date.now()}`;
+      const video = videos.find((v) => v.id === videoId);
+      if (video) {
+        setRtspStreams((prev) => ({
+          ...prev,
+          [streamId]: {
+            url: video.url,
+          },
+        }));
+        setSelectedStreams((prev) => [...prev, streamId]);
+        setCameraSizes((prev) => ({
+          ...prev,
+          [streamId]: { width: 800, height: 500 },
+        }));
+      }
+    };
 
     return () => {
       delete window.startCameraStream;
+      delete window.startVideoStream; // Xóa khi unmount
     };
-  }, []);
+  }, [videos]); // Thêm videos vào dependencies để đảm bảo cập nhật khi danh sách video thay đổi
 
   useEffect(() => {
     if (pendingCameraId && cameras.length > 0) {
@@ -67,6 +84,31 @@ const SamplePage = () => {
     }
   };
 
+  const loadUploadedVideos = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetchDataFromAPI("/api/videos/list-videos", token);
+      if (response.success) {
+        const videos = response.data.reduce((acc, video) => {
+          const streamId = `upload-${video.id}`;
+          acc[streamId] = { url: video.url, name: video.name };
+          return acc;
+        }, {});
+        setUploadedVideos(videos);
+        setSelectedStreams(Object.keys(videos));
+        Object.keys(videos).forEach((streamId) => {
+          setCameraSizes((prev) => ({
+            ...prev,
+            [streamId]: { width: 800, height: 500 },
+          }));
+        });
+        setVideos(response.data); // Cập nhật state videos từ API
+      }
+    } catch (error) {
+      console.error("Error loading uploaded videos:", error);
+    }
+  };
+
   const handleCameraClick = async (cameraId) => {
     console.log("Đang chọn camera:", cameraId);
     console.log("Danh sách cameras (ref):", camerasRef.current);
@@ -97,7 +139,11 @@ const SamplePage = () => {
     isLoadingStream.current = true;
     try {
       const token = localStorage.getItem("token");
-      const result = await postData(`/api/cameras/${cameraId}/stream/start`, { type: "hls" }, token);
+      const result = await postData(
+        `/api/cameras/${cameraId}/stream/start`,
+        { type: "hls" },
+        token
+      );
       if (!result.success) {
         alert(result.message || "Không thể phát camera");
         return;
@@ -129,31 +175,37 @@ const SamplePage = () => {
   };
 
   const handleRetry = async (streamId) => {
-    const streamInfo = rtspStreams[streamId];
+    const streamInfo = rtspStreams[streamId] || uploadedVideos[streamId];
     if (!streamInfo) return;
 
-    const cameraId = streamInfo.cameraId;
+    const cameraId = streamInfo.cameraId || streamId.split("-")[1];
 
     setRetrying((prev) => ({ ...prev, [streamId]: true }));
 
     try {
       const token = localStorage.getItem("token");
-      const result = await postData(`/api/cameras/${cameraId}/stream/start`, { type: "hls" }, token);
-      if (!result.success) {
-        alert(result.message || "Không thể phát lại camera");
-        return;
+      if (rtspStreams[streamId]) {
+        const result = await postData(
+          `/api/cameras/${cameraId}/stream/start`,
+          { type: "hls" },
+          token
+        );
+        if (!result.success) {
+          alert(result.message || "Không thể phát lại camera");
+          return;
+        }
+        const streamUrl = result.data.stream.streamUrl.replace(
+          "localhost",
+          window.location.hostname
+        );
+        setRtspStreams((prev) => ({
+          ...prev,
+          [streamId]: {
+            ...prev[streamId],
+            url: streamUrl,
+          },
+        }));
       }
-      const streamUrl = result.data.stream.streamUrl.replace(
-        "localhost",
-        window.location.hostname
-      );
-      setRtspStreams((prev) => ({
-        ...prev,
-        [streamId]: {
-          ...prev[streamId],
-          url: streamUrl,
-        },
-      }));
     } catch (error) {
       console.error("Error restarting stream:", error);
       alert(
@@ -176,13 +228,18 @@ const SamplePage = () => {
       delete newSizes[streamId];
       return newSizes;
     });
+    setUploadedVideos((prev) => {
+      const newVideos = { ...prev };
+      delete newVideos[streamId];
+      return newVideos;
+    });
   };
 
   const handleConfigClick = (streamId) => {
-    const streamInfo = rtspStreams[streamId];
+    const streamInfo = rtspStreams[streamId] || uploadedVideos[streamId];
     if (!streamInfo) return;
 
-    const cameraId = streamInfo.cameraId;
+    const cameraId = streamInfo.cameraId || streamId.split("-")[1];
     const camera = cameraPositions.find((c) => c.id === cameraId);
 
     if (camera) {
@@ -208,8 +265,14 @@ const SamplePage = () => {
 
     const startX = e.clientX;
     const startY = e.clientY;
-    const startWidth = parseInt(resizeRef.style.width, 10) || (cameraSizes[streamId]?.width || 800);
-    const startHeight = parseInt(resizeRef.style.height, 10) || (cameraSizes[streamId]?.height || 500);
+    const startWidth =
+      parseInt(resizeRef.style.width, 10) ||
+      cameraSizes[streamId]?.width ||
+      800;
+    const startHeight =
+      parseInt(resizeRef.style.height, 10) ||
+      cameraSizes[streamId]?.height ||
+      500;
 
     const onMouseMove = (e) => {
       const newWidth = startWidth + (e.clientX - startX);
@@ -232,6 +295,48 @@ const SamplePage = () => {
     document.addEventListener("mouseup", onMouseUp);
   };
 
+  const handleUploadVideo = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("video", file);
+
+    try {
+      const token = localStorage.getItem("token");
+      const response = await postData(
+        "/api/videos/upload-video",
+        formData,
+        token,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        }
+      );
+      if (response.success) {
+        const streamId = `upload-${response.data.id}`;
+        // Tạo URL đầy đủ
+        const fullUrl = `${window.location.origin}${response.data.url}`;
+        setUploadedVideos((prev) => ({
+          ...prev,
+          [streamId]: {
+            url: fullUrl,
+            name: file.name,
+          },
+        }));
+        setSelectedStreams((prev) => [...prev, streamId]);
+        setCameraSizes((prev) => ({
+          ...prev,
+          [streamId]: { width: 800, height: 500 },
+        }));
+      } else {
+        alert(response.message || "Tải video thất bại");
+      }
+    } catch (error) {
+      console.error("Error uploading video:", error);
+      alert("Tải video thất bại: " + (error.message || "Lỗi không xác định"));
+    }
+  };
+
   return (
     <div>
       <div
@@ -252,9 +357,12 @@ const SamplePage = () => {
           }}
         >
           <button onClick={() => setSelectedStreams([])}>Clear All</button>
-          <button onClick={fetchCameras} disabled={loading}>
-            {loading ? "Đang tải..." : "Làm mới"}
-          </button>
+          <input
+            type="file"
+            accept="video/*"
+            onChange={handleUploadVideo}
+            style={{ marginLeft: "10px" }}
+          />
         </div>
         <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
           <span style={{ marginRight: "15px" }}>
@@ -288,13 +396,19 @@ const SamplePage = () => {
       <div className="parent-grid">
         {selectedStreams.length > 0 ? (
           selectedStreams.map((streamId) => {
-            const streamInfo = rtspStreams[streamId];
+            const streamInfo =
+              rtspStreams[streamId] || uploadedVideos[streamId];
             if (!streamInfo) return null;
 
-            const cameraId = streamInfo.cameraId;
+            // Xác định loại nguồn
+            const isUploadedVideo = streamId.startsWith("upload-");
+
+            const cameraId = streamInfo.cameraId || streamId.split("-")[1];
             const camera = cameras.find((c) => c.id === cameraId) || {
               id: cameraId,
-              name: `Camera ${cameraId}`,
+              name: uploadedVideos[streamId]
+                ? uploadedVideos[streamId].name
+                : `Camera ${cameraId}`,
             };
             const size = cameraSizes[streamId] || { width: 800, height: 500 };
 
@@ -318,21 +432,33 @@ const SamplePage = () => {
                   <CameraViewer
                     camera={{
                       id: streamId,
-                      name: `${camera.name} (Stream ${streamId.split("-")[1]})`,
+                      name: isUploadedVideo
+                        ? uploadedVideos[streamId].name
+                        : `${camera.name} (Stream ${streamId.split("-")[1]})`,
                       streamUrl: streamInfo.url,
+                      isUploadedVideo: isUploadedVideo,
                     }}
-                    actionBar={({ startRecognition, stopRecognition, isRecognizing }) => (
+                    actionBar={({
+                      startRecognition,
+                      stopRecognition,
+                      isRecognizing,
+                      isProcessing,
+                    }) => (
                       <CameraActionBar
                         cameraName={camera.name}
                         cameraId={cameraId}
                         isRetrying={retrying[streamId]}
                         onRetry={() => handleRetry(streamId)}
                         onFullscreen={() => {
-                          const video = document.getElementById(`video-${streamId}`);
+                          const video = document.getElementById(
+                            `video-${streamId}`
+                          );
                           if (video && video.requestFullscreen) {
                             video.requestFullscreen();
                           } else {
-                            console.error("Fullscreen not supported or element not found");
+                            console.error(
+                              "Fullscreen not supported or element not found"
+                            );
                           }
                         }}
                         onConfigure={() => handleConfigClick(streamId)}
@@ -340,6 +466,7 @@ const SamplePage = () => {
                         onStartRecognize={startRecognition}
                         onStopRecognize={stopRecognition}
                         isRecognizing={isRecognizing}
+                        isProcessing={isProcessing}
                       />
                     )}
                     onClose={() => handleCloseCameraFeed(streamId)}
@@ -362,7 +489,10 @@ const SamplePage = () => {
             );
           })
         ) : (
-          <p>Không có camera nào được chọn. Vui lòng chọn camera từ sidebar.</p>
+          <p>
+            Không có camera hoặc video nào được chọn. Vui lòng chọn camera từ
+            sidebar hoặc tải video lên.
+          </p>
         )}
       </div>
       {showConfig &&

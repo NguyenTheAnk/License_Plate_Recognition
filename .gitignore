@@ -1,3 +1,5 @@
 node_modules
 .env
 venv
+public/streams
+server/public/uploads/videos

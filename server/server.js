@@ -23,24 +23,8 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 app.use('/api/cameras', require('./routes/camera'));
-app.use(express.static('public'));
+app.use('/api/videos', require('./routes/videoRoutes'));
 app.use('/streams', express.static(path.join(__dirname, '../public/streams')));
-
-
-const plateRoutes = require('./routes/plate');
-const journeyRoutes = require('./routes/journey');
-const accessControlRoutes = require('./routes/accessControl');
-const rolesRoutes = require('./routes/roles');
-const permissionsRoutes = require('./routes/permissions');
-const authRoute = require('./routes/authRoute');
-const userRoute = require('./routes/user');
-const cameraRoute = require('./routes/camera');
-const locationRoute = require('./routes/location');
-const whiteList = require('./routes/whiteList');
-const blackList = require('./routes/blackList');
-// Thêm các routes khác nếu có
-
-
 
 // WebSocket setup
 const server = http.createServer(app);
@@ -91,6 +75,18 @@ process.on('SIGINT', () => {
 });
 
 // Đăng ký các routes chuẩn RESTful
+const plateRoutes = require('./routes/plate');
+const journeyRoutes = require('./routes/journey');
+const accessControlRoutes = require('./routes/accessControl');
+const rolesRoutes = require('./routes/roles');
+const permissionsRoutes = require('./routes/permissions');
+const authRoute = require('./routes/authRoute');
+const userRoute = require('./routes/user');
+const cameraRoute = require('./routes/camera');
+const locationRoute = require('./routes/location');
+const whiteList = require('./routes/whiteList');
+const blackList = require('./routes/blackList');
+
 app.use('/api/plates', plateRoutes);
 app.use('/api/journeys', journeyRoutes);
 app.use('/api/access-control', accessControlRoutes);
@@ -98,12 +94,10 @@ app.use('/api/roles', rolesRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/auth', authRoute);
 app.use('/api/user', userRoute);
-//app.use('/api/camera', cameraRoute);
+app.use('/api/camera', cameraRoute);
 app.use('/api/location', locationRoute);
 app.use('/api/whitelist', whiteList);
 app.use('/api/blacklist', blackList);
-
-// Đăng ký các routes khác nếu có
 
 // Global error handler (luôn trả về JSON)
 app.use((err, req, res, next) => {
@@ -117,4 +111,4 @@ app.use((err, req, res, next) => {
 
 server.listen(port, () => {
   console.log(`Server running on port ${port}`);
-}); 
+});
