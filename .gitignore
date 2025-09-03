@@ -3,3 +3,10 @@ node_modules
 venv
 public/streams
 server/public/uploads/videos
+plate_recognition/static
+plate_recognition/temp_videos/
+plate_recognition/model/
+plate_recognition/llhls_output/
+plate_recognition/upload/
+plate_recognition/plates.csv
+plate_recognition/sort/

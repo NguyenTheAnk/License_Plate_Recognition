@@ -144,7 +144,7 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
 
   const handleCameraSelect = (cameraId) => {
     if (window.startCameraStream) {
-      window.startCameraStream(cameraId.toString());
+      window.startCameraStream(cameraId);
     }
     if (currentPath !== "/route-monitoring") {
       navigate("/route-monitoring");

@@ -84,81 +84,109 @@ const SamplePage = () => {
     }
   };
 
-  const loadUploadedVideos = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetchDataFromAPI("/api/videos/list-videos", token);
-      if (response.success) {
-        const videos = response.data.reduce((acc, video) => {
-          const streamId = `upload-${video.id}`;
-          acc[streamId] = { url: video.url, name: video.name };
-          return acc;
-        }, {});
-        setUploadedVideos(videos);
-        setSelectedStreams(Object.keys(videos));
-        Object.keys(videos).forEach((streamId) => {
-          setCameraSizes((prev) => ({
-            ...prev,
-            [streamId]: { width: 800, height: 500 },
-          }));
-        });
-        setVideos(response.data); // Cập nhật state videos từ API
+  const buildRtspUrl = (camera) => {
+    if (camera.protocol === "rtsp") {
+      if (camera.username && camera.password) {
+        return `rtsp://${camera.username}:${camera.password}@${camera.host}:${camera.port}${camera.path}`;
+      } else {
+        return `rtsp://${camera.host}:${camera.port}${camera.path}`;
       }
-    } catch (error) {
-      console.error("Error loading uploaded videos:", error);
     }
+    return "";
   };
 
+  // Thay đổi hoàn toàn handleCameraClick
   const handleCameraClick = async (cameraId) => {
-    console.log("Đang chọn camera:", cameraId);
-    console.log("Danh sách cameras (ref):", camerasRef.current);
+    const id = typeof cameraId === "string" ? parseInt(cameraId) : cameraId;
+    console.log("Đang chọn camera:", id);
 
     if (showConfig || isLoadingStream.current) return;
 
-    const camera = camerasRef.current.find((c) => c.id === Number(cameraId));
+    const camera =
+      camerasRef.current.find((c) => c.id === Number(cameraId)) ||
+      camerasRef.current.find((c) => c.id === cameraId);
 
     if (!camera) {
-      console.error(
-        "Camera not found:",
-        cameraId,
-        "Available cameras:",
-        camerasRef.current
-      );
+      console.error("Camera not found:", cameraId);
       await fetchCameras();
-      const refreshedCamera = camerasRef.current.find(
-        (c) => c.id === Number(cameraId)
-      );
+      const refreshedCamera =
+        camerasRef.current.find((c) => c.id === Number(cameraId)) ||
+        camerasRef.current.find((c) => c.id === cameraId);
       if (!refreshedCamera) {
         alert(`Không tìm thấy camera ${cameraId}`);
         return;
       }
     }
 
-    const streamId = `${cameraId}-${Date.now()}`;
+    if (camera && !camera.rtsp_url) {
+      // Thêm URL RTSP vào đối tượng camera nếu chưa có
+      camera.rtsp_url = buildRtspUrl(camera);
+      console.log("Generated RTSP URL:", camera.rtsp_url);
+    }
 
+    const streamId = `${cameraId}-${Date.now()}`;
     isLoadingStream.current = true;
+
+    // Dừng stream hiện tại nếu có
+    const existingStream = Object.keys(rtspStreams).find(
+      (id) => rtspStreams[id].cameraId === cameraId
+    );
+    if (existingStream) {
+      handleCloseCameraFeed(existingStream);
+    }
+
     try {
       const token = localStorage.getItem("token");
+      const type = "hls";
       const result = await postData(
         `/api/cameras/${cameraId}/stream/start`,
         { type: "hls" },
         token
       );
+
       if (!result.success) {
         alert(result.message || "Không thể phát camera");
         return;
       }
-      const streamUrl = result.data.stream.streamUrl.replace(
-        "localhost",
-        window.location.hostname
-      );
+
+      let streamUrl;
+      if (type === "websocket") {
+        if (result.data.stream.wsUrl) {
+          streamUrl = result.data.stream.wsUrl.replace(
+            "localhost",
+            window.location.hostname
+          );
+        } else {
+          console.error("WebSocket URL is null");
+          // Xử lý fallback hoặc thông báo lỗi
+          return;
+        }
+      } else {
+        if (result.data.stream.streamUrl) {
+          streamUrl = result.data.stream.streamUrl.replace(
+            "localhost",
+            window.location.hostname
+          );
+        } else {
+          console.error("Stream URL is null");
+          // Xử lý fallback hoặc thông báo lỗi
+          return;
+        }
+      }
+
+      // Lấy RTSP URL từ response
+      const rtspUrl = result.data.rtspUrl;
+      console.log("Received RTSP URL:", rtspUrl);
+
       setRtspStreams((prev) => ({
         ...prev,
         [streamId]: {
           cameraId: cameraId,
           url: streamUrl,
+          rtspUrl: result.data.rtspUrl,
         },
       }));
+
       setSelectedStreams((prev) => [...prev, streamId]);
       setCameraSizes((prev) => ({
         ...prev,
@@ -175,37 +203,62 @@ const SamplePage = () => {
   };
 
   const handleRetry = async (streamId) => {
-    const streamInfo = rtspStreams[streamId] || uploadedVideos[streamId];
-    if (!streamInfo) return;
+    console.log("Starting retry for streamId:", streamId);
+    const streamInfo = rtspStreams[streamId];
+    if (!streamInfo || !streamInfo.cameraId) {
+      console.error("No RTSP stream info found for streamId:", streamId);
+      return;
+    }
 
-    const cameraId = streamInfo.cameraId || streamId.split("-")[1];
+    const cameraId = streamInfo.cameraId;
 
     setRetrying((prev) => ({ ...prev, [streamId]: true }));
 
     try {
       const token = localStorage.getItem("token");
-      if (rtspStreams[streamId]) {
-        const result = await postData(
-          `/api/cameras/${cameraId}/stream/start`,
-          { type: "hls" },
-          token
-        );
-        if (!result.success) {
-          alert(result.message || "Không thể phát lại camera");
-          return;
-        }
-        const streamUrl = result.data.stream.streamUrl.replace(
+      const result = await postData(
+        `/api/cameras/${cameraId}/stream/start`,
+        { type: "hls" },
+        token
+      );
+
+      if (!result.success) {
+        alert(result.message || "Không thể phát lại camera");
+        return;
+      }
+
+      let streamUrl;
+      if (result.data.stream.streamUrl) {
+        streamUrl = result.data.stream.streamUrl.replace(
           "localhost",
           window.location.hostname
         );
-        setRtspStreams((prev) => ({
-          ...prev,
-          [streamId]: {
-            ...prev[streamId],
-            url: streamUrl,
-          },
-        }));
+      } else {
+        console.error("Stream URL is null");
+        return;
       }
+
+      // Tạo stream ID mới để force re-render
+      const newStreamId = `stream-${cameraId}-${Date.now()}`;
+
+      // Đóng stream cũ
+      handleCloseCameraFeed(streamId);
+
+      // Thêm stream mới
+      setRtspStreams((prev) => ({
+        ...prev,
+        [newStreamId]: {
+          cameraId: cameraId,
+          url: streamUrl,
+          rtspUrl: result.data.rtspUrl,
+        },
+      }));
+
+      setSelectedStreams((prev) => [...prev, newStreamId]);
+      setCameraSizes((prev) => ({
+        ...prev,
+        [newStreamId]: { width: 800, height: 500 },
+      }));
     } catch (error) {
       console.error("Error restarting stream:", error);
       alert(
@@ -237,15 +290,20 @@ const SamplePage = () => {
 
   const handleConfigClick = (streamId) => {
     const streamInfo = rtspStreams[streamId] || uploadedVideos[streamId];
-    if (!streamInfo) return;
+    if (!streamInfo) {
+      console.error("No stream info found for streamId:", streamId);
+      return;
+    }
 
     const cameraId = streamInfo.cameraId || streamId.split("-")[1];
-    const camera = cameraPositions.find((c) => c.id === cameraId);
-
-    if (camera) {
-      setSelectedCameraId(cameraId);
-      setShowConfig(true);
+    if (!cameraId) {
+      console.error("No cameraId found for streamId:", streamId);
+      return;
     }
+
+    setSelectedCameraId(cameraId);
+    setShowConfig(true); // Đảm bảo mở modal ngay lập tức
+    console.log("Configuring camera with ID:", cameraId);
   };
 
   const handleSaveConfig = (updatedConfig) => {
@@ -296,6 +354,8 @@ const SamplePage = () => {
   };
 
   const handleUploadVideo = async (event) => {
+    // ===================PROTOCOL WEBSOCKET===========================
+
     const file = event.target.files[0];
     if (!file) return;
 
@@ -303,38 +363,41 @@ const SamplePage = () => {
     formData.append("video", file);
 
     try {
-      const token = localStorage.getItem("token");
-      const response = await postData(
-        "/api/videos/upload-video",
-        formData,
-        token,
+      // 1. Gửi video lên server để xử lý
+      const uploadResponse = await fetch(
+        "http://localhost:5002/api/process-local-video",
         {
-          headers: { "Content-Type": "multipart/form-data" },
+          method: "POST",
+          body: formData,
         }
       );
-      if (response.success) {
-        const streamId = `upload-${response.data.id}`;
-        // Tạo URL đầy đủ
-        const fullUrl = `${window.location.origin}${response.data.url}`;
-        setUploadedVideos((prev) => ({
-          ...prev,
-          [streamId]: {
-            url: fullUrl,
-            name: file.name,
-          },
-        }));
-        setSelectedStreams((prev) => [...prev, streamId]);
-        setCameraSizes((prev) => ({
-          ...prev,
-          [streamId]: { width: 800, height: 500 },
-        }));
-      } else {
-        alert(response.message || "Tải video thất bại");
+
+      if (!uploadResponse.ok) {
+        throw new Error("Lỗi khi tải video lên server");
       }
+
+      const uploadData = await uploadResponse.json();
+
+      // 2. Sử dụng WebSocket URL từ phản hồi
+      const streamUrl = uploadData.wsUrl;
+
+      const streamId = `processed-video-${Date.now()}`;
+
+      setRtspStreams((prev) => ({
+        ...prev,
+        [streamId]: {
+          url: streamUrl,
+          isProcessed: true,
+          fileName: file.name,
+        },
+      }));
+
+      setSelectedStreams((prev) => [...prev, streamId]);
     } catch (error) {
-      console.error("Error uploading video:", error);
-      alert("Tải video thất bại: " + (error.message || "Lỗi không xác định"));
+      console.error("Lỗi xử lý video:", error);
+      alert("Xử lý video thất bại: " + error.message);
     }
+
   };
 
   return (
@@ -436,7 +499,13 @@ const SamplePage = () => {
                         ? uploadedVideos[streamId].name
                         : `${camera.name} (Stream ${streamId.split("-")[1]})`,
                       streamUrl: streamInfo.url,
+                      rtspUrl: streamInfo.rtspUrl,
                       isUploadedVideo: isUploadedVideo,
+                    }}
+                    onStreamError={(cameraId, errorType) => {
+                      console.log(
+                        `Stream error for camera ${cameraId}, type: ${errorType}`
+                      );
                     }}
                     actionBar={({
                       startRecognition,
@@ -531,6 +600,7 @@ const SamplePage = () => {
               <CameraConfigurationPage
                 cameraId={selectedCameraId}
                 onSave={handleSaveConfig}
+                onClose={() => setShowConfig(false)}
               />
               <button
                 style={{

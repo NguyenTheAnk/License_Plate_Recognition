@@ -1,13 +1,14 @@
 // server\controllers\Camera\getCameraStream.js
 const db = require('../../db');
 const streamingService = require('../../services/streamingService');
+const vlcStreamService = require('../../services/vlcStreamService');
 
 const buildRtspUrl = (camera) => {
     if (camera.protocol === 'rtsp') {
         if (camera.username && camera.password) {
-            return `${camera.protocol}://${camera.username}:${camera.password}@${camera.host}:${camera.port}${camera.path}`;
+            return `rtsp://${camera.username}:${camera.password}@${camera.host}:${camera.port}${camera.path}`;
         } else {
-            return `${camera.protocol}://${camera.host}:${camera.port}${camera.path}`;
+            return `rtsp://${camera.host}:${camera.port}${camera.path}`;
         }
     }
     return '';
@@ -73,7 +74,8 @@ const getCameraStreamInfo = async (req, res) => {
                     is_detect: camera.is_detect,
                     status: camera.status,
                     connection_status: camera.connection_status,
-                    stream_url: streamUrl
+                    stream_url: streamUrl,
+                    rtsp_url: streamUrl
                 }
             }
         });
@@ -149,12 +151,12 @@ const getAllCameraStreams = async (req, res) => {
 const startCameraStream = async (req, res) => {
     try {
         const cameraId = req.params.id;
-        const { type = 'hls' } = req.body; // 'hls' hoặc 'websocket'
+        const { type = 'hls', lowLatency = true  } = req.body; // 'hls' hoặc 'websocket'
 
         // Kiểm tra camera có tồn tại không
         const connection = await db.promise();
         const [cameras] = await connection.execute(`
-            SELECT id, username, password, name, code, status
+            SELECT id, name, protocol, host, port, path, username, password
             FROM cameras 
             WHERE id = ? AND is_active = 1
         `, [cameraId]);
@@ -184,6 +186,15 @@ const startCameraStream = async (req, res) => {
                 streamUrl: `${req.protocol}://${req.get('host')}/${hlsPath}`,
                 wsUrl: null
             };
+        } else if (type === 'vlc') {
+            // Sử dụng VLC để stream
+            const streamUrl = await vlcStreamService.startVLCHTTPStream(cameraId, req);
+            streamInfo = {
+                type: 'vlc',
+                streamUrl: streamUrl,
+                wsUrl: null,
+                lowLatency: lowLatency
+            };
         } else {
             // WebSocket stream sẽ được xử lý qua WebSocket connection
             streamInfo = {
@@ -210,11 +221,21 @@ const startCameraStream = async (req, res) => {
             console.error('Error logging stream start:', logError);
         }
 
+        // Lấy thông tin camera đầy đủ từ database
+        
+        if (cameras.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy camera'
+            });
+        }
+        const rtspUrl = buildRtspUrl(camera);
         return res.json({
             success: true,
             data: {
                 camera: camera,
-                stream: streamInfo
+                stream: streamInfo,
+                rtspUrl: rtspUrl
             }
         });
 
@@ -233,6 +254,7 @@ const stopCameraStream = async (req, res) => {
         const cameraId = req.params.id;
 
         streamingService.stopStream(cameraId);
+        vlcStreamService.stopVLCStream(cameraId);
 
         // Log hoạt động
         try {

@@ -23,9 +23,12 @@ const CameraActionBar = ({
       </button>
       <button
         className="action-btn retry-btn"
-        onClick={onRetry}
+        onClick={() => {
+          console.log("Retry button clicked for camera:", cameraName);
+          onRetry();
+        }}
         title="Retry"
-        disabled={isRetrying}
+        // disabled={isRetrying}
       >
         {isRetrying ? <div className="spinner"></div> : <MdReplay size={25} />}
       </button>
