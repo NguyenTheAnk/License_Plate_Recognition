@@ -7,6 +7,7 @@ import os
 import redis
 from statistics import mean
 from cjm_byte_track.core import BYTETracker 
+from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,7 +18,14 @@ CROPS_FOLDER = 'static/crops'
 os.makedirs(CROPS_FOLDER, exist_ok=True)
 
 # Khởi tạo Redis
-r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+try:
+    r = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=1)
+    r.ping()  # Test kết nối
+    redis_available = True
+    logger.info("Redis connection successful")
+except redis.ConnectionError:
+    redis_available = False
+    logger.warning("Redis not available. Running without Redis support.")
 
 # Khởi tạo FastALPR
 try:
@@ -31,21 +39,40 @@ except Exception as e:
 
 # Khởi tạo ByteTrack với tham số tối ưu
 tracker = BYTETracker(
-    track_thresh=0.25,  # Tăng ngưỡng để giảm false positives
-    track_buffer=30,    # Giảm buffer để giảm bộ nhớ
-    match_thresh=0.8,   # Giảm ngưỡng matching
+    track_thresh=0.25,
+    track_buffer=30,
+    match_thresh=0.8,
     frame_rate=30
 )
 
-# Lưu lịch sử biển số
+# Lưu lịch sử biển số và ánh xạ track_id
 plate_history = {}
 track_info = {}
+track_id_mapping = {}  # Ánh xạ từ track_id mới sang track_id cũ
+plate_to_track_id = defaultdict(list)  # Ánh xạ từ biển số sang track_id
 
 # Biến toàn cục để tính FPS
 fps_counter = 0
 last_fps_time = time.time()
 current_fps = 0
 last_redis_update = 0
+
+def levenshtein_distance(s1, s2):
+    """Tính khoảng cách Levenshtein giữa hai chuỗi."""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
 
 def is_bbox_in_roi(bbox, roi):
     """Kiểm tra xem bounding box có giao với vùng ROI hay không."""
@@ -54,19 +81,56 @@ def is_bbox_in_roi(bbox, roi):
     return not (bbox_x2 < roi_x1 or bbox_x1 > roi_x2 or
                 bbox_y2 < roi_y1 or bbox_y1 > roi_y2)
 
-def update_redis_plate(track_id, plate_text, confidence):
-    """Cập nhật biển số có confidence cao nhất vào Redis"""
-    redis_key = f"plate_{track_id}"
-    existing_data = r.hgetall(redis_key)
+def find_existing_track_id(plate_text, threshold=3):
+    """Tìm track_id hiện có cho biển số tương tự"""
+    # Tìm trong plate_to_track_id trước
+    for existing_plate, track_ids in plate_to_track_id.items():
+        if levenshtein_distance(plate_text, existing_plate) <= threshold:
+            # Trả về track_id đầu tiên (cũ nhất)
+            return track_ids[0]
     
-    if not existing_data or float(existing_data.get('confidence', 0)) < confidence:
-        plate_data = {
+    # Nếu không tìm thấy, tìm trong Redis
+    if not redis_available:
+        return None
+        
+    try:
+        for key in r.keys("track:*"):
+            track_data = r.hgetall(key)
+            existing_plate = track_data.get('plate', '')
+            if levenshtein_distance(plate_text, existing_plate) <= threshold:
+                return key.split(":")[1]  # Trả về track_id
+    except redis.RedisError as e:
+        logger.error(f"Redis error in find_existing_track_id: {str(e)}")
+    
+    return None
+
+def update_redis_plate(track_id, plate_text, confidence, bbox):
+    """Cập nhật biển số vào Redis"""
+    if not redis_available:
+        return
+        
+    try:
+        redis_key = f"track:{track_id}"
+        plate_key = f"plate:{plate_text}"
+        
+        # Kiểm tra xem có nên cập nhật không (confidence cao hơn)
+        existing_data = r.hgetall(redis_key)
+        if existing_data and float(existing_data.get('confidence', 0)) >= confidence:
+            return  # Không cập nhật nếu confidence không cao hơn
+            
+        # Cập nhật Redis
+        r.hset(redis_key, mapping={
             'plate': plate_text,
-            'confidence': str(confidence),
-            'timestamp': str(time.time())
-        }
-        r.hset(redis_key, mapping=plate_data)
+            'confidence': confidence,
+            'bbox': bbox,
+            'timestamp': time.time(),
+            'last_seen': time.time()
+        })
+        r.set(plate_key, track_id)
         r.expire(redis_key, 3600)  # Tự động xóa sau 1 giờ
+        r.expire(plate_key, 3600)  # Tự động xóa sau 1 giờ
+    except redis.RedisError as e:
+        logger.error(f"Redis error: {str(e)}")
 
 def detect_and_ocr(frame):
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
@@ -78,12 +142,11 @@ def detect_and_ocr(frame):
         current_fps = fps_counter / (current_time - last_fps_time)
         fps_counter = 0
         last_fps_time = current_time
-        logger.info(f"FPS: {current_fps:.2f}")
     
     curr_time = time.time()
     original_height, original_width = frame.shape[:2]
     
-    # CHỈ XỬ LÝ VÙNG ROI - CẢI THIỆN HIỆU SUẤT
+    # CHỈ XỬ LÝ VÙNG ROI
     roi_frame = frame[ROI_YMIN:ROI_YMAX, ROI_XMIN:ROI_XMAX]
     
     # Gọi FastALPR chỉ trên vùng ROI
@@ -94,18 +157,16 @@ def detect_and_ocr(frame):
         logger.error(f"FastALPR prediction failed: {str(e)}")
         return frame
 
-    # Chuẩn bị danh sách detections (chuyển tọa độ về frame gốc)
+    # Chuẩn bị danh sách detections
     detections = []
     for res in alpr_results:
         bbox = res.detection.bounding_box
-        # Chuyển tọa độ từ ROI về frame gốc
         x1 = max(int(bbox.x1) + ROI_XMIN, 0)
         y1 = max(int(bbox.y1) + ROI_YMIN, 0)
         x2 = min(int(bbox.x2) + ROI_XMIN, original_width)
         y2 = min(int(bbox.y2) + ROI_YMIN, original_height)
         conf = res.detection.confidence or 0.7
         
-        # Chỉ thêm detection nếu nằm trong ROI (kiểm tra lại)
         if is_bbox_in_roi((x1, y1, x2, y2), (ROI_XMIN, ROI_YMIN, ROI_XMAX, ROI_YMAX)):
             detections.append([x1, y1, x2, y2, conf])
 
@@ -137,7 +198,7 @@ def detect_and_ocr(frame):
 
     for track in tracks:
         tlwh = track.tlwh
-        track_id = track.track_id
+        current_track_id = track.track_id
         x1, y1, w, h = map(int, tlwh)
         x2, y2 = x1 + w, y1 + h
         
@@ -145,18 +206,15 @@ def detect_and_ocr(frame):
         if (x2 - x1) < 50 or (y2 - y1) < 20 or not is_bbox_in_roi((x1, y1, x2, y2), (ROI_XMIN, ROI_YMIN, ROI_XMAX, ROI_YMAX)):
             continue
 
-        # Sử dụng kết quả OCR từ lần nhận diện đầu tiên (trên ROI)
-        # Tránh thực hiện OCR lại để tiết kiệm thời gian
+        # Sử dụng kết quả OCR từ lần nhận diện đầu tiên
         plate_text = ""
         conf_val = 0
         
-        # Tìm kết quả OCR tương ứng với bounding box này
         for res in alpr_results:
             bbox = res.detection.bounding_box
             res_x1 = int(bbox.x1) + ROI_XMIN
             res_y1 = int(bbox.y1) + ROI_YMIN
             
-            # Kiểm tra xem bounding box có trùng khớp không
             if (abs(res_x1 - x1) < 20 and abs(res_y1 - y1) < 20 and 
                 res.ocr and res.ocr.text):
                 plate_text = res.ocr.text
@@ -168,57 +226,74 @@ def detect_and_ocr(frame):
         if conf_val < 0.65 or len(plate_text) < 5:
             continue
 
-        # Lưu vào lịch sử biển số
-        if track_id not in plate_history:
-            plate_history[track_id] = []
+        # Tìm track_id hiện có cho biển số tương tự
+        existing_track_id = find_existing_track_id(plate_text)
         
-        # Giới hạn lịch sử
-        if len(plate_history[track_id]) >= 5:  # Giảm từ 10 xuống 5
-            plate_history[track_id].pop(0)
+        # Xác định track_id sẽ sử dụng
+        if existing_track_id and existing_track_id != current_track_id:
+            # Ánh xạ track_id mới sang track_id cũ
+            track_id_mapping[current_track_id] = existing_track_id
+            final_track_id = existing_track_id
+        else:
+            final_track_id = current_track_id
+        
+        # Cập nhật ánh xạ biển số sang track_id
+        if plate_text not in plate_to_track_id:
+            plate_to_track_id[plate_text] = []
+        if final_track_id not in plate_to_track_id[plate_text]:
+            plate_to_track_id[plate_text].append(final_track_id)
+        
+        # Lưu vào lịch sử biển số
+        if final_track_id not in plate_history:
+            plate_history[final_track_id] = []
+        
+        if len(plate_history[final_track_id]) >= 5:
+            plate_history[final_track_id].pop(0)
             
-        plate_history[track_id].append((plate_text, conf_val))
+        plate_history[final_track_id].append((plate_text, conf_val))
 
-        # Cập nhật Redis với biển số có confidence cao nhất (mỗi 2 giây)
-        if curr_time - last_redis_update > 2.0:
-            if plate_history[track_id]:
-                best_plate = max(plate_history[track_id], key=lambda x: x[1])
-                update_redis_plate(track_id, best_plate[0], best_plate[1])
-            last_redis_update = curr_time
+        # Cập nhật Redis ngay lập tức
+        if plate_history[final_track_id]:
+            best_plate = max(plate_history[final_track_id], key=lambda x: x[1])
+            bbox_str = f"{x1},{y1},{x2},{y2}"
+            update_redis_plate(final_track_id, best_plate[0], best_plate[1], bbox_str)
 
         # Cập nhật track_info
-        track_info[track_id] = {
+        track_info[final_track_id] = {
             'plate': plate_text,
             'confidence': conf_val,
             'bbox': f"{x1},{y1},{x2},{y2}",
             'last_seen': curr_time
         }
         
-        current_track_ids.add(track_id)
+        current_track_ids.add(final_track_id)
 
         # Vẽ hộp giới hạn và thông tin
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        label = f"ID {track_id}: {plate_text}"
+        label = f"ID {final_track_id}: {plate_text}"
         cv2.putText(frame, label, (x1, y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        # Chỉ lưu crop mỗi 5 giây để giảm I/O
-        if track_id not in plate_history or len(plate_history[track_id]) == 1:
-            crop_filename = f"crop_{track_id}_{int(curr_time)}.jpg"
-            padding = 5  # Giảm padding
-            x1_crop, y1_crop, x2_crop, y2_crop = max(x1-padding, 0), max(y1-padding, 0), min(x2+padding, original_width), min(y2+padding, original_height)
+        # Lưu crop
+        if final_track_id not in plate_history or len(plate_history[final_track_id]) == 1:
+            crop_filename = f"crop_{final_track_id}_{int(curr_time)}.jpg"
+            padding = 5
+            x1_crop = max(x1-padding, 0)
+            y1_crop = max(y1-padding, 0)
+            x2_crop = min(x2+padding, original_width)
+            y2_crop = min(y2+padding, original_height)
             crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
             if crop.size > 0:
                 cv2.imwrite(os.path.join(CROPS_FOLDER, crop_filename), crop)
 
     # Dọn dẹp tracks cũ
-    if len(plate_history) > 30:  # Giảm từ 50 xuống 30
-        # Tìm track cũ nhất
+    if len(plate_history) > 30:
         oldest_track = min(plate_history.keys(), key=lambda k: track_info.get(k, {}).get('last_seen', 0))
         del plate_history[oldest_track]
         if oldest_track in track_info:
             del track_info[oldest_track]
     
-    # Cleanup inactive tracks (mỗi 10 giây)
+    # Cleanup inactive tracks
     if curr_time - last_redis_update > 10.0:
         for track_id in list(track_info.keys()):
             if curr_time - track_info[track_id]['last_seen'] > 10.0:

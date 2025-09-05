@@ -397,7 +397,6 @@ const SamplePage = () => {
       console.error("Lỗi xử lý video:", error);
       alert("Xử lý video thất bại: " + error.message);
     }
-
   };
 
   return (
@@ -426,34 +425,6 @@ const SamplePage = () => {
             onChange={handleUploadVideo}
             style={{ marginLeft: "10px" }}
           />
-        </div>
-        <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-          <span style={{ marginRight: "15px" }}>
-            <span
-              style={{
-                display: "inline-block",
-                width: "12px",
-                height: "12px",
-                backgroundColor: "#FF9800",
-                borderRadius: "50%",
-                marginRight: "5px",
-              }}
-            ></span>
-            RTSP
-          </span>
-          <span>
-            <span
-              style={{
-                display: "inline-block",
-                width: "12px",
-                height: "12px",
-                backgroundColor: "#4CAF50",
-                borderRadius: "50%",
-                marginRight: "5px",
-              }}
-            ></span>
-            Đang xem
-          </span>
         </div>
       </div>
       <div className="parent-grid">
