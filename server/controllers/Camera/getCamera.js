@@ -1,8 +1,6 @@
-// server\controllers\Camera\getCamera.js
 const db = require('../../db');
 
 const buildRtspUrl = (camera) => {
-    // Trả về RTSP URL động, không trả password ra ngoài response!
     if (camera.protocol === 'rtsp') {
         if (camera.username && camera.password) {
             return `${camera.protocol}://${camera.username}:${camera.password}@${camera.host}:${camera.port}${camera.path}`;
@@ -21,7 +19,31 @@ const getCameraById = async (req, res) => {
 
         const [cameras] = await connection.execute(`
             SELECT 
-                c.*,
+                c.ke,
+                c.mid,
+                c.name,
+                c.code,
+                c.details,
+                c.protocol,
+                c.host,
+                c.path,
+                c.port,
+                c.fps,
+                c.width,
+                c.height,
+                c.location_id,
+                c.direction,
+                c.camera_type,
+                c.camera_role,
+                c.monitoring_location_id,
+                c.status,
+                c.last_heartbeat,
+                c.is_active,
+                c.is_detect,
+                c.created_at,
+                c.updated_at,
+                c.username,
+                c.password,
                 l.name as location_name,
                 l.address as location_address,
                 l.zone_type as location_zone_type,
@@ -33,7 +55,7 @@ const getCameraById = async (req, res) => {
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
-                END as connection_status,
+                END as connection_status
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
@@ -47,23 +69,10 @@ const getCameraById = async (req, res) => {
             });
         }
 
-        // Get recent detections from this camera (last 24 hours)
-        const [recentDetections] = await connection.execute(`
-            SELECT 
-                COUNT(*) as total_detections_24h,
-                COUNT(DISTINCT plate_number) as unique_plates_24h,
-                AVG(confidence) as avg_confidence_24h,
-                MAX(detection_time) as last_detection_time
-            FROM license_plate_detections 
-            WHERE camera_id = ? AND detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-        `, [cameraId]);
+        const camera = cameras[0];
+        delete camera.username;
+        delete camera.password;
 
-        const camera = {
-            rtsp_url: buildRtspUrl(cameras[0]), 
-            recent_stats: recentDetections[0]
-        };
-
-        // Log access
         try {
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, status, ip_address, user_agent, created_at)
@@ -78,7 +87,6 @@ const getCameraById = async (req, res) => {
             );
         } catch (logError) {
             console.error('Error logging access:', logError);
-            // Continue without failing
         }
 
         res.status(200).json({
@@ -114,12 +122,10 @@ const getAllCameras = async (req, res) => {
             direction
         } = req.query;
 
-        // Convert to numbers early and validate
         const pageNum = Math.max(1, parseInt(page) || 1);
-        const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20)); // Cap at 100
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
         const offsetNum = (pageNum - 1) * limitNum;
 
-        // Build where conditions and parameters separately
         let whereConditions = ['c.is_active = 1'];
         let queryParams = [];
 
@@ -148,92 +154,102 @@ const getAllCameras = async (req, res) => {
             queryParams.push(direction.trim());
         }
 
-        const whereClause = 'WHERE ' + whereConditions.join(' AND ');
+        const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
 
-        // Validate sort field
         const allowedSortFields = ['id', 'name', 'code', 'status', 'created_at', 'updated_at', 'last_heartbeat'];
         const sortField = allowedSortFields.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-        console.log('Debug - WHERE clause:', whereClause);
-        console.log('Debug - Query params:', queryParams);
-        console.log('Debug - Limit/Offset:', { limitNum, offsetNum });
-
-        // Get total count first
         const countQuery = `
             SELECT COUNT(*) as total 
             FROM cameras c 
-            JOIN locations l ON c.location_id = l.id 
-            ${whereClause}
+            LEFT JOIN locations l ON c.location_id = l.id 
+            ` + whereClause + `
         `;
 
-        console.log('Debug - Count query:', countQuery);
         const [countResult] = await connection.execute(countQuery, queryParams);
         const total = countResult[0].total;
 
-        // Build main query with string interpolation for ORDER BY (safe since validated)
-        const mainQuery = `
-            SELECT 
-                c.id,
-                c.name,
-                c.code,
-                c.url,
-                c.ke,
-                c.mid,
-                c.details,
-                c.protocol,
-                c.host,
-                c.path,
-                c.port,
-                c.width,
-                c.height,
-                c.location_id,
-                c.direction,
-                c.camera_type,
-                c.camera_role,
-                c.monitoring_location_id,
-                c.resolution,
-                c.fps,
-                c.installation_date,
-                c.maintenance_schedule,
-                c.status,
-                c.last_heartbeat,
-                c.is_active,
-                c.is_detect,
-                c.created_at,
-                c.updated_at,
-                l.name as location_name,
-                l.address as location_address,
-                l.zone_type as location_zone_type,
-                ml.name as monitoring_location_name,
-                ml.zone_type as monitoring_zone_type,
-                TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat,
-                CASE 
-                    WHEN c.last_heartbeat IS NULL THEN 'never'
-                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
-                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
-                    ELSE 'offline'
-                END as connection_status,
-                CONCAT(c.protocol, '://', c.host, ':', c.port, c.path) as rtsp_url
-            FROM cameras c
-            JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
-            ${whereClause}
-            ORDER BY c.${sortField} ${sortOrder}
-            LIMIT ${limitNum} OFFSET ${offsetNum}
-        `;
+        const mainQuery = 
+            "SELECT " +
+                "c.id, " +
+                "c.ke, " +
+                "c.mid, " +
+                "c.name, " +
+                "c.code, " +
+                "c.details, " +
+                "c.protocol, " +
+                "c.host, " +
+                "c.path, " +
+                "c.port, " +
+                "c.fps, " +
+                "c.width, " +
+                "c.height, " +
+                "c.location_id, " +
+                "c.direction, " +
+                "c.camera_type, " +
+                "c.camera_role, " +
+                "c.monitoring_location_id, " +
+                "c.status, " +
+                "c.last_heartbeat, " +
+                "c.installation_date, " +
+                "c.maintenance_schedule, " +
+                "c.is_active, " +
+                "c.is_detect, " +
+                "c.created_at, " +
+                "c.updated_at, " +
+                "c.username, " +
+                "c.password, " +
+                "l.name as location_name, " +
+                "l.address as location_address, " +
+                "l.zone_type as location_zone_type, " +
+                "ml.name as monitoring_location_name, " +
+                "ml.zone_type as monitoring_zone_type, " +
+                "TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat, " +
+                "CASE " +
+                    "WHEN c.status = 'online' THEN 'online' " +
+                    "WHEN c.status = 'offline' THEN 'offline' " +
+                    "WHEN c.status = 'warning' THEN 'warning' " +
+                    "ELSE 'offline' " +
+                "END as connection_status, " +
+                "CASE " +
+                    "WHEN c.protocol = 'rtsp' AND c.username IS NOT NULL AND c.password IS NOT NULL THEN " +
+                        "CONCAT(c.protocol, '://', c.username, ':', c.password, '@', c.host, ':', c.port, c.path) " +
+                    "WHEN c.protocol = 'rtsp' THEN " +
+                        "CONCAT(c.protocol, '://', c.host, ':', c.port, c.path) " +
+                    "ELSE " +
+                        "CONCAT(c.protocol, '://', c.host, ':', c.port, c.path) " +
+                "END as rtsp_url, " +
+                "CONCAT(c.width, 'x', c.height) as resolution, " +
+                "CASE " +
+                    "WHEN c.installation_date IS NOT NULL THEN " +
+                        "DATEDIFF(NOW(), c.installation_date) " +
+                    "ELSE NULL " +
+                "END as days_since_installation, " +
+                "CASE " +
+                    "WHEN c.maintenance_schedule IS NOT NULL THEN " +
+                        "CASE " +
+                            "WHEN c.maintenance_schedule = 'weekly' THEN 7 " +
+                            "WHEN c.maintenance_schedule = 'monthly' THEN 30 " +
+                            "WHEN c.maintenance_schedule = 'quarterly' THEN 90 " +
+                            "WHEN c.maintenance_schedule = 'yearly' THEN 365 " +
+                            "ELSE 30 " +
+                        "END " +
+                    "ELSE 30 " +
+                "END as maintenance_interval_days " +
+            "FROM cameras c " +
+            "LEFT JOIN locations l ON c.location_id = l.id " +
+            "LEFT JOIN locations ml ON c.monitoring_location_id = ml.id " +
+            whereClause + " " +
+            "ORDER BY c." + sortField + " " + sortOrder + " " +
+            "LIMIT ? OFFSET ?";
 
-        console.log('Debug - Main query:', mainQuery);
+        const [cameras] = await connection.query(mainQuery, [...queryParams, limitNum, offsetNum]);
 
-        // Execute main query with only the WHERE clause parameters
-        const [cameras] = await connection.execute(mainQuery, queryParams);
-
-        // Get detection counts separately
         const cameraIds = cameras.map(camera => camera.id);
         let detectionCounts = {};
 
         if (cameraIds.length > 0) {
-            // Use IN clause with proper parameter binding
             const placeholders = cameraIds.map(() => '?').join(',');
             const detectionQuery = `
                 SELECT 
@@ -241,28 +257,41 @@ const getAllCameras = async (req, res) => {
                     COUNT(*) as count 
                 FROM license_plate_detections 
                 WHERE camera_id IN (${placeholders}) 
-                AND detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                AND detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
                 GROUP BY camera_id
             `;
 
-            try {
-                const [detections] = await connection.execute(detectionQuery, cameraIds);
-                detections.forEach(detection => {
-                    detectionCounts[detection.camera_id] = detection.count;
-                });
-            } catch (detectionError) {
-                console.error('Error getting detection counts:', detectionError);
-                // Continue without detection counts
-            }
+            const [detections] = await connection.query(detectionQuery, cameraIds);
+            detections.forEach(detection => {
+                detectionCounts[detection.camera_id] = detection.count;
+            });
         }
 
-        // Add detection counts to cameras
         const camerasWithDetections = cameras.map(camera => ({
             ...camera,
-            detections_24h: detectionCounts[camera.id] || 0
+            detections_24h: detectionCounts[camera.id] || 0,
+            // Hide sensitive information
+            username: undefined,
+            password: undefined,
+            // Add additional computed fields
+            is_online: camera.connection_status === 'online',
+            is_offline: camera.connection_status === 'offline',
+            is_warning: camera.connection_status === 'warning',
+            has_credentials: !!(camera.username && camera.password),
+            // Format dates
+            installation_date_formatted: camera.installation_date ? 
+                new Date(camera.installation_date).toLocaleDateString('vi-VN') : null,
+            last_heartbeat_formatted: camera.last_heartbeat ? 
+                new Date(camera.last_heartbeat).toLocaleString('vi-VN') : null,
+            // Add status indicators
+            status_indicators: {
+                is_active: !!camera.is_active,
+                is_detect_enabled: !!camera.is_detect,
+                has_maintenance_schedule: !!camera.maintenance_schedule,
+                is_recently_installed: camera.days_since_installation !== null && camera.days_since_installation < 30
+            }
         }));
 
-        // Log access (simplified)
         try {
             await connection.execute(
                 'INSERT INTO access_logs (user_id, username, action_type, object_type, status, ip_address, user_agent, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
@@ -312,13 +341,13 @@ const getAllCameras = async (req, res) => {
         });
     }
 };
+
 const getCamerasByLocation = async (req, res) => {
     const connection = await db.promise();
 
     try {
         const locationId = req.params.locationId;
 
-        // Check if location exists
         const [location] = await connection.execute(
             'SELECT id, name FROM locations WHERE id = ? AND is_active = 1',
             [locationId]
@@ -333,7 +362,31 @@ const getCamerasByLocation = async (req, res) => {
 
         const [cameras] = await connection.execute(`
             SELECT 
-                c.*,
+                c.ke,
+                c.mid,
+                c.name,
+                c.code,
+                c.details,
+                c.protocol,
+                c.host,
+                c.path,
+                c.port,
+                c.fps,
+                c.width,
+                c.height,
+                c.location_id,
+                c.direction,
+                c.camera_type,
+                c.camera_role,
+                c.monitoring_location_id,
+                c.status,
+                c.last_heartbeat,
+                c.is_active,
+                c.is_detect,
+                c.created_at,
+                c.updated_at,
+                c.username,
+                c.password,
                 l.name as location_name,
                 CASE 
                     WHEN c.last_heartbeat IS NULL THEN 'never'
@@ -347,11 +400,18 @@ const getCamerasByLocation = async (req, res) => {
             ORDER BY c.camera_role, c.name
         `, [locationId, locationId]);
 
+        const camerasWithRtsp = cameras.map(camera => ({
+            ...camera,
+            rtsp_url: buildRtspUrl(camera),
+            username: undefined,
+            password: undefined
+        }));
+
         res.status(200).json({
             success: true,
             data: {
                 location: location[0],
-                cameras: cameras
+                cameras: camerasWithRtsp
             }
         });
 
@@ -369,7 +429,6 @@ const getCameraStatistics = async (req, res) => {
     const connection = await db.promise();
 
     try {
-        // Get overall statistics
         const [overallStats] = await connection.execute(`
             SELECT 
                 COUNT(*) as total_cameras,
@@ -386,7 +445,6 @@ const getCameraStatistics = async (req, res) => {
             WHERE is_active = 1
         `);
 
-        // Get cameras by location
         const [locationStats] = await connection.execute(`
             SELECT 
                 l.id,
@@ -403,17 +461,17 @@ const getCameraStatistics = async (req, res) => {
             ORDER BY camera_count DESC
         `);
 
-        // Get detection statistics per camera (last 7 days)
         const [detectionStats] = await connection.execute(`
             SELECT 
                 c.id,
                 c.name,
                 COUNT(lpd.id) as detections_7d,
                 COUNT(DISTINCT lpd.plate_number) as unique_plates_7d,
-                AVG(lpd.confidence) as avg_confidence_7d
+                AVG(lpd.confidence_score) as avg_confidence_7d,
+                MAX(lpd.detected_at) as last_detected_at
             FROM cameras c
             LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
-                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
             WHERE c.is_active = 1
             GROUP BY c.id, c.name
             ORDER BY detections_7d DESC

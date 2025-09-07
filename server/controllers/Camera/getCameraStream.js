@@ -1,6 +1,7 @@
 // server\controllers\Camera\getCameraStream.js
 const db = require('../../db');
 const streamingService = require('../../services/streamingService');
+const ffmpeg = require('fluent-ffmpeg');
 
 const buildRtspUrl = (camera) => {
     if (camera.protocol === 'rtsp') {
@@ -11,6 +12,54 @@ const buildRtspUrl = (camera) => {
         }
     }
     return '';
+};
+
+// Test camera connection
+const testCameraConnection = (rtspUrl) => {
+    return new Promise((resolve) => {
+        console.log(`Testing camera connection: ${rtspUrl}`);
+        
+        const command = ffmpeg(rtspUrl)
+            .inputOptions([
+                '-rtsp_transport', 'tcp',
+                '-rtsp_flags', 'prefer_tcp',
+                '-timeout', '5000000',
+                '-analyzeduration', '1000000',
+                '-probesize', '1000000'
+            ])
+            .outputOptions([
+                '-f', 'null',
+                '-t', '5' // Test 5 seconds only
+            ])
+            .output('-')
+            .on('start', () => {
+                console.log('Camera test started');
+            })
+            .on('error', (err) => {
+                console.error('Camera test failed:', err.message);
+                resolve({
+                    success: false,
+                    error: err.message
+                });
+            })
+            .on('end', () => {
+                console.log('Camera test successful');
+                resolve({
+                    success: true
+                });
+            });
+
+        command.run();
+        
+        // Timeout after 10 seconds
+        setTimeout(() => {
+            command.kill();
+            resolve({
+                success: false,
+                error: 'Connection timeout'
+            });
+        }, 10000);
+    });
 };
 
 const getCameraStreamInfo = async (req, res) => {
@@ -117,7 +166,12 @@ const getAllCameraStreams = async (req, res) => {
                 c.is_detect,
                 c.status,
                 c.last_heartbeat,
-                CONCAT(c.protocol, '://', c.host, ':', c.port, c.path) as stream_url,
+                CASE 
+                    WHEN c.username IS NOT NULL AND c.password IS NOT NULL THEN
+                        CONCAT(c.protocol, '://', c.username, ':', c.password, '@', c.host, ':', c.port, c.path)
+                    ELSE
+                        CONCAT(c.protocol, '://', c.host, ':', c.port, c.path)
+                END as stream_url,
                 CASE 
                     WHEN c.last_heartbeat IS NULL THEN 'never'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
@@ -151,39 +205,61 @@ const startCameraStream = async (req, res) => {
         const cameraId = req.params.id;
         const { type = 'hls' } = req.body; // 'hls' hoặc 'websocket'
 
+        console.log(`Starting stream for camera ${cameraId} with type ${type}`);
+
         // Kiểm tra camera có tồn tại không
         const connection = await db.promise();
         const [cameras] = await connection.execute(`
-            SELECT id, username, password, name, code, status
+            SELECT id, username, password, name, code, status, protocol, host, port, path
             FROM cameras 
             WHERE id = ? AND is_active = 1
         `, [cameraId]);
 
         if (cameras.length === 0) {
+            console.log(`Camera ${cameraId} not found or not active`);
             return res.status(404).json({
                 success: false,
-                message: 'Không tìm thấy camera'
+                message: 'Không tìm thấy camera hoặc camera không hoạt động'
             });
         }
 
         const camera = cameras[0];
+        console.log(`Found camera:`, { id: camera.id, name: camera.name, host: camera.host, port: camera.port });
 
-        // Kiểm tra trạng thái camera
-        // NOTE: camera.connection_status không có trong camera ở đây, nên bỏ check này!
+        // Kiểm tra thông tin camera có đầy đủ không
+        if (!camera.host || !camera.port || !camera.path) {
+            console.log(`Camera ${cameraId} missing required configuration`);
+            return res.status(400).json({
+                success: false,
+                message: 'Camera thiếu thông tin cấu hình (host, port, path)'
+            });
+        }
 
         let streamInfo;
 
         if (type === 'hls') {
-            const hlsPath = await streamingService.startHLSStream(cameraId);
-            if (!hlsPath) {
-                throw new Error('Không thể bắt đầu HLS stream');
+            console.log(`Starting real camera stream for camera ${cameraId}`);
+            // Sử dụng camera thật từ database
+            const camera = await streamingService.getCameraInfo(cameraId);
+            if (!camera) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Camera not found'
+                });
             }
+            
+            const rtspUrl = streamingService.buildRtspUrl(camera);
+            console.log(`Real camera RTSP URL: ${rtspUrl}`);
+            
+            // Sử dụng MJPEG stream thay vì HLS
+            const mjpegPath = `http://localhost:5000/api/rtsp-stream?url=${encodeURIComponent(rtspUrl)}`;
 
             streamInfo = {
                 type: 'hls',
-                streamUrl: `${req.protocol}://${req.get('host')}/${hlsPath}`,
+                streamUrl: mjpegPath,
                 wsUrl: null
             };
+            console.log(`HLS stream started successfully: ${streamInfo.streamUrl}`);
         } else {
             // WebSocket stream sẽ được xử lý qua WebSocket connection
             streamInfo = {
