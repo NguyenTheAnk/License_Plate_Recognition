@@ -35,8 +35,6 @@ const upload = multer({ dest: 'public/uploads/' });
 
 // Import validators
 const {
-    createWhitelistValidator,
-    updateWhitelistValidator,
     bulkWhitelistValidator
 } = require('../helper/validator');
 
@@ -91,7 +89,6 @@ router.post('/bulk/restore',
 router.post('/create', 
     auth, 
     upload.single('image'),
-    createWhitelistValidator, 
     createWhitelist
 );
 
