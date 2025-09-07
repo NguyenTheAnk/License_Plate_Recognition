@@ -104,7 +104,7 @@ if (!fs.existsSync(frameCropsDir)) {
 app.post("/api/plates", async (req, res) => {
   const connection = await db.promise();
   try {
-    const { track_id, plate_number, confidence, bbox, timestamp, frame_path } =
+    const { track_id, plate_number, confidence, bbox, timestamp, frame_path, camera_id } =
       req.body;
 
     // Kiểm tra dữ liệu đầu vào
@@ -127,8 +127,8 @@ app.post("/api/plates", async (req, res) => {
 
     // Thực thi query để lưu biển số và đường dẫn frame
     await connection.execute(
-      "INSERT INTO license_plates (track_id, plate_number, confidence, bbox, detected_at, frame_path) VALUES (?, ?, ?, ?, FROM_UNIXTIME(?), ?)",
-      [track_id, plate_number, confidence, bbox, timestamp, frame_path || null]
+      "INSERT INTO license_plates (track_id, plate_number, confidence, bbox, detected_at, frame_path, camera_id) VALUES (?, ?, ?, ?, FROM_UNIXTIME(?), ?, ?)",
+      [track_id, plate_number, confidence, bbox, timestamp, frame_path, camera_id || null]
     );
 
     res.status(200).json({ message: "Lưu biển số thành công" });

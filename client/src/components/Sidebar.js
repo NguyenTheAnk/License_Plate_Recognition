@@ -44,8 +44,8 @@ const menuGroups = [
     label: '',
     items: [
       { text: 'Trang chủ', icon: <HomeIcon />, path: '/' },
-      { text: 'Nhận diện biển số xe', icon: <LicensePlateIcon />, path: '/license-plate' },
-      { text: 'Giám sát theo lộ trình', icon: <RouteIcon />, path: '/route-monitoring' },
+      { text: 'Nhận diện biển số xe', icon: <LicensePlateIcon />, path: '/route-monitoring' },
+      { text: 'Giám sát theo lộ trình', icon: <RouteIcon />, path: '/license-plate' },
       { text: 'Tra cứu', icon: <SearchIcon />, path: '/search' },
       { text: 'WhiteList', icon: <WhiteListIcon />, path: '/whitelist' },
       { text: 'BlackList', icon: <BlackListIcon />, path: '/blacklist' },

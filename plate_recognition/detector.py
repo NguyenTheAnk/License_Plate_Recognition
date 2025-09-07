@@ -64,7 +64,7 @@ FRAMES_FOLDER = '../public/frames_crops'
 os.makedirs(FRAMES_FOLDER, exist_ok=True)
 
 # Gửi dữ liệu biển số tới server Node.js
-def send_plate_to_server(track_id, plate_data, frame_path=None):
+def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None):
     try:
         current_time = time.time()
         plate_text = plate_data['plate']
@@ -83,7 +83,8 @@ def send_plate_to_server(track_id, plate_data, frame_path=None):
             "confidence": plate_data['confidence'],
             "bbox": plate_data['bbox'],
             "timestamp": current_time,
-            "frame_path": frame_path
+            "frame_path": frame_path,
+            "camera_id": camera_id
         }
         
         response = requests.post(url, json=data, timeout=2)
@@ -171,7 +172,7 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
     except redis.RedisError as e:
         logger.error(f"Redis error: {str(e)}")
 
-def detect_and_ocr(frame):
+def detect_and_ocr(frame, camera_id=None):
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
     
     # Tính FPS
@@ -358,7 +359,7 @@ def detect_and_ocr(frame):
                     print(f"Failed to save original frame to {absolute_frame_path}")
                 
                 # Gửi dữ liệu biển số tới server Node.js
-                send_plate_to_server(track_id, track_info[track_id], frame_path)
+                send_plate_to_server(track_id, track_info[track_id], frame_path, camera_id=camera_id)
                 tracks_to_remove.append(track_id)
         
         for track_id in tracks_to_remove:

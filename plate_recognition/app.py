@@ -46,6 +46,7 @@ def recognize_ws(ws):
                     data = json.loads(message)
                     if data.get('type') == 'rtsp_url' and 'url' in data:
                         stream_url = data['url']
+                        camera_id = data.get('cameraId')
 
                         # Đóng stream hiện tại nếu có
                         if cap is not None:
@@ -80,7 +81,7 @@ def recognize_ws(ws):
                             
                             
                             # Xử lý frame với detect_and_ocr
-                            processed_frame = detect_and_ocr(frame)
+                            processed_frame = detect_and_ocr(frame, camera_id=camera_id)
 
                             # Mã hóa và gửi frame
                             _, buffer = cv2.imencode('.jpg', processed_frame, [
@@ -229,7 +230,7 @@ def processed_video_ws(ws, video_id):
                 break
 
             # Xử lý frame với detection/OCR
-            processed_frame = detect_and_ocr(frame)
+            processed_frame = detect_and_ocr(frame, camera_id="1")
 
             # Mã hóa frame đã xử lý thành JPEG
             _, buffer = cv2.imencode('.jpg', processed_frame, [
