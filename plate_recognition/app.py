@@ -52,13 +52,13 @@ def calculate_roi_coordinates(width, height):
 
 # Import detector (simple)
 try:
-    from detector_fixed import detect_and_ocr
+    from detector import detect_and_ocr
     print("Simple Detector imported successfully")
 except ImportError as e:
     print(f"Error importing simple detector: {e}")
     # Fallback to fixed detector
     try:
-        from detector_fixed import detect_and_ocr
+        from detector import detect_and_ocr
         print("Fallback to Fixed Detector")
     except ImportError as e2:
         print(f"Error importing fallback detector: {e2}")
@@ -123,7 +123,7 @@ def server_status():
     try:
         # Check if models are available
         try:
-            from detector_fixed import yolo_model, plate_model, ocr_reader
+            from detector import yolo_model, plate_model, ocr_reader
         except ImportError:
             from detector import yolo_model, plate_model, ocr_reader
         
@@ -155,7 +155,7 @@ def initialize_models_safely():
         
         # Import detector functions
         try:
-            from detector_fixed import check_pytorch_compatibility, check_model_availability, initialize_ocr
+            from detector import check_pytorch_compatibility, check_model_availability, initialize_ocr
             logger.info("✅ Using fixed detector initialization")
             check_pytorch_compatibility()
             check_model_availability()
@@ -900,41 +900,6 @@ def health():
 def home():
     return jsonify({"message": "License Plate Recognition WebSocket Server", "status": "running"})
 
-@app.route('/ws-test')
-def ws_test():
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>WebSocket Test</title>
-    </head>
-    <body>
-        <h1>WebSocket Test</h1>
-        <div id="status">Connecting...</div>
-        <div id="messages"></div>
-        <script>
-            const ws = new WebSocket('ws://127.0.0.1:5002/recognize-ws');
-            
-            ws.onopen = function() {
-                document.getElementById('status').textContent = 'Connected!';
-            };
-            
-            ws.onmessage = function(event) {
-                const messages = document.getElementById('messages');
-                messages.innerHTML += '<p>' + event.data + '</p>';
-            };
-            
-            ws.onerror = function(error) {
-                document.getElementById('status').textContent = 'Error: ' + error;
-            };
-            
-            ws.onclose = function() {
-                document.getElementById('status').textContent = 'Disconnected';
-            };
-        </script>
-    </body>
-    </html>
-    """
 
 # API endpoint Ä‘á»ƒ start camera stream
 @app.route('/api/cameras/<camera_id>/stream/start', methods=['POST'])
@@ -1093,7 +1058,7 @@ def get_detected_plates():
         
         # Get list from tracked_objects
         try:
-            from detector_fixed import tracked_objects
+            from detector import tracked_objects
         except ImportError:
             from detector import tracked_objects
         plates_list = []
@@ -1268,7 +1233,7 @@ def search_detected_plates():
                 'message': 'Tham sá»‘ tÃ¬m kiáº¿m khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng'
             }), 400
         
-        from detector_fixed import tracked_objects
+        from detector import tracked_objects
         plates_list = []
         for obj_id, obj in tracked_objects.items():
             if 'plate_number' in obj and obj['plate_number'] != 'Äang nháº­n diá»‡n...':
@@ -1332,7 +1297,7 @@ def search_detected_plates():
 @app.route('/api/detected-plates/delete/<plate_id>', methods=['DELETE'])
 def delete_detected_plate(plate_id):
     try:
-        from detector_fixed import tracked_objects
+        from detector import tracked_objects
         try:
             plates_list = list(tracked_objects.keys())
         except:
@@ -1611,7 +1576,7 @@ def video_feed():
         if video_processing:
             logger.info(f"Processing detection for frame {current_frame}")
             try:
-                from detector_fixed import detect_and_ocr
+                from detector import detect_and_ocr
                 result = detect_and_ocr(frame)
                 if result and result.get('frame'):
                     logger.info(f"Detection successful for frame {current_frame}")
@@ -1779,7 +1744,7 @@ def video_stream():
             detection_result = None
             if video_processing:
                 try:
-                    from detector_fixed import detect_and_ocr
+                    from detector import detect_and_ocr
                     # Pass video_processing flag to detector
                     detection_result = detect_and_ocr(frame, video_processing=True)
                     if detection_result:
@@ -1922,196 +1887,8 @@ def video_stream():
     return Response(generate_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
-# Test route để kiểm tra detection system
-@app.route('/test_detection')
-def test_detection():
-    """Test detection system với test frame"""
-    try:
-        # Tạo test frame
-        test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        
-        # Vẽ một số hình dạng để test
-        cv2.rectangle(test_frame, (100, 100), (300, 200), (0, 255, 0), 2)  # Xe
-        cv2.rectangle(test_frame, (120, 120), (280, 180), (255, 0, 0), 2)  # Biển số
-        cv2.putText(test_frame, "TEST PLATE", (130, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(test_frame, "Testing Detection System", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        
-        # Test detection
-        logger.info("Testing detection system with test frame...")
-        result = detect_and_ocr(test_frame)
-        
-        if result:
-            logger.info("✅ Detection test successful!")
-            logger.info(f"Result keys: {list(result.keys())}")
-            logger.info(f"Boxes: {len(result.get('boxes', []))}")
-            logger.info(f"Labels: {len(result.get('labels', []))}")
-            logger.info(f"Tracked objects: {len(result.get('tracked_objects', {}))}")
-            
-            # Encode test frame
-            _, buffer = cv2.imencode('.jpg', test_frame)
-            test_frame_bytes = buffer.tobytes()
-            
-            return jsonify({
-                'success': True,
-                'message': 'Detection test successful',
-                'result_summary': {
-                    'boxes_count': len(result.get('boxes', [])),
-                    'labels_count': len(result.get('labels', [])),
-                    'tracked_objects_count': len(result.get('tracked_objects', {})),
-                    'ocr_results_count': len(result.get('ocr_results', []))
-                },
-                'frame_size': len(test_frame_bytes)
-            })
-        else:
-            logger.error("❌ Detection test failed!")
-            return jsonify({
-                'success': False,
-                'message': 'Detection test failed - no result returned'
-            }), 500
-            
-    except Exception as e:
-        logger.error(f"Test detection error: {e}")
-        import traceback
-        logger.error(f"Test detection traceback: {traceback.format_exc()}")
-        return jsonify({
-            'success': False,
-            'message': f'Test detection error: {str(e)}'
-        }), 500
 
-# Test route để kiểm tra tracked_objects
-@app.route('/test_tracked_objects')
-def test_tracked_objects():
-    """Test tracked_objects system"""
-    try:
-        from detector_fixed import get_tracked_objects, get_detection_stats
-        
-        # Lấy thông tin tracked objects
-        tracked_objects = get_tracked_objects()
-        detection_stats = get_detection_stats()
-        
-        logger.info(f"Tracked objects test: {len(tracked_objects)} objects")
-        logger.info(f"Detection stats: {detection_stats}")
-        
-        return jsonify({
-            'success': True,
-            'tracked_objects_count': len(tracked_objects),
-            'tracked_objects': tracked_objects,
-            'detection_stats': detection_stats
-        })
-        
-    except Exception as e:
-        logger.error(f"Test tracked_objects error: {e}")
-        import traceback
-        logger.error(f"Test tracked_objects traceback: {traceback.format_exc()}")
-        return jsonify({
-            'success': False,
-            'message': f'Test tracked_objects error: {str(e)}'
-        }), 500
 
-# Test route để tạo test video stream
-@app.route('/test_video_stream')
-def test_video_stream():
-    """Test video stream với detection system"""
-    try:
-        from flask import Response
-        import time
-        
-        def generate_test_frames():
-            """Generate test frames với detection"""
-            frame_count = 0
-            while True:
-                # Tạo test frame
-                test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                
-                # Vẽ background
-                test_frame[:] = (50, 50, 50)  # Dark gray background
-                
-                # Vẽ một số hình dạng để test detection
-                if frame_count % 30 < 15:  # Animate every 30 frames
-                    # Vẽ xe
-                    cv2.rectangle(test_frame, (100, 150), (400, 300), (0, 255, 0), 2)
-                    cv2.putText(test_frame, "CAR", (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    
-                    # Vẽ biển số
-                    cv2.rectangle(test_frame, (150, 200), (350, 250), (255, 0, 0), 2)
-                    cv2.putText(test_frame, "30A-123.45", (160, 235), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                    
-                    # Vẽ xe thứ 2
-                    cv2.rectangle(test_frame, (450, 200), (600, 350), (0, 255, 255), 2)
-                    cv2.putText(test_frame, "BIKE", (470, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-                    
-                    # Vẽ biển số xe thứ 2
-                    cv2.rectangle(test_frame, (470, 220), (580, 270), (255, 255, 0), 2)
-                    cv2.putText(test_frame, "51B-678.90", (475, 255), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-                
-                # Vẽ thông tin frame
-                cv2.putText(test_frame, f"Test Frame: {frame_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                cv2.putText(test_frame, "Detection Test Video", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                cv2.putText(test_frame, "Testing License Plate Recognition", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-                
-                # Vẽ ROI
-                roi_x1, roi_y1 = int(640 * 0.05), int(480 * 0.3)
-                roi_x2, roi_y2 = int(640 * 0.95), int(480 * 0.8)
-                cv2.rectangle(test_frame, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 255, 255), 2)
-                cv2.putText(test_frame, "ROI", (roi_x1 + 10, roi_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                
-                # Chạy detection trên test frame
-                try:
-                    logger.info(f"Running detection on test frame {frame_count}")
-                    result = detect_and_ocr(test_frame, video_processing=True)
-                    
-                    if result and isinstance(result, dict):
-                        # Vẽ kết quả detection
-                        boxes = result.get('boxes', [])
-                        labels = result.get('labels', [])
-                        tracked_objects = result.get('tracked_objects', {})
-                        
-                        logger.info(f"Frame {frame_count}: {len(boxes)} boxes, {len(labels)} labels, {len(tracked_objects)} tracked objects")
-                        
-                        # Vẽ thông tin detection
-                        info_y = 120
-                        cv2.putText(test_frame, f"Detection Results:", (10, info_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                        cv2.putText(test_frame, f"Boxes: {len(boxes)}", (10, info_y + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                        cv2.putText(test_frame, f"Labels: {len(labels)}", (10, info_y + 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                        cv2.putText(test_frame, f"Tracked: {len(tracked_objects)}", (10, info_y + 75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                        
-                        # Vẽ các labels được detect
-                        for i, label in enumerate(labels[:5]):  # Chỉ hiển thị 5 labels đầu
-                            cv2.putText(test_frame, f"Label {i+1}: {label}", (10, info_y + 100 + i*25), 
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-                    else:
-                        logger.warning(f"Frame {frame_count}: Detection returned invalid result")
-                        cv2.putText(test_frame, "Detection Failed", (10, info_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                        
-                except Exception as e:
-                    logger.error(f"Detection error on frame {frame_count}: {e}")
-                    cv2.putText(test_frame, f"Detection Error: {str(e)[:30]}", (10, info_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                
-                # Encode frame
-                try:
-                    _, buffer = cv2.imencode('.jpg', test_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                    frame_bytes = buffer.tobytes()
-                    
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                except Exception as e:
-                    logger.error(f"Frame encoding failed: {e}")
-                    continue
-                
-                frame_count += 1
-                time.sleep(0.1)  # 10 FPS
-        
-        return Response(generate_test_frames(),
-                        mimetype='multipart/x-mixed-replace; boundary=frame')
-                        
-    except Exception as e:
-        logger.error(f"Test video stream error: {e}")
-        import traceback
-        logger.error(f"Test video stream traceback: {traceback.format_exc()}")
-        return jsonify({
-            'success': False,
-            'message': f'Test video stream error: {str(e)}'
-        }), 500
 
 def start_server_safely():
     """Start server with multiple fallback options"""
