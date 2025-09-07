@@ -12,13 +12,22 @@ import User from './pages/User/User';
 import UserDetail from './pages/User/UserDetail';
 import Roles from './pages/Roles and Permissions/Roles';
 import Permissions from './pages/Roles and Permissions/Permissions';
-import Cameras from './pages/Camera/Cameras';
+import Cameras from './pages/Cameras';
 import Search from './pages/Search/Search';
+import SearchWhitelist from './pages/Search/SearchWhitelist';
+import SearchBlacklist from './pages/Search/SearchBlacklist';
+import SearchAccessControl from './pages/Search/SearchAccessControl';
+import SearchCamera from './pages/Search/SearchCamera';
+import SearchJourney from './pages/Search/SearchJourney';
+import SearchLocation from './pages/Search/SearchLocation';
+import SearchPlates from './pages/Search/SearchPlates';
+import PlateRecognition from './pages/PlateRecognition/PlateRecognition';
 import axios from 'axios';
 import WhiteList from './components/WhiteList';
 import BlackList from './components/BlackList';
-import SamplePage from './pages/Camera/SamplePage';
-import CameraConfigurationPage from './pages/Camera/CameraConfigurationPage';
+import SamplePage from './pages/ViewCamera/SamplePage';
+import CameraConfigurationPage from './pages/ViewCamera/CameraConfigurationPage';
+
 
 export const MyContext = React.createContext();
 
@@ -94,7 +103,7 @@ function AppContent() {
     // Chỉ gọi API logout nếu không skip và có token
     if (!skipApiCall && currentToken) {
       try {
-        await axios.post('http://localhost:5000/api/auth/logout', {}, {
+        await axios.post('http://localhost:4000/api/auth/logout', {}, {
           headers: { Authorization: `Bearer ${currentToken}` }
         });
         console.log('Logout API call successful');
@@ -181,7 +190,17 @@ function AppContent() {
                   <Route path="/blacklist" element={<BlackList />} />
                   <Route path="/roles" element={<Roles />} />
                   <Route path="/search" element={<Search />} />
-                  <Route path="/route-monitoring" element={<SamplePage />} />
+                  <Route path="/search/whitelist" element={<SearchWhitelist />} />
+                  <Route path="/search/blacklist" element={<SearchBlacklist />} />
+                  <Route path="/search/history" element={<Search />} />
+                  <Route path="/search/owner" element={<Search />} />
+                  <Route path="/search/camera" element={<SearchCamera />} />
+                  <Route path="/search/location" element={<SearchLocation />} />
+                  <Route path="/search/journey" element={<SearchJourney />} />
+                  <Route path="/search/plates" element={<SearchPlates />} />
+                  <Route path="/search/access-control" element={<SearchAccessControl />} />
+                  <Route path="/route-monitoring" element={<PlateRecognition/>} />
+                  <Route path="/plate-recognition" element={<SamplePage />} />
                   <Route path="/camera-config/:id" element={<CameraConfigurationPage />} />
                   <Route path="/permissions" element={<Permissions />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
