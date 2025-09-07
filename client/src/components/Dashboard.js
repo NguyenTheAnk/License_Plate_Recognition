@@ -1,127 +1,1525 @@
-import React from 'react';
-import { Box, Grid, Paper, Typography, Avatar } from '@mui/material';
-import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, AreaChart, Area } from 'recharts';
-import VideocamIcon from '@mui/icons-material/Videocam';
-import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
-import EventNoteIcon from '@mui/icons-material/EventNote';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, Grid, Paper, Typography, Avatar, CircularProgress, Alert, 
+  Card, CardContent, Chip, LinearProgress, Fade, Zoom, 
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  List, ListItem, ListItemText, ListItemIcon, Divider
+} from '@mui/material';
+import { 
+  PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, 
+  ResponsiveContainer, LineChart, Line, AreaChart, Area, RadialBarChart, 
+  RadialBar, ScatterChart, Scatter, ComposedChart, CartesianGrid, 
+  ReferenceLine, Brush, Treemap, Sankey
+} from 'recharts';
+import {
+  Videocam, DirectionsCar, EventNote, CheckCircle,
+  Warning, TrendingUp, TrendingDown, Speed,
+  Security, LocationOn, Schedule, Assessment,
+  Timeline, BarChart as BarChartIcon, PieChart as PieChartIcon, ShowChart,
+  People, Settings, Notifications, Refresh
+} from '@mui/icons-material';
 
-const cameraStats = [
-  { name: 'Đang hoạt động', value: 32 },
-  { name: 'Không hoạt động', value: 14 },
-];
-const COLORS = ['#43a047', '#d32f2f'];
+const COLORS = ['#43a047', '#d32f2f', '#1976d2', '#ffa000', '#9c27b0', '#f44336', '#4caf50', '#ff9800'];
+const CHART_COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#d084d0', '#87d068', '#ffb347'];
 
-const eventStats = [
-  { name: 'T2', xe: 120, suKien: 10 },
-  { name: 'T3', xe: 98, suKien: 8 },
-  { name: 'T4', xe: 110, suKien: 12 },
-  { name: 'T5', xe: 150, suKien: 15 },
-  { name: 'T6', xe: 130, suKien: 9 },
-  { name: 'T7', xe: 90, suKien: 7 },
-  { name: 'CN', xe: 80, suKien: 5 },
-];
-
-const summary = [
-  { label: 'Tổng số camera', value: 46, icon: <VideocamIcon fontSize="large" />, color: '#1976d2' },
-  { label: 'Đang hoạt động', value: 32, icon: <CheckCircleIcon fontSize="large" />, color: '#43a047' },
-  { label: 'Số sự kiện', value: 55, icon: <EventNoteIcon fontSize="large" />, color: '#ffa000' },
-  { label: 'Xe nhận diện', value: 678, icon: <DirectionsCarIcon fontSize="large" />, color: '#d32f2f' },
-];
-
-// Dữ liệu mẫu cho LineChart: số xe nhận diện theo giờ
-const lineData = [
-  { hour: '06h', xe: 5 }, { hour: '07h', xe: 12 }, { hour: '08h', xe: 20 }, { hour: '09h', xe: 18 },
-  { hour: '10h', xe: 25 }, { hour: '11h', xe: 22 }, { hour: '12h', xe: 15 }, { hour: '13h', xe: 10 },
-  { hour: '14h', xe: 8 }, { hour: '15h', xe: 14 }, { hour: '16h', xe: 19 }, { hour: '17h', xe: 23 },
-];
-
-// Dữ liệu mẫu cho BarChart: số xe nhận diện theo camera
-const camBarData = [
-  { camera: 'Cam 1', xe: 120 },
-  { camera: 'Cam 2', xe: 98 },
-  { camera: 'Cam 3', xe: 110 },
-  { camera: 'Cam 4', xe: 150 },
-  { camera: 'Cam 5', xe: 130 },
-];
+// API Base URL
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 function Dashboard() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [dashboardData, setDashboardData] = useState({
+    summary: [],
+    cameraStats: [],
+    eventStats: [],
+    lineData: [],
+    camBarData: [],
+    // New data for enhanced dashboard
+    hourlyStats: [],
+    weeklyTrends: [],
+    monthlyStats: [],
+    topPlates: [],
+    recentDetections: [],
+    systemHealth: {},
+    performanceMetrics: {},
+    locationStats: [],
+    vehicleTypeStats: [],
+    confidenceDistribution: [],
+    alerts: [],
+    realTimeStats: {}
+  });
+
+  // Fetch dashboard data
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Check if user is authenticated
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('Bạn cần đăng nhập để xem dashboard');
+        }
+
+        // Fetch camera statistics
+        const cameraResponse = await fetch(`${API_BASE_URL}/cameras/statistics`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        
+        if (!cameraResponse.ok) {
+          throw new Error(`Camera API error: ${cameraResponse.status}`);
+        }
+        const cameraData = await cameraResponse.json();
+
+        // Fetch plate detections (last 7 days) - using correct endpoint
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const detectionResponse = await fetch(`${API_BASE_URL}/plate-detections/list?date_from=${sevenDaysAgo.toISOString().split('T')[0]}&rowsPerPage=1000`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        
+        if (!detectionResponse.ok) {
+          throw new Error(`Detection API error: ${detectionResponse.status}`);
+        }
+        const detectionData = await detectionResponse.json();
+
+        // Fetch journeys (last 7 days) - using correct endpoint
+        const journeyResponse = await fetch(`${API_BASE_URL}/journeys?limit=1000`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        
+        if (!journeyResponse.ok) {
+          throw new Error(`Journey API error: ${journeyResponse.status}`);
+        }
+        const journeyData = await journeyResponse.json();
+
+        // Fetch access control lists - using correct endpoint
+        const accessResponse = await fetch(`${API_BASE_URL}/access-control?limit=1000`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        
+        if (!accessResponse.ok) {
+          throw new Error(`Access Control API error: ${accessResponse.status}`);
+        }
+        const accessData = await accessResponse.json();
+
+        // Process data
+        const processedData = processDashboardData(cameraData, detectionData, journeyData, accessData);
+        setDashboardData(processedData);
+
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        
+        // Fallback to mock data if API fails
+        if (err.message.includes('Bạn cần đăng nhập')) {
+          setError(err.message);
+        } else {
+          console.warn('API not available, using fallback data');
+          setDashboardData({
+            summary: [
+              { label: 'Tổng số camera', value: 0, icon: <Videocam fontSize="large" />, color: '#1976d2' },
+              { label: 'Đang hoạt động', value: 0, icon: <CheckCircle fontSize="large" />, color: '#43a047' },
+              { label: 'Số lộ trình', value: 0, icon: <EventNote fontSize="large" />, color: '#ffa000' },
+              { label: 'Xe nhận diện (7 ngày)', value: 0, icon: <DirectionsCar fontSize="large" />, color: '#d32f2f' },
+            ],
+            cameraStats: [
+              { name: 'Đang hoạt động', value: 0 },
+              { name: 'Không hoạt động', value: 0 },
+            ],
+            eventStats: [],
+            lineData: [],
+            camBarData: []
+          });
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  // Process raw API data into dashboard format
+  const processDashboardData = (cameraData, detectionData, journeyData, accessData) => {
+    const cameraStats = cameraData.data?.overall || {};
+    const detections = detectionData.data?.detections || detectionData.detections || [];
+    const journeys = journeyData || [];
+    const accessLists = accessData || [];
+
+    // Summary cards
+const summary = [
+      { 
+        label: 'Tổng số camera', 
+        value: cameraStats.total_cameras || 0, 
+        icon: <Videocam fontSize="large" />, 
+        color: '#1976d2' 
+      },
+      { 
+        label: 'Đang hoạt động', 
+        value: cameraStats.online_cameras || 0, 
+        icon: <CheckCircle fontSize="large" />, 
+        color: '#43a047' 
+      },
+      { 
+        label: 'Số lộ trình', 
+        value: journeys.length, 
+        icon: <EventNote fontSize="large" />, 
+        color: '#ffa000' 
+      },
+      { 
+        label: 'Xe nhận diện (7 ngày)', 
+        value: detections.length, 
+        icon: <DirectionsCar fontSize="large" />, 
+        color: '#d32f2f' 
+      },
+    ];
+
+    // Camera status pie chart
+    const cameraStatusData = [
+      { name: 'Đang hoạt động', value: cameraStats.online_cameras || 0 },
+      { name: 'Không hoạt động', value: (cameraStats.offline_cameras || 0) + (cameraStats.maintenance_cameras || 0) },
+    ];
+
+    // Weekly detection data (last 7 days)
+    const eventStats = generateWeeklyStats(detections);
+
+    // Hourly detection data (today)
+    const lineData = generateHourlyStats(detections);
+
+    // Camera detection counts
+    const camBarData = generateCameraStats(detections, cameraData.data?.top_detection_cameras || []);
+
+    // Generate additional statistics
+    const hourlyStats = generateHourlyStats(detections);
+    const weeklyTrends = generateWeeklyTrends(detections);
+    const monthlyStats = generateMonthlyStats(detections);
+    const topPlates = generateTopPlates(detections);
+    const recentDetections = generateRecentDetections(detections);
+    const systemHealth = generateSystemHealth(cameraStats, detections);
+    const performanceMetrics = generatePerformanceMetrics(detections);
+    const locationStats = generateLocationStats(detections, cameraData.data?.by_location || []);
+    const vehicleTypeStats = generateVehicleTypeStats(detections);
+    const confidenceDistribution = generateConfidenceDistribution(detections);
+    const alerts = generateAlerts(cameraStats, detections);
+    const realTimeStats = generateRealTimeStats(detections);
+
+    return {
+      summary,
+      cameraStats: cameraStatusData,
+      eventStats,
+      lineData,
+      camBarData,
+      hourlyStats,
+      weeklyTrends,
+      monthlyStats,
+      topPlates,
+      recentDetections,
+      systemHealth,
+      performanceMetrics,
+      locationStats,
+      vehicleTypeStats,
+      confidenceDistribution,
+      alerts,
+      realTimeStats
+    };
+  };
+
+  // Generate weekly statistics
+  const generateWeeklyStats = (detections) => {
+    const days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    const today = new Date();
+    const weeklyData = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      
+      const dayDetections = detections.filter(d => 
+        d.detected_at && d.detected_at.startsWith(dateStr)
+      );
+
+      weeklyData.push({
+        name: days[6 - i],
+        xe: dayDetections.length,
+        suKien: Math.floor(dayDetections.length * 0.1) // Approximate events
+      });
+    }
+
+    return weeklyData;
+  };
+
+  // Generate hourly statistics for today
+  const generateHourlyStats = (detections) => {
+    const today = new Date().toISOString().split('T')[0];
+    const hourlyData = [];
+    
+    for (let hour = 6; hour <= 17; hour++) {
+      const hourStr = hour.toString().padStart(2, '0');
+      const hourDetections = detections.filter(d => 
+        d.detected_at && 
+        d.detected_at.startsWith(today) &&
+        d.detected_at.includes(`T${hourStr}:`)
+      );
+
+      hourlyData.push({
+        hour: `${hour}h`,
+        xe: hourDetections.length
+      });
+    }
+
+    return hourlyData;
+  };
+
+  // Generate camera statistics
+  const generateCameraStats = (detections, topCameras) => {
+    const cameraCounts = {};
+    
+    detections.forEach(detection => {
+      if (detection.camera_id) {
+        cameraCounts[detection.camera_id] = (cameraCounts[detection.camera_id] || 0) + 1;
+      }
+    });
+
+    return topCameras.slice(0, 5).map(camera => ({
+      camera: camera.name || `Cam ${camera.id}`,
+      xe: cameraCounts[camera.id] || 0
+    }));
+  };
+
+  // Generate weekly trends
+  const generateWeeklyTrends = (detections) => {
+    const days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    const today = new Date();
+    const weeklyData = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      
+      const dayDetections = detections.filter(d => 
+        d.detected_at && d.detected_at.startsWith(dateStr)
+      );
+
+      const uniquePlates = new Set(dayDetections.map(d => d.plate_number)).size;
+      const avgConfidence = dayDetections.length > 0 
+        ? dayDetections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / dayDetections.length 
+        : 0;
+
+      weeklyData.push({
+        day: days[6 - i],
+        detections: dayDetections.length,
+        uniquePlates,
+        avgConfidence: Math.round(avgConfidence * 100) / 100,
+        efficiency: Math.min(100, Math.round((uniquePlates / Math.max(dayDetections.length, 1)) * 100))
+      });
+    }
+
+    return weeklyData;
+  };
+
+  // Generate monthly statistics
+  const generateMonthlyStats = (detections) => {
+    const months = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
+    const monthlyData = [];
+
+    for (let i = 0; i < 12; i++) {
+      const monthDetections = detections.filter(d => {
+        if (!d.detected_at) return false;
+        const date = new Date(d.detected_at);
+        return date.getMonth() === i;
+      });
+
+      monthlyData.push({
+        month: months[i],
+        detections: monthDetections.length,
+        uniquePlates: new Set(monthDetections.map(d => d.plate_number)).size,
+        avgConfidence: monthDetections.length > 0 
+          ? Math.round((monthDetections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / monthDetections.length) * 100) / 100
+          : 0
+      });
+    }
+
+    return monthlyData;
+  };
+
+  // Generate top plates
+  const generateTopPlates = (detections) => {
+    const plateCounts = {};
+    
+    detections.forEach(detection => {
+      if (detection.plate_number) {
+        plateCounts[detection.plate_number] = (plateCounts[detection.plate_number] || 0) + 1;
+      }
+    });
+
+    return Object.entries(plateCounts)
+      .map(([plate, count]) => ({ plate, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  };
+
+  // Generate recent detections
+  const generateRecentDetections = (detections) => {
+    return detections
+      .sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at))
+      .slice(0, 10)
+      .map(detection => ({
+        id: detection.id,
+        plate: detection.plate_number,
+        time: new Date(detection.detected_at).toLocaleString('vi-VN'),
+        confidence: Math.round((detection.confidence_score || 0) * 100),
+        camera: detection.camera_name || 'Unknown',
+        location: detection.location_name || 'Unknown'
+      }));
+  };
+
+  // Generate system health
+  const generateSystemHealth = (cameraStats, detections) => {
+    const totalCameras = cameraStats.total_cameras || 0;
+    const onlineCameras = cameraStats.online_cameras || 0;
+    const offlineCameras = cameraStats.offline_cameras || 0;
+    
+    const healthScore = totalCameras > 0 ? Math.round((onlineCameras / totalCameras) * 100) : 0;
+    
+    return {
+      healthScore,
+      totalCameras,
+      onlineCameras,
+      offlineCameras,
+      status: healthScore >= 90 ? 'Excellent' : healthScore >= 70 ? 'Good' : healthScore >= 50 ? 'Fair' : 'Poor',
+      lastUpdate: new Date().toLocaleString('vi-VN')
+    };
+  };
+
+  // Generate performance metrics
+  const generatePerformanceMetrics = (detections) => {
+    const totalDetections = detections.length;
+    const avgConfidence = totalDetections > 0 
+      ? detections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / totalDetections 
+      : 0;
+    
+    const highConfidence = detections.filter(d => (d.confidence_score || 0) >= 0.8).length;
+    const mediumConfidence = detections.filter(d => (d.confidence_score || 0) >= 0.5 && (d.confidence_score || 0) < 0.8).length;
+    const lowConfidence = detections.filter(d => (d.confidence_score || 0) < 0.5).length;
+
+    return {
+      totalDetections,
+      avgConfidence: Math.round(avgConfidence * 100) / 100,
+      highConfidence,
+      mediumConfidence,
+      lowConfidence,
+      accuracyRate: totalDetections > 0 ? Math.round((highConfidence / totalDetections) * 100) : 0
+    };
+  };
+
+  // Generate location statistics
+  const generateLocationStats = (detections, locations) => {
+    const locationCounts = {};
+    
+    detections.forEach(detection => {
+      if (detection.location_id) {
+        locationCounts[detection.location_id] = (locationCounts[detection.location_id] || 0) + 1;
+      }
+    });
+
+    return locations.map(location => ({
+      name: location.location_name,
+      detections: locationCounts[location.id] || 0,
+      cameras: location.camera_count || 0,
+      efficiency: location.camera_count > 0 ? Math.round(((locationCounts[location.id] || 0) / location.camera_count) * 100) / 100 : 0
+    })).sort((a, b) => b.detections - a.detections);
+  };
+
+  // Generate vehicle type statistics
+  const generateVehicleTypeStats = (detections) => {
+    const typeCounts = {};
+    
+    detections.forEach(detection => {
+      const type = detection.detected_vehicle_type || 'unknown';
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+    });
+
+    return Object.entries(typeCounts).map(([type, count]) => ({
+      type: type.charAt(0).toUpperCase() + type.slice(1),
+      count,
+      percentage: Math.round((count / detections.length) * 100)
+    }));
+  };
+
+  // Generate confidence distribution
+  const generateConfidenceDistribution = (detections) => {
+    const ranges = [
+      { range: '0-20%', min: 0, max: 0.2, count: 0 },
+      { range: '20-40%', min: 0.2, max: 0.4, count: 0 },
+      { range: '40-60%', min: 0.4, max: 0.6, count: 0 },
+      { range: '60-80%', min: 0.6, max: 0.8, count: 0 },
+      { range: '80-100%', min: 0.8, max: 1.0, count: 0 }
+    ];
+
+    detections.forEach(detection => {
+      const confidence = detection.confidence_score || 0;
+      const range = ranges.find(r => confidence >= r.min && confidence < r.max);
+      if (range) range.count++;
+    });
+
+    return ranges;
+  };
+
+  // Generate alerts
+  const generateAlerts = (cameraStats, detections) => {
+    const alerts = [];
+    
+    // Camera offline alert
+    const offlineCameras = cameraStats.offline_cameras || 0;
+    if (offlineCameras > 0) {
+      alerts.push({
+        id: 1,
+        type: 'warning',
+        message: `${offlineCameras} camera đang offline`,
+        timestamp: new Date().toLocaleString('vi-VN')
+      });
+    }
+
+    // Low confidence alert
+    const lowConfidenceDetections = detections.filter(d => (d.confidence_score || 0) < 0.5).length;
+    if (lowConfidenceDetections > 0) {
+      alerts.push({
+        id: 2,
+        type: 'error',
+        message: `${lowConfidenceDetections} phát hiện có độ tin cậy thấp`,
+        timestamp: new Date().toLocaleString('vi-VN')
+      });
+    }
+
+    // High detection volume alert
+    const todayDetections = detections.filter(d => {
+      const today = new Date().toISOString().split('T')[0];
+      return d.detected_at && d.detected_at.startsWith(today);
+    }).length;
+    
+    if (todayDetections > 1000) {
+      alerts.push({
+        id: 3,
+        type: 'info',
+        message: `Hôm nay có ${todayDetections} phát hiện - Lưu lượng cao`,
+        timestamp: new Date().toLocaleString('vi-VN')
+      });
+    }
+
+    return alerts;
+  };
+
+  // Generate real-time stats
+  const generateRealTimeStats = (detections) => {
+    const now = new Date();
+    const lastHour = new Date(now.getTime() - 60 * 60 * 1000);
+    
+    const recentDetections = detections.filter(d => 
+      d.detected_at && new Date(d.detected_at) > lastHour
+    );
+
+    return {
+      detectionsLastHour: recentDetections.length,
+      uniquePlatesLastHour: new Set(recentDetections.map(d => d.plate_number)).size,
+      avgConfidenceLastHour: recentDetections.length > 0 
+        ? Math.round((recentDetections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / recentDetections.length) * 100) / 100
+        : 0,
+      lastUpdate: now.toLocaleString('vi-VN')
+    };
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={{ minHeight: '100vh', background: '#f4f6fa', p: 3 }}>
+    <Box sx={{ 
+      minHeight: '100vh', 
+      background: '#f5f5f5', 
+      p: 3,
+      '& .pulse': {
+        animation: 'pulse 2s infinite'
+      },
+      '@keyframes pulse': {
+        '0%': { opacity: 1 },
+        '50%': { opacity: 0.5 },
+        '100%': { opacity: 1 }
+      }
+    }}>
+      {/* Header */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" fontWeight={700} sx={{ mb: 1, color: '#1976d2' }}>
+          Dashboard Thống Kê Hệ Thống
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Tổng quan hoạt động hệ thống nhận diện biển số xe
+        </Typography>
+      </Box>
+
       <Grid container spacing={3}>
-        {/* Card tổng quan */}
-        {summary.map((item, idx) => (
+        {/* Card tổng quan với animation */}
+        {dashboardData.summary.map((item, idx) => (
           <Grid item xs={12} sm={6} md={3} key={item.label}>
-            <Paper sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 2, borderRadius: 2, boxShadow: 3 }}>
-              <Avatar sx={{ bgcolor: item.color, width: 48, height: 48 }}>{item.icon}</Avatar>
-              <Box>
-                <Typography variant="h6" fontWeight={700}>{item.value}</Typography>
-                <Typography variant="body2" color="text.secondary">{item.label}</Typography>
-              </Box>
-            </Paper>
+            <Fade in={true} timeout={500 + idx * 100}>
+              <Paper sx={{ 
+                p: 4, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 3, 
+                borderRadius: 4, 
+                boxShadow: 6,
+                background: `linear-gradient(135deg, ${item.color}20, ${item.color}08)`,
+                border: `2px solid ${item.color}40`,
+                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                height: 140,
+                position: 'relative',
+                overflow: 'hidden',
+                '&:hover': {
+                  transform: 'translateY(-8px) scale(1.02)',
+                  boxShadow: `0 20px 40px ${item.color}30`,
+                  border: `2px solid ${item.color}60`,
+                  '&::before': {
+                    opacity: 1
+                  }
+                },
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: `linear-gradient(45deg, ${item.color}15, transparent)`,
+                  opacity: 0,
+                  transition: 'opacity 0.3s ease'
+                }
+              }}>
+                <Avatar sx={{ 
+                  bgcolor: item.color, 
+                  width: 64, 
+                  height: 64,
+                  boxShadow: `0 8px 20px ${item.color}50`,
+                  transition: 'all 0.3s ease',
+                  zIndex: 1
+                }}>
+                  {item.icon}
+                </Avatar>
+                <Box sx={{ zIndex: 1, flex: 1 }}>
+                  <Typography variant="h3" fontWeight={800} color={item.color} sx={{
+                    textShadow: `0 2px 4px ${item.color}30`,
+                    letterSpacing: '-0.02em',
+                    lineHeight: 1.1
+                  }}>
+                    {item.value.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" fontWeight={600} sx={{
+                    fontSize: '0.95rem',
+                    letterSpacing: '0.02em',
+                    mt: 0.5
+                  }}>
+                    {item.label}
+                  </Typography>
+                </Box>
+              </Paper>
+            </Fade>
           </Grid>
         ))}
-        {/* Biểu đồ tròn và cột */}
+
+        {/* Real-time Stats */}
+        <Grid item xs={12}>
+          <Zoom in={true} timeout={800}>
+            <Card sx={{ 
+              mb: 3, 
+              background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)', 
+              color: 'white',
+              borderRadius: 3,
+              boxShadow: 4
+            }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                  <Typography variant="h6" fontWeight={700}>
+                    Thống Kê Real-time
+                  </Typography>
+                  <Chip 
+                    label="LIVE" 
+                    color="error" 
+                    size="small" 
+                    sx={{ 
+                      animation: 'pulse 2s infinite',
+                      fontWeight: 600
+                    }}
+                  />
+                </Box>
+                <Grid container spacing={3}>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h3" fontWeight={700}>
+                        {dashboardData.realTimeStats.detectionsLastHour || 0}
+                      </Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                        Phát hiện trong giờ qua
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h3" fontWeight={700}>
+                        {dashboardData.realTimeStats.uniquePlatesLastHour || 0}
+                      </Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                        Biển số duy nhất
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h3" fontWeight={700}>
+                        {dashboardData.realTimeStats.avgConfidenceLastHour || 0}%
+                      </Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                        Độ tin cậy TB
+                      </Typography>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </CardContent>
+            </Card>
+          </Zoom>
+        </Grid>
+        {/* System Health & Performance */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, borderRadius: 2, boxShadow: 3, height: 360 }}>
-            <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>Tỉ lệ trạng thái camera</Typography>
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={cameraStats} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                  {cameraStats.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+          <Fade in={true} timeout={1000}>
+            <Paper sx={{ 
+              p: 4, 
+              borderRadius: 4, 
+              boxShadow: 6, 
+              height: 450,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e3f2fd',
+              position: 'relative',
+              overflow: 'hidden',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'linear-gradient(45deg, rgba(25, 118, 210, 0.05), transparent)',
+                opacity: 0.5
+              }
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 4, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#1976d2',
+                position: 'relative',
+                zIndex: 1
+              }}>
+                <Assessment color="primary" />
+                Tình Trạng Hệ Thống
+              </Typography>
+              
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2">Tổng thể</Typography>
+                  <Typography variant="body2" fontWeight={700}>
+                    {dashboardData.systemHealth.healthScore || 0}%
+                  </Typography>
+                </Box>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={dashboardData.systemHealth.healthScore || 0}
+                  sx={{ 
+                    height: 8, 
+                    borderRadius: 4,
+                    bgcolor: '#e0e0e0',
+                    '& .MuiLinearProgress-bar': {
+                      borderRadius: 4,
+                      background: dashboardData.systemHealth.healthScore >= 90 
+                        ? 'linear-gradient(90deg, #4caf50, #8bc34a)'
+                        : dashboardData.systemHealth.healthScore >= 70
+                        ? 'linear-gradient(90deg, #ff9800, #ffc107)'
+                        : 'linear-gradient(90deg, #f44336, #ff5722)'
+                    }
+                  }}
+                />
+              </Box>
+
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e8f5e8', borderRadius: 2 }}>
+                    <Typography variant="h4" color="success.main" fontWeight={700}>
+                      {dashboardData.systemHealth.onlineCameras || 0}
+                    </Typography>
+                    <Typography variant="body2">Online</Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
+                    <Typography variant="h4" color="error.main" fontWeight={700}>
+                      {dashboardData.systemHealth.offlineCameras || 0}
+                    </Typography>
+                    <Typography variant="body2">Offline</Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+
+              <Box sx={{ mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Trạng thái: <strong>{dashboardData.systemHealth.status || 'Unknown'}</strong>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Cập nhật: {dashboardData.systemHealth.lastUpdate || 'N/A'}
+                </Typography>
+              </Box>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        {/* Performance Metrics */}
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={1200}>
+            <Paper sx={{ 
+              p: 4, 
+              borderRadius: 4, 
+              boxShadow: 6, 
+              height: 450,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e8f5e8',
+              position: 'relative',
+              overflow: 'hidden',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'linear-gradient(45deg, rgba(46, 125, 50, 0.05), transparent)',
+                opacity: 0.5
+              }
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 4, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#2e7d32',
+                position: 'relative',
+                zIndex: 1
+              }}>
+                <Speed color="primary" />
+                Hiệu Suất Hệ Thống
+              </Typography>
+              
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2">Độ chính xác</Typography>
+                  <Typography variant="body2" fontWeight={700}>
+                    {dashboardData.performanceMetrics.accuracyRate || 0}%
+                  </Typography>
+                </Box>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={dashboardData.performanceMetrics.accuracyRate || 0}
+                  sx={{ height: 8, borderRadius: 4 }}
+                />
+              </Box>
+
+              <Grid container spacing={2}>
+                <Grid item xs={4}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e3f2fd', borderRadius: 2 }}>
+                    <Typography variant="h5" color="info.main" fontWeight={700}>
+                      {dashboardData.performanceMetrics.highConfidence || 0}
+                    </Typography>
+                    <Typography variant="caption">Cao (≥80%)</Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#fff3e0', borderRadius: 2 }}>
+                    <Typography variant="h5" color="warning.main" fontWeight={700}>
+                      {dashboardData.performanceMetrics.mediumConfidence || 0}
+                    </Typography>
+                    <Typography variant="caption">Trung bình</Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={4}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
+                    <Typography variant="h5" color="error.main" fontWeight={700}>
+                      {dashboardData.performanceMetrics.lowConfidence || 0}
+                    </Typography>
+                    <Typography variant="caption">Thấp (&lt;50%)</Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+
+              <Box sx={{ mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Tổng phát hiện: <strong>{dashboardData.performanceMetrics.totalDetections || 0}</strong>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Độ tin cậy TB: <strong>{dashboardData.performanceMetrics.avgConfidence || 0}</strong>
+                </Typography>
+              </Box>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        {/* Enhanced Charts Row 1 */}
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={1400}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 450,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e3f2fd'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#1976d2'
+              }}>
+                <PieChartIcon color="primary" />
+                Tỉ Lệ Trạng Thái Camera
+              </Typography>
+              <ResponsiveContainer width="100%" height={350}>
+                <PieChart>
+                  <Pie 
+                    data={dashboardData.cameraStats} 
+                    dataKey="value" 
+                    nameKey="name" 
+                    cx="50%" 
+                    cy="50%" 
+                    outerRadius={120}
+                    innerRadius={50}
+                    paddingAngle={2}
+                    label={({ name, percent }) => `${name}\n${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {dashboardData.cameraStats.map((entry, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={CHART_COLORS[index % CHART_COLORS.length]}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    formatter={(value, name) => [value, name]}
+                    labelStyle={{ fontWeight: 600 }}
+                    contentStyle={{ 
+                      borderRadius: 8, 
+                      border: '1px solid #e0e0e0',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                    }}
+                  />
+                  <Legend 
+                    verticalAlign="bottom" 
+                    height={36}
+                    iconType="circle"
+                    wrapperStyle={{ paddingTop: 20 }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={1600}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 450,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e8f5e8'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#2e7d32'
+              }}>
+                <BarChartIcon color="primary" />
+                Xu Hướng Tuần
+              </Typography>
+              <ResponsiveContainer width="100%" height={350}>
+                <ComposedChart data={dashboardData.weeklyTrends} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                  <XAxis 
+                    dataKey="day" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <YAxis 
+                    yAxisId="left" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <YAxis 
+                    yAxisId="right" 
+                    orientation="right" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      borderRadius: 8, 
+                      border: '1px solid #e0e0e0',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      backgroundColor: '#ffffff'
+                    }}
+                    labelStyle={{ fontWeight: 600 }}
+                  />
+                  <Legend 
+                    verticalAlign="top" 
+                    height={36}
+                    wrapperStyle={{ paddingBottom: 10 }}
+                  />
+                  <Bar 
+                    yAxisId="left" 
+                    dataKey="detections" 
+                    fill="url(#barGradient)" 
+                    name="Phát hiện" 
+                    radius={[6, 6, 0, 0]}
+                    maxBarSize={40}
+                  />
+                  <Line 
+                    yAxisId="right" 
+                    type="monotone" 
+                    dataKey="efficiency" 
+                    stroke="#ff6b6b" 
+                    strokeWidth={4} 
+                    name="Hiệu suất %"
+                    dot={{ fill: '#ff6b6b', strokeWidth: 2, r: 6 }}
+                    activeDot={{ r: 8, stroke: '#ff6b6b', strokeWidth: 2 }}
+                  />
+                  <defs>
+                    <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#8884d8" stopOpacity={0.3}/>
+                    </linearGradient>
+                  </defs>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        {/* Enhanced Charts Row 2 */}
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={1800}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 450,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #fff3e0'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#f57c00'
+              }}>
+                <Timeline color="primary" />
+                Phát Hiện Theo Giờ (Hôm Nay)
+              </Typography>
+              <ResponsiveContainer width="100%" height={350}>
+                <AreaChart data={dashboardData.lineData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                  <XAxis 
+                    dataKey="hour" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <YAxis 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      borderRadius: 8, 
+                      border: '1px solid #e0e0e0',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      backgroundColor: '#ffffff'
+                    }}
+                    labelStyle={{ fontWeight: 600 }}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="xe" 
+                    stroke="#1976d2" 
+                    fill="url(#areaGradient)" 
+                    strokeWidth={4}
+                    dot={{ fill: '#1976d2', strokeWidth: 2, r: 6 }}
+                    activeDot={{ r: 8, stroke: '#1976d2', strokeWidth: 2 }}
+                  />
+                  <defs>
+                    <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#1976d2" stopOpacity={0.8}/>
+                      <stop offset="50%" stopColor="#1976d2" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#1976d2" stopOpacity={0.1}/>
+                    </linearGradient>
+                  </defs>
+                </AreaChart>
+              </ResponsiveContainer>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={2000}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 450,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e8f5e8'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#2e7d32'
+              }}>
+                <ShowChart color="primary" />
+                Top Camera Hoạt Động
+              </Typography>
+              <ResponsiveContainer width="100%" height={350}>
+                <BarChart data={dashboardData.camBarData} layout="horizontal" margin={{ top: 20, right: 30, left: 80, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                  <XAxis 
+                    type="number" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <YAxis 
+                    dataKey="camera" 
+                    type="category" 
+                    width={80}
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      borderRadius: 8, 
+                      border: '1px solid #e0e0e0',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      backgroundColor: '#ffffff'
+                    }}
+                    labelStyle={{ fontWeight: 600 }}
+                  />
+                  <Bar 
+                    dataKey="xe" 
+                    fill="url(#horizontalBarGradient)" 
+                    radius={[0, 6, 6, 0]}
+                    maxBarSize={50}
+                  />
+                  <defs>
+                    <linearGradient id="horizontalBarGradient" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="5%" stopColor="#43a047" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#43a047" stopOpacity={0.3}/>
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        {/* Data Tables Row */}
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={2200}>
+            <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 4, height: 400 }}>
+              <Typography variant="h6" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <DirectionsCar color="primary" />
+                Top Biển Số Phát Hiện
+              </Typography>
+              <TableContainer sx={{ maxHeight: 300 }}>
+                <Table stickyHeader size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Biển số</TableCell>
+                      <TableCell align="right">Số lần</TableCell>
+                      <TableCell align="right">%</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {dashboardData.topPlates.slice(0, 8).map((plate, index) => (
+                      <TableRow key={plate.plate} hover>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Chip 
+                              label={index + 1} 
+                              size="small" 
+                              color={index < 3 ? 'primary' : 'default'}
+                              sx={{ minWidth: 24, height: 24 }}
+                            />
+                            <Typography variant="body2" fontWeight={500}>
+                              {plate.plate}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="body2" fontWeight={600}>
+                            {plate.count}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                                                      <Typography variant="body2" color="text.secondary">
+                              {dashboardData.performanceMetrics.totalDetections > 0 
+                                ? Math.round((plate.count / dashboardData.performanceMetrics.totalDetections) * 100)
+                                : 0}%
+                            </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={2400}>
+            <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 4, height: 400 }}>
+              <Typography variant="h6" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <EventNote color="primary" />
+                Phát Hiện Gần Đây
+              </Typography>
+              <List sx={{ maxHeight: 300, overflow: 'auto' }}>
+                {dashboardData.recentDetections.slice(0, 6).map((detection, index) => (
+                  <React.Fragment key={detection.id}>
+                    <ListItem sx={{ px: 0 }}>
+                      <ListItemIcon>
+                        <Avatar sx={{ 
+                          width: 32, 
+                          height: 32, 
+                          bgcolor: detection.confidence >= 80 ? 'success.main' : 
+                                  detection.confidence >= 50 ? 'warning.main' : 'error.main'
+                        }}>
+                          {detection.confidence}
+                        </Avatar>
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography variant="body2" fontWeight={600}>
+                              {detection.plate}
+                            </Typography>
+                            <Chip 
+                              label={`${detection.confidence}%`} 
+                              size="small" 
+                              color={detection.confidence >= 80 ? 'success' : 
+                                    detection.confidence >= 50 ? 'warning' : 'error'}
+                            />
+                          </Box>
+                        }
+                        secondary={
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">
+                              {detection.camera} • {detection.location}
+                            </Typography>
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              {detection.time}
+                            </Typography>
+                          </Box>
+                        }
+                      />
+                    </ListItem>
+                    {index < 5 && <Divider />}
+                  </React.Fragment>
+                ))}
+              </List>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        {/* Alerts and Notifications */}
+        {dashboardData.alerts.length > 0 && (
+          <Grid item xs={12}>
+            <Fade in={true} timeout={2600}>
+              <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 4 }}>
+                <Typography variant="h6" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Notifications color="primary" />
+                  Thông Báo & Cảnh Báo
+                </Typography>
+                <Grid container spacing={2}>
+                  {dashboardData.alerts.map((alert) => (
+                    <Grid item xs={12} sm={6} md={4} key={alert.id}>
+                      <Alert 
+                        severity={alert.type} 
+                        sx={{ 
+                          borderRadius: 2,
+                          '& .MuiAlert-message': {
+                            width: '100%'
+                          }
+                        }}
+                      >
+                        <Typography variant="body2" fontWeight={500}>
+                          {alert.message}
+                        </Typography>
+                        <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                          {alert.timestamp}
+                        </Typography>
+                      </Alert>
+                    </Grid>
                   ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </Paper>
+                </Grid>
+              </Paper>
+            </Fade>
+          </Grid>
+        )}
+
+        {/* Additional Statistics */}
+        <Grid item xs={12} md={4}>
+          <Fade in={true} timeout={2800}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 350,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e3f2fd'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#1976d2'
+              }}>
+                <LocationOn color="primary" />
+                Thống Kê Theo Vị Trí
+              </Typography>
+              <Box sx={{ maxHeight: 280, overflow: 'auto', pr: 1 }}>
+                {dashboardData.locationStats.slice(0, 5).map((location, index) => (
+                  <Box key={location.name} sx={{ 
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    p: 2,
+                    mb: 1,
+                    borderRadius: 2,
+                    bgcolor: index % 2 === 0 ? '#f5f5f5' : 'transparent',
+                    transition: 'all 0.2s ease',
+                    '&:hover': {
+                      bgcolor: '#e3f2fd',
+                      transform: 'translateX(2px)'
+                    }
+                  }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={600} sx={{ 
+                        color: '#1976d2', 
+                        fontSize: '0.9rem',
+                        mb: 0.5,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {location.name}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 2 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+                          {location.detections} phát hiện
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+                          {location.cameras} camera
+                        </Typography>
+                      </Box>
+                    </Box>
+                    <Box sx={{ 
+                      textAlign: 'right', 
+                      minWidth: 60,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-end'
+                    }}>
+                      <Typography variant="h6" fontWeight={700} color="primary" sx={{ 
+                        fontSize: '1rem',
+                        lineHeight: 1
+                      }}>
+                        {location.efficiency}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ 
+                        fontSize: '0.75rem',
+                        lineHeight: 1
+                      }}>
+                        hiệu suất
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            </Paper>
+          </Fade>
         </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, borderRadius: 2, boxShadow: 3, height: 360 }}>
-            <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>Thống kê xe & sự kiện trong tuần</Typography>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={eventStats}>
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="xe" fill="#1976d2" name="Xe nhận diện" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="suKien" fill="#ffa000" name="Sự kiện" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Paper>
+
+        <Grid item xs={12} md={4}>
+          <Fade in={true} timeout={3000}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 350,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e8f5e8'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#2e7d32'
+              }}>
+                <DirectionsCar color="primary" />
+                Loại Phương Tiện
+              </Typography>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={dashboardData.vehicleTypeStats}
+                    dataKey="count"
+                    nameKey="type"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    innerRadius={30}
+                    paddingAngle={2}
+                    label={({ type, percentage }) => `${type}\n${percentage}%`}
+                    labelLine={false}
+                  >
+                    {dashboardData.vehicleTypeStats.map((entry, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={CHART_COLORS[index % CHART_COLORS.length]}
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    formatter={(value, name) => [value, name]}
+                    contentStyle={{ 
+                      borderRadius: 8, 
+                      border: '1px solid #e0e0e0',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </Paper>
+          </Fade>
         </Grid>
-        {/* Biểu đồ đường: số xe nhận diện theo giờ */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, borderRadius: 2, boxShadow: 3, height: 360 }}>
-            <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>Số xe nhận diện theo giờ</Typography>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={lineData}>
-                <XAxis dataKey="hour" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="xe" stroke="#1976d2" strokeWidth={3} dot={{ r: 5 }} name="Xe nhận diện" />
-              </LineChart>
-            </ResponsiveContainer>
-          </Paper>
-        </Grid>
-        {/* Biểu đồ cột: số xe nhận diện theo camera */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, borderRadius: 2, boxShadow: 3, height: 360 }}>
-            <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>Số xe nhận diện theo camera</Typography>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={camBarData}>
-                <XAxis dataKey="camera" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="xe" fill="#43a047" name="Xe nhận diện" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Paper>
+
+        <Grid item xs={12} md={4}>
+          <Fade in={true} timeout={3200}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 350,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #fff3e0'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#f57c00'
+              }}>
+                <Assessment color="primary" />
+                Phân Bố Độ Tin Cậy
+              </Typography>
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={dashboardData.confidenceDistribution} layout="horizontal" margin={{ top: 20, right: 30, left: 60, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                  <XAxis 
+                    type="number" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <YAxis 
+                    dataKey="range" 
+                    type="category" 
+                    width={60}
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      borderRadius: 8, 
+                      border: '1px solid #e0e0e0',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      backgroundColor: '#ffffff'
+                    }}
+                    labelStyle={{ fontWeight: 600 }}
+                  />
+                  <Bar 
+                    dataKey="count" 
+                    fill="url(#confidenceGradient)" 
+                    radius={[0, 6, 6, 0]}
+                    maxBarSize={40}
+                  />
+                  <defs>
+                    <linearGradient id="confidenceGradient" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#8884d8" stopOpacity={0.3}/>
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            </Paper>
+          </Fade>
         </Grid>
       </Grid>
     </Box>
@@ -129,3 +1527,53 @@ function Dashboard() {
 }
 
 export default Dashboard; 
+
+// Add CSS animations
+const styles = `
+  @keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+  
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  
+  .dashboard-card {
+    animation: fadeInUp 0.6s ease-out;
+  }
+  
+  .dashboard-chart {
+    animation: slideInRight 0.8s ease-out;
+  }
+  
+  .live-indicator {
+    animation: pulse 2s infinite;
+  }
+`;
+
+// Inject styles
+if (typeof document !== 'undefined') {
+  const styleSheet = document.createElement('style');
+  styleSheet.textContent = styles;
+  document.head.appendChild(styleSheet);
+} 
