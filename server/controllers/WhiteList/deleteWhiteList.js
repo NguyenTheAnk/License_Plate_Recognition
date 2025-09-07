@@ -8,13 +8,11 @@ const deleteWhitelist = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // Check if whitelist entry exists
+        // ✅ FIXED: Removed location and owner field references
         const [existingEntry] = await connection.execute(
-            `SELECT *, 
-                    l.name as location_name,
+            `SELECT w.*, 
                     v.make, v.model, v.color
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN vehicles v ON w.vehicle_id = v.id
              WHERE w.id = ?`,
             [id]
@@ -29,7 +27,7 @@ const deleteWhitelist = async (req, res) => {
 
         const whitelistEntry = existingEntry[0];
 
-        // SỬA: Luôn xóa vĩnh viễn - Clean up image files before permanent deletion
+        // Clean up image files before permanent deletion
         const imagePaths = [
             whitelistEntry.plate_image_path,
             whitelistEntry.detected_plate_image,
@@ -53,7 +51,7 @@ const deleteWhitelist = async (req, res) => {
             }
         }
 
-        // SỬA: Permanent delete - completely remove from database
+        // Permanent delete - completely remove from database
         await connection.execute(
             'DELETE FROM vehicle_whitelist WHERE id = ?',
             [id]
@@ -78,13 +76,13 @@ const deleteWhitelist = async (req, res) => {
             ]
         );
 
+        // ✅ FIXED: Removed location_name from response
         res.status(200).json({
             success: true,
             message: 'Xóa vĩnh viễn whitelist entry thành công',
             data: {
                 id: parseInt(id),
                 plate_number: whitelistEntry.plate_number,
-                location_name: whitelistEntry.location_name,
                 deleted_permanently: true,
                 deleted_files_count: imagePaths.length
             }
@@ -104,18 +102,9 @@ const bulkDeleteWhitelist = async (req, res) => {
     const connection = await db.promise();
     
     try {
-        // SỬA: Thêm debug logs
-        console.log('=== BULK DELETE REQUEST ===');
-        console.log('Method:', req.method);
-        console.log('URL:', req.url);
-        console.log('Params:', req.params);
-        console.log('Body:', req.body);
-        console.log('Content-Type:', req.get('Content-Type'));
-        console.log('============================');
-
         const { ids } = req.body;
 
-        // SỬA: Validation chi tiết và debug
+        // Validation
         if (!req.body) {
             console.log('ERROR: No request body');
             return res.status(400).json({
@@ -148,7 +137,7 @@ const bulkDeleteWhitelist = async (req, res) => {
             });
         }
 
-        // SỬA: Validate từng ID
+        // Validate each ID
         const invalidIds = ids.filter(id => {
             const parsed = parseInt(id);
             return isNaN(parsed) || parsed <= 0;
@@ -162,22 +151,19 @@ const bulkDeleteWhitelist = async (req, res) => {
             });
         }
 
-        console.log('✓ Validation passed. Processing IDs:', ids);
-
-        // Bắt đầu transaction
+        // Begin transaction
         await connection.beginTransaction();
 
         try {
             // Get existing entries before deletion for logging
             const placeholders = ids.map(() => '?').join(',');
-            console.log('SQL placeholders:', placeholders);
             
+            // ✅ FIXED: Removed location references
             const [existingEntries] = await connection.execute(
-                `SELECT w.id, w.plate_number, w.location_id, l.name as location_name,
+                `SELECT w.id, w.plate_number,
                         w.plate_image_path, w.detected_plate_image, w.plate_image_cropped_path, w.plate_image_processed_path,
                         w.ocr_raw_text, w.verification_status
                  FROM vehicle_whitelist w
-                 LEFT JOIN locations l ON w.location_id = l.id
                  WHERE w.id IN (${placeholders})`,
                 ids
             );
@@ -194,7 +180,7 @@ const bulkDeleteWhitelist = async (req, res) => {
 
             let deletedFilesCount = 0;
 
-            // Thực hiện permanent delete
+            // Execute permanent delete
             console.log('Executing DELETE query...');
             const [result] = await connection.execute(
                 `DELETE FROM vehicle_whitelist WHERE id IN (${placeholders})`,
@@ -203,11 +189,11 @@ const bulkDeleteWhitelist = async (req, res) => {
 
             console.log('Database delete result:', result);
 
-            // Commit transaction trước khi xóa file
+            // Commit transaction before deleting files
             await connection.commit();
             console.log('Transaction committed successfully');
 
-            // Xóa file sau khi commit database
+            // Delete files after committing database
             for (const entry of existingEntries) {
                 const imagePaths = [
                     entry.plate_image_path,
@@ -231,7 +217,7 @@ const bulkDeleteWhitelist = async (req, res) => {
                 }
             }
 
-            // Log access sau khi thành công
+            // Log access after success
             await connection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, 
                                         old_values, status, ip_address, user_agent, created_at)
@@ -266,7 +252,6 @@ const bulkDeleteWhitelist = async (req, res) => {
                     deleted_entries: existingEntries.map(entry => ({
                         id: entry.id,
                         plate_number: entry.plate_number,
-                        location_name: entry.location_name
                     }))
                 }
             });
@@ -316,9 +301,8 @@ const restoreWhitelist = async (req, res) => {
 
         // Check if whitelist entry exists and is inactive
         const [existingEntry] = await connection.execute(
-            `SELECT w.*, l.name as location_name
+            `SELECT w.*
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              WHERE w.id = ? AND w.is_active = 0`,
             [id]
         );
@@ -332,16 +316,16 @@ const restoreWhitelist = async (req, res) => {
 
         const whitelistEntry = existingEntry[0];
 
-        // Check for duplicate if restoring
+        // ✅ FIXED: Check for duplicate only by plate_number (removed location_id)
         const [duplicateEntry] = await connection.execute(
-            'SELECT id FROM vehicle_whitelist WHERE location_id = ? AND plate_number = ? AND id != ? AND is_active = 1',
-            [whitelistEntry.location_id, whitelistEntry.plate_number, id]
+            'SELECT id FROM vehicle_whitelist WHERE plate_number = ? AND id != ? AND is_active = 1',
+            [whitelistEntry.plate_number, id]
         );
 
         if (duplicateEntry.length > 0) {
             return res.status(409).json({
                 success: false,
-                message: 'Biển số này đã có trong danh sách trắng tại vị trí này. Không thể khôi phục.'
+                message: 'Biển số này đã có trong danh sách trắng. Không thể khôi phục.'
             });
         }
 
@@ -367,13 +351,13 @@ const restoreWhitelist = async (req, res) => {
             ]
         );
 
+        // ✅ FIXED: Removed location_name from response
         res.status(200).json({
             success: true,
             message: 'Khôi phục whitelist entry thành công',
             data: {
                 id: parseInt(id),
                 plate_number: whitelistEntry.plate_number,
-                location_name: whitelistEntry.location_name,
                 is_active: true
             }
         });
@@ -404,9 +388,8 @@ const bulkRestoreWhitelist = async (req, res) => {
         // Get existing inactive entries
         const placeholders = ids.map(() => '?').join(',');
         const [existingEntries] = await connection.execute(
-            `SELECT w.id, w.plate_number, w.location_id, l.name as location_name
+            `SELECT w.id, w.plate_number
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              WHERE w.id IN (${placeholders}) AND w.is_active = 0`,
             ids
         );
@@ -418,13 +401,13 @@ const bulkRestoreWhitelist = async (req, res) => {
             });
         }
 
-        // Check for duplicates that would prevent restoration
+        // ✅ FIXED: Check for duplicates only by plate_number (removed location_id)
         const duplicateChecks = [];
         const duplicateParams = [];
 
         for (const entry of existingEntries) {
-            duplicateChecks.push('(location_id = ? AND plate_number = ? AND id != ? AND is_active = 1)');
-            duplicateParams.push(entry.location_id, entry.plate_number, entry.id);
+            duplicateChecks.push('(plate_number = ? AND id != ? AND is_active = 1)');
+            duplicateParams.push(entry.plate_number, entry.id);
         }
 
         if (duplicateChecks.length > 0) {
@@ -471,6 +454,7 @@ const bulkRestoreWhitelist = async (req, res) => {
             ]
         );
 
+        // ✅ FIXED: Removed location_name from response
         res.status(200).json({
             success: true,
             message: `Khôi phục thành công ${result.affectedRows} whitelist entries`,
@@ -480,8 +464,7 @@ const bulkRestoreWhitelist = async (req, res) => {
                 restored_count: result.affectedRows,
                 restored_entries: existingEntries.map(entry => ({
                     id: entry.id,
-                    plate_number: entry.plate_number,
-                    location_name: entry.location_name
+                    plate_number: entry.plate_number
                 }))
             }
         });
@@ -507,12 +490,11 @@ const deleteExpiredWhitelist = async (req, res) => {
         cutoffDate.setDate(cutoffDate.getDate() - parseInt(days_expired));
         const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
 
-        // Get expired entries with image paths
+        // ✅ FIXED: Removed location references from expired entries query
         const [expiredEntries] = await connection.execute(
-            `SELECT w.id, w.plate_number, w.location_id, w.valid_to, l.name as location_name,
+            `SELECT w.id, w.plate_number, w.valid_to,
                     w.plate_image_path, w.plate_image_cropped_path, w.plate_image_processed_path
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              WHERE w.valid_to IS NOT NULL AND w.valid_to < ? AND w.is_active = 1`,
             [cutoffDateStr]
         );
@@ -529,7 +511,6 @@ const deleteExpiredWhitelist = async (req, res) => {
         }
 
         let result;
-        let actionType;
         let deletedFilesCount = 0;
 
         if (permanent === 'true') {
@@ -557,7 +538,6 @@ const deleteExpiredWhitelist = async (req, res) => {
                  WHERE valid_to IS NOT NULL AND valid_to < ? AND is_active = 1`,
                 [cutoffDateStr]
             );
-            actionType = 'DELETE_EXP_PERMANENT';
         } else {
             // Soft delete expired entries
             result = await connection.execute(
@@ -565,7 +545,6 @@ const deleteExpiredWhitelist = async (req, res) => {
                  WHERE valid_to IS NOT NULL AND valid_to < ? AND is_active = 1`,
                 [cutoffDateStr]
             );
-            actionType = 'DELETE_EXP_SOFT';
         }
 
         // Log access
@@ -576,7 +555,7 @@ const deleteExpiredWhitelist = async (req, res) => {
             [
                 req.user.userId,
                 req.user.username || req.user.email,
-                permanent === 'true' ? 'DELETE' : 'UPDATE', // SỬA: Sử dụng DELETE hoặc UPDATE
+                permanent === 'true' ? 'DELETE' : 'UPDATE',
                 JSON.stringify({ 
                     action: 'delete_expired',
                     permanent: permanent === 'true',
@@ -585,7 +564,6 @@ const deleteExpiredWhitelist = async (req, res) => {
                     expired_entries: expiredEntries.map(e => ({
                         id: e.id,
                         plate_number: e.plate_number,
-                        location_name: e.location_name,
                         valid_to: e.valid_to
                     })),
                     affected_rows: result[0].affectedRows,
@@ -595,6 +573,8 @@ const deleteExpiredWhitelist = async (req, res) => {
                 req.get('User-Agent')
             ]
         );
+
+        // ✅ FIXED: Removed location_name from response
         res.status(200).json({
             success: true,
             message: `${permanent === 'true' ? 'Xóa vĩnh viễn' : 'Vô hiệu hóa'} thành công ${result[0].affectedRows} whitelist entries hết hạn`,
@@ -607,7 +587,6 @@ const deleteExpiredWhitelist = async (req, res) => {
                 expired_entries: expiredEntries.map(e => ({
                     id: e.id,
                     plate_number: e.plate_number,
-                    location_name: e.location_name,
                     valid_to: e.valid_to
                 }))
             }
@@ -634,12 +613,11 @@ const purgeInactiveWhitelist = async (req, res) => {
         cutoffDate.setDate(cutoffDate.getDate() - parseInt(days_inactive));
         const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
 
-        // Get inactive entries that haven't been updated for specified days
+        // ✅ FIXED: Removed location references from inactive entries query
         const [inactiveEntries] = await connection.execute(
-            `SELECT w.id, w.plate_number, w.location_id, w.updated_at, l.name as location_name,
+            `SELECT w.id, w.plate_number, w.updated_at,
                     w.plate_image_path, w.plate_image_cropped_path, w.plate_image_processed_path
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              WHERE w.is_active = 0 AND w.updated_at < ?`,
             [cutoffDateStr]
         );
@@ -697,7 +675,6 @@ const purgeInactiveWhitelist = async (req, res) => {
                     inactive_entries: inactiveEntries.map(e => ({
                         id: e.id,
                         plate_number: e.plate_number,
-                        location_name: e.location_name,
                         updated_at: e.updated_at
                     })),
                     affected_rows: result.affectedRows,
@@ -708,6 +685,7 @@ const purgeInactiveWhitelist = async (req, res) => {
             ]
         );
 
+        // ✅ FIXED: Removed location_name from response
         res.status(200).json({
             success: true,
             message: `Dọn dẹp thành công ${result.affectedRows} whitelist entries không hoạt động`,
@@ -719,7 +697,6 @@ const purgeInactiveWhitelist = async (req, res) => {
                 purged_entries: inactiveEntries.map(e => ({
                     id: e.id,
                     plate_number: e.plate_number,
-                    location_name: e.location_name,
                     updated_at: e.updated_at
                 }))
             }

@@ -70,21 +70,9 @@ const updateWhitelist = async (req, res) => {
     try {
         const { id } = req.params;
         
-        // THÊM: Debug logging
-        console.log('=== UPDATE WHITELIST DEBUG ===');
-        console.log('Request params:', req.params);
-        console.log('Request body:', req.body);
-        console.log('Request files:', req.files ? Object.keys(req.files) : 'No files');
-        console.log('Content-Type:', req.get('Content-Type'));
-        console.log('===============================');
-        
         const {
-            location_id,
             plate_number,
             vehicle_id,
-            owner_name,
-            owner_phone,
-            contact_email,
             valid_from,
             valid_to,
             description,
@@ -101,9 +89,8 @@ const updateWhitelist = async (req, res) => {
 
         // Check if whitelist entry exists
         const [existingEntry] = await connection.execute(
-            `SELECT w.*, l.name as location_name, v.plate_number as vehicle_plate
+            `SELECT w.*, v.plate_number as vehicle_plate
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN vehicles v ON w.vehicle_id = v.id
              WHERE w.id = ?`,
             [id]
@@ -116,22 +103,7 @@ const updateWhitelist = async (req, res) => {
             });
         }
 
-        const currentEntry = existingEntry[0];
-
-        // Check if location exists (if location_id is being updated)
-        if (location_id && location_id !== currentEntry.location_id) {
-            const [locationExists] = await connection.execute(
-                'SELECT id FROM locations WHERE id = ? AND is_active = 1',
-                [location_id]
-            );
-
-            if (locationExists.length === 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Không tìm thấy vị trí'
-                });
-            }
-        }
+        const currentEntry = existingEntry[0];      
 
         // Check if vehicle exists (if vehicle_id is being updated)
         if (vehicle_id && vehicle_id !== currentEntry.vehicle_id) {
@@ -159,12 +131,11 @@ const updateWhitelist = async (req, res) => {
 
         // Check for duplicate entry if plate_number or location_id is being changed
         const newPlateNumber = plate_number || currentEntry.plate_number;
-        const newLocationId = location_id || currentEntry.location_id;
 
-        if (plate_number !== currentEntry.plate_number || location_id !== currentEntry.location_id) {
+        if (plate_number && plate_number !== currentEntry.plate_number) {
             const [duplicateEntry] = await connection.execute(
-                'SELECT id FROM vehicle_whitelist WHERE location_id = ? AND plate_number = ? AND id != ? AND is_active = 1',
-                [newLocationId, newPlateNumber, id]
+                'SELECT id FROM vehicle_whitelist WHERE plate_number = ? AND id != ? AND is_active = 1',
+                [newPlateNumber, id]
             );
 
             if (duplicateEntry.length > 0) {
@@ -186,27 +157,6 @@ const updateWhitelist = async (req, res) => {
             });
         }
 
-        // Validate email format if provided
-        if (contact_email && contact_email.trim() !== '') {
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(contact_email)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Định dạng email không hợp lệ'
-                });
-            }
-        }
-
-        // Validate phone format if provided
-        if (owner_phone && owner_phone.trim() !== '') {
-            const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
-            if (!phoneRegex.test(owner_phone.replace(/\s+/g, ''))) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Định dạng số điện thoại không hợp lệ'
-                });
-            }
-        }
 
         // Handle uploaded images
         let newImagePaths = {
@@ -240,15 +190,13 @@ const updateWhitelist = async (req, res) => {
                     const imagePath = req.files.plate_image[0].path;
                     const { execSync } = require('child_process');
                     
-                    console.log('[DEBUG] Python script path:', pythonScript);
-                    console.log('[DEBUG] Image path:', imagePath);
+                  
                     
                     const result = execSync(`python "${pythonScript}" --image "${imagePath}" --save-crop`).toString();
                     const lines = result.trim().split('\n');
                     const lastLine = lines[lines.length - 1];
                     
-                    console.log('[DEBUG] Python output:', result);
-                    console.log('[DEBUG] Last line:', lastLine);
+                    
                     
                     const ocrResult = JSON.parse(lastLine);
                     
@@ -265,11 +213,8 @@ const updateWhitelist = async (req, res) => {
                         };
                     }
                     
-                    console.log('[DEBUG][UPDATE] detectedPlateImage:', detectedPlateImage);
-                    console.log('[DEBUG][UPDATE] ocrUpdateData:', ocrUpdateData);
                     
                 } catch (err) {
-                    console.error('[UPDATE] OCR error:', err);
                     detectedPlateImage = currentEntry.detected_plate_image;
                     ocrUpdateData = null;
                 }
@@ -306,11 +251,7 @@ const updateWhitelist = async (req, res) => {
         const updateFields = [];
         const updateValues = [];
         
-        // SỬA: Cho phép update field với empty string và kiểm tra các giá trị có thay đổi không
-        if (location_id !== undefined && location_id !== currentEntry.location_id) {
-            updateFields.push('location_id = ?');
-            updateValues.push(location_id || null);
-        }
+        
         if (plate_number !== undefined && plate_number !== currentEntry.plate_number) {
             updateFields.push('plate_number = ?');
             updateValues.push(plate_number);
@@ -319,18 +260,7 @@ const updateWhitelist = async (req, res) => {
             updateFields.push('vehicle_id = ?');
             updateValues.push(vehicle_id || null);
         }
-        if (owner_name !== undefined && owner_name !== currentEntry.owner_name) {
-            updateFields.push('owner_name = ?');
-            updateValues.push(owner_name || null);
-        }
-        if (contact_email !== undefined && contact_email !== currentEntry.contact_email) {
-            updateFields.push('contact_email = ?');
-            updateValues.push(contact_email || null);
-        }
-        if (owner_phone !== undefined && owner_phone !== currentEntry.owner_phone) {
-            updateFields.push('owner_phone = ?');
-            updateValues.push(owner_phone || null);
-        }
+       
         if (valid_from !== undefined) {
             const processedValidFrom = valid_from ? formatDateForMySQL(valid_from) : null;
             if (processedValidFrom !== currentEntry.valid_from) {
@@ -467,7 +397,7 @@ const updateWhitelist = async (req, res) => {
 
         // Get updated entry with related data
         const [updatedEntry] = await connection.execute(
-            `SELECT w.*, l.name as location_name, l.code as location_code, l.zone_type,
+            `SELECT w.*,
                     v.make, v.model, v.color, v.vehicle_type,
                     u1.name as created_by_name, u2.name as approved_by_name,
                     CASE 
@@ -481,7 +411,6 @@ const updateWhitelist = async (req, res) => {
                         ELSE FALSE
                     END as has_images
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN vehicles v ON w.vehicle_id = v.id
              LEFT JOIN users u1 ON w.created_by = u1.id
              LEFT JOIN users u2 ON w.approved_by = u2.id
@@ -562,7 +491,7 @@ const updateWhitelistStatus = async (req, res) => {
 
         // Check if whitelist entry exists
         const [existingEntry] = await connection.execute(
-            'SELECT id, plate_number, is_active, location_id FROM vehicle_whitelist WHERE id = ?',
+            'SELECT id, plate_number, is_active FROM vehicle_whitelist WHERE id = ?',
             [id]
         );
 
@@ -578,8 +507,8 @@ const updateWhitelistStatus = async (req, res) => {
         // If activating, check for duplicates
         if (is_active && !currentEntry.is_active) {
             const [duplicateEntry] = await connection.execute(
-                'SELECT id FROM vehicle_whitelist WHERE location_id = ? AND plate_number = ? AND id != ? AND is_active = 1',
-                [currentEntry.location_id, currentEntry.plate_number, id]
+                'SELECT id FROM vehicle_whitelist WHERE plate_number = ? AND id != ? AND is_active = 1',
+                [currentEntry.plate_number, id]
             );
 
             if (duplicateEntry.length > 0) {
@@ -755,7 +684,7 @@ const bulkUpdateWhitelist = async (req, res) => {
 
         const allowedFields = [
             'is_active', 'approval_status', 'valid_from', 'valid_to', 
-            'description', 'owner_name', 'owner_phone', 'contact_email',
+            'description',
             'verification_status', 'verified_plate_number'
         ];
 
@@ -791,7 +720,7 @@ const bulkUpdateWhitelist = async (req, res) => {
         // Get existing entries for logging
         const placeholders = ids.map(() => '?').join(',');
         const [existingEntries] = await connection.execute(
-            `SELECT id, plate_number, location_id, approval_status, is_active
+            `SELECT id, plate_number, approval_status, is_active
              FROM vehicle_whitelist WHERE id IN (${placeholders})`,
             ids
         );
@@ -799,13 +728,12 @@ const bulkUpdateWhitelist = async (req, res) => {
         // Check for potential conflicts if activating entries
         if (update_data.is_active === true || update_data.is_active === 1) {
             const [conflicts] = await connection.execute(
-                `SELECT w1.id, w1.plate_number, w1.location_id
+                `SELECT w1.id, w1.plate_number,
                  FROM vehicle_whitelist w1
                  WHERE w1.id IN (${placeholders}) 
                  AND w1.is_active = 0
                  AND EXISTS (
                      SELECT 1 FROM vehicle_whitelist w2 
-                     WHERE w2.location_id = w1.location_id 
                      AND w2.plate_number = w1.plate_number 
                      AND w2.id != w1.id 
                      AND w2.is_active = 1

@@ -117,7 +117,7 @@ const searchRoles = async (req, res) => {
             const allowedSortFields = ['id', 'name', 'level', 'created_at', 'updated_at'];
             const validSortBy = allowedSortFields.includes(sort_by) ? sort_by : 'created_at';
             const validSortOrder = ['asc', 'desc'].includes(sort_order.toLowerCase()) ? sort_order.toUpperCase() : 'DESC';
-            orderByClause = `ORDER BY r.${validSortBy} ${validSortOrder}`;
+            orderByClause = `ORDER BY r.` + validSortBy + ` ` + validSortOrder;
         }
 
         // Main search query

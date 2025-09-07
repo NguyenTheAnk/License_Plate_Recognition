@@ -91,24 +91,25 @@ const searchUsers = async (req, res) => {
         const totalPages = Math.ceil(totalUsers / limit);
 
         // Get users basic info - SIMPLIFIED QUERY
-        const [users] = await connection.execute(`
-            SELECT 
-                u.id,
-                u.name,
-                u.email,
-                u.phone,
-                u.status,
-                u.last_login,
-                u.last_password_change,
-                u.failed_login_attempts,
-                u.account_locked,
-                u.created_at,
-                u.updated_at
-            FROM users u
-            ${whereClause}
-            ORDER BY u.${sortColumn} ${sortOrder}
-            LIMIT ? OFFSET ?
-        `, [...params, parseInt(limit), parseInt(offset)]);
+        const [users] = await connection.execute(
+            "SELECT " +
+                "u.id, " +
+                "u.name, " +
+                "u.email, " +
+                "u.phone, " +
+                "u.status, " +
+                "u.last_login, " +
+                "u.last_password_change, " +
+                "u.failed_login_attempts, " +
+                "u.account_locked, " +
+                "u.created_at, " +
+                "u.updated_at " +
+            "FROM users u " +
+            whereClause + " " +
+            "ORDER BY u." + sortColumn + " " + sortOrder + " " +
+            "LIMIT ? OFFSET ?",
+            [...params, parseInt(limit), parseInt(offset)]
+        );
 
         // Get roles and permissions for each user
         for (let user of users) {
@@ -342,7 +343,7 @@ const getUsersByRole = async (req, res) => {
             userQuery += ` AND u.status = ${escapedStatus}`;
         }
 
-        userQuery += ` ORDER BY u.name ASC LIMIT ${limitNum} OFFSET ${offset}`;
+        userQuery += ` ORDER BY u.name ASC LIMIT ` + limitNum + ` OFFSET ` + offset;
 
         console.log('Count Query:', countQuery);
         console.log('User Query:', userQuery);

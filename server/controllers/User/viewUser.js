@@ -467,22 +467,21 @@ const getUsersWithRolePermissionSummary = async (req, res) => {
         console.log('[getUsersWithRolePermissionSummary] Total users:', totalUsers);
 
         // FIXED: Get users basic info with string interpolation for LIMIT/OFFSET
-        const userQuery = `
-            SELECT 
-                u.id,
-                u.name,
-                u.email,
-                u.phone,
-                u.status,
-                u.last_login_at,
-                u.is_account_locked,
-                u.created_at,
-                u.updated_at
-            FROM users u
-            ${whereClause}
-            ORDER BY u.${sortColumn} ${sortOrder}
-            LIMIT ${limitNum} OFFSET ${offset}
-        `;
+        const userQuery = 
+            "SELECT " +
+                "u.id, " +
+                "u.name, " +
+                "u.email, " +
+                "u.phone, " +
+                "u.status, " +
+                "u.last_login_at, " +
+                "u.is_account_locked, " +
+                "u.created_at, " +
+                "u.updated_at " +
+            "FROM users u " +
+            whereClause + " " +
+            "ORDER BY u." + sortColumn + " " + sortOrder + " " +
+            "LIMIT " + limitNum + " OFFSET " + offset;
 
         const [users] = await connection.execute(userQuery, params);
         console.log('[getUsersWithRolePermissionSummary] Found users:', users.length);

@@ -898,4 +898,4 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and '--test' in sys.argv:
         test_plate_classification_logic()
     else:
-    main()
+        main()

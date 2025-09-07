@@ -1,6 +1,5 @@
 const db = require('../../db');
 
-
 const getAllWhitelist = async (req, res) => {
     const connection = await db.promise();
     
@@ -8,7 +7,6 @@ const getAllWhitelist = async (req, res) => {
         const {
             page = 1,
             limit = 50,
-            location_id,
             plate_number,
             approval_status,
             is_active,
@@ -27,12 +25,6 @@ const getAllWhitelist = async (req, res) => {
         // Build WHERE conditions and parameters
         let whereConditions = [];
         let queryParams = [];
-
-        // Location filter
-        if (location_id) {
-            whereConditions.push('w.location_id = ?');
-            queryParams.push(parseInt(location_id));
-        }
 
         // Plate number search
         if (plate_number) {
@@ -74,29 +66,20 @@ const getAllWhitelist = async (req, res) => {
         const sortBy = allowedSortFields.includes(sort_by) ? sort_by : 'created_at';
         const sortOrder = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-        console.log('WHERE clause:', whereClause);
-        console.log('Query params:', queryParams);
-
         // Get total count first
         const countQuery = `SELECT COUNT(*) as total FROM vehicle_whitelist w ${whereClause}`;
-        console.log('Count query:', countQuery);
         
         const [countResult] = await connection.execute(countQuery, queryParams);
         const total = countResult[0].total;
-        console.log('Count result:', total);
 
-        // SOLUTION: Use direct string interpolation for LIMIT and OFFSET to avoid parameter issues
+        // ✅ FIXED: Removed location references
         const dataQuery = `
-        SELECT w.id, w.location_id, w.plate_number, w.vehicle_id,
-               w.owner_name, w.owner_phone, w.contact_email,
+        SELECT w.id, w.plate_number, w.vehicle_id,
                w.valid_from, w.valid_to, w.description, 
                w.approval_status, w.approved_by, w.approved_at,
                w.is_active, w.created_by, w.created_at, w.updated_at,
                w.plate_image_path, w.detected_plate_image, w.ocr_raw_text, w.ocr_processed_at,
                w.ocr_confidence, w.verification_status, w.verified_plate_number,
-               l.name as location_name, 
-               l.code as location_code,
-               l.zone_type,
                u1.name as created_by_name,
                u2.name as approved_by_name,
                CASE 
@@ -110,20 +93,14 @@ const getAllWhitelist = async (req, res) => {
                    ELSE 0 
                END as has_images
         FROM vehicle_whitelist w
-        LEFT JOIN locations l ON w.location_id = l.id
         LEFT JOIN users u1 ON w.created_by = u1.id
         LEFT JOIN users u2 ON w.approved_by = u2.id
         ${whereClause}
         ORDER BY w.${sortBy} ${sortOrder}
         LIMIT ${parsedLimit} OFFSET ${offset}`;
 
-        console.log('Data query:', dataQuery);
-        console.log('Data query params (only filters):', queryParams);
-
         // Execute with only filter parameters (no LIMIT/OFFSET params)
-        const [whitelistEntries] = await connection.execute(dataQuery, queryParams);
-
-        console.log('Query executed successfully, results:', whitelistEntries.length);
+        const [whitelistEntries] = await connection.query(dataQuery, queryParams);
 
         // Log access for audit trail
         try {
@@ -153,7 +130,6 @@ const getAllWhitelist = async (req, res) => {
                 has_prev: parsedPage > 1
             },
             filters_applied: {
-                location_id: location_id || null,
                 plate_number: plate_number || null,
                 approval_status: approval_status || null,
                 is_active: is_active || null,
@@ -192,15 +168,9 @@ const getWhitelistById = async (req, res) => {
         const { id } = req.params;
         const { include_detection_history = 'false' } = req.query;
 
-        // Get whitelist entry with related data
+        // ✅ FIXED: Removed location references
         const [whitelistEntry] = await connection.execute(
             `SELECT w.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
-                    l.address as location_address,
-                    l.zone_type,
-                    l.latitude,
-                    l.longitude,
                     v.make, v.model, v.color, v.vehicle_type, v.year_manufactured,
                     v.owner_name as vehicle_owner_name,
                     v.owner_phone as vehicle_owner_phone,
@@ -222,7 +192,6 @@ const getWhitelistById = async (req, res) => {
                         ELSE FALSE
                     END as has_images
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN vehicles v ON w.vehicle_id = v.id
              LEFT JOIN users u1 ON w.created_by = u1.id
              LEFT JOIN users u2 ON w.approved_by = u2.id
@@ -289,18 +258,17 @@ const getWhitelistById = async (req, res) => {
             plate_number_matches: entry.plate_number === entry.verified_plate_number
         };
 
-        // Get recent detections for this plate number at this location
-        const [recentDetections] = await connection.execute(
-            `SELECT lpd.id, lpd.detected_at, lpd.direction, lpd.confidence_score, lpd.is_verified,
-                    lpd.original_image_path, lpd.cropped_plate_image_path,
-                    c.name as camera_name, c.camera_key
-             FROM license_plate_detections lpd
-             LEFT JOIN cameras c ON lpd.camera_id = c.id
-             WHERE lpd.plate_number = ? AND lpd.location_id = ?
-             ORDER BY lpd.detected_at DESC
-             LIMIT 10`,
-            [entry.plate_number, entry.location_id]
-        );
+                const [recentDetections] = await connection.execute(
+                `SELECT lpd.id, lpd.detected_at, lpd.direction, lpd.confidence_score, lpd.is_verified,
+                        lpd.original_image_path, lpd.cropped_plate_image_path,
+                        c.name as camera_name, c.id as camera_id
+                FROM license_plate_detections lpd
+                LEFT JOIN cameras c ON lpd.camera_id = c.id
+                WHERE lpd.plate_number = ?
+                ORDER BY lpd.detected_at DESC
+                LIMIT 10`,
+                [entry.plate_number]
+            );
 
         // Get usage statistics
         const [usageStats] = await connection.execute(
@@ -316,33 +284,33 @@ const getWhitelistById = async (req, res) => {
                 AVG(lpd.confidence_score) as avg_confidence,
                 COUNT(CASE WHEN lpd.is_verified = TRUE THEN 1 END) as verified_detections
              FROM license_plate_detections lpd
-             WHERE lpd.plate_number = ? AND lpd.location_id = ?`,
-            [entry.plate_number, entry.location_id]
+             WHERE lpd.plate_number = ?`,
+            [entry.plate_number]
         );
 
         // Get full detection history if requested
         let detectionHistory = null;
         if (include_detection_history === 'true') {
             const [fullDetections] = await connection.execute(
-                `SELECT lpd.*, c.name as camera_name, c.camera_key
-                 FROM license_plate_detections lpd
-                 LEFT JOIN cameras c ON lpd.camera_id = c.id
-                 WHERE lpd.plate_number = ? AND lpd.location_id = ?
-                 ORDER BY lpd.detected_at DESC
-                 LIMIT 100`,
-                [entry.plate_number, entry.location_id]
+                `SELECT lpd.*, c.name as camera_name, c.id as camera_id
+                FROM license_plate_detections lpd
+                LEFT JOIN cameras c ON lpd.camera_id = c.id
+                WHERE lpd.plate_number = ?
+                ORDER BY lpd.detected_at DESC
+                LIMIT 100`,
+                [entry.plate_number]
             );
             detectionHistory = fullDetections;
         }
 
-        // Get related alerts
+        // ✅ FIXED: Removed location_id parameter from query
         const [relatedAlerts] = await connection.execute(
             `SELECT a.id, a.alert_type, a.severity, a.title, a.status, a.created_at
              FROM alerts a
-             WHERE a.plate_number = ? AND a.location_id = ?
+             WHERE a.plate_number = ?
              ORDER BY a.created_at DESC
              LIMIT 5`,
-            [entry.plate_number, entry.location_id]
+            [entry.plate_number]
         );
 
         // Build result object
@@ -397,7 +365,7 @@ const getWhitelistByPlateNumber = async (req, res) => {
     
     try {
         const { plate_number } = req.params;
-        const { location_id, include_inactive = 'false', exact_match = 'true' } = req.query;
+        const { include_inactive = 'false', exact_match = 'true' } = req.query;
 
         let whereConditions = [];
         let queryParams = [];
@@ -412,12 +380,6 @@ const getWhitelistByPlateNumber = async (req, res) => {
             queryParams.push(searchTerm, searchTerm, searchTerm);
         }
 
-        // Location filter
-        if (location_id) {
-            whereConditions.push('w.location_id = ?');
-            queryParams.push(location_id);
-        }
-
         // Active status filter
         if (include_inactive !== 'true') {
             whereConditions.push('w.is_active = 1');
@@ -425,11 +387,9 @@ const getWhitelistByPlateNumber = async (req, res) => {
 
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
+        // ✅ FIXED: Removed location references
         const [whitelistEntries] = await connection.execute(
             `SELECT w.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
-                    l.zone_type,
                     v.make, v.model, v.color, v.vehicle_type,
                     u1.name as created_by_name, 
                     u2.name as approved_by_name,
@@ -444,7 +404,6 @@ const getWhitelistByPlateNumber = async (req, res) => {
                         ELSE FALSE
                     END as has_images
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN vehicles v ON w.vehicle_id = v.id
              LEFT JOIN users u1 ON w.created_by = u1.id
              LEFT JOIN users u2 ON w.approved_by = u2.id
@@ -459,7 +418,6 @@ const getWhitelistByPlateNumber = async (req, res) => {
             data: whitelistEntries,
             search_params: {
                 plate_number,
-                location_id: location_id || null,
                 include_inactive: include_inactive === 'true',
                 exact_match: exact_match === 'true'
             },
@@ -486,8 +444,6 @@ const searchWhitelist = async (req, res) => {
         const { 
             q, // general search query
             plate_number,
-            owner_name,
-            location_id,
             approval_status,
             valid_status,
             verification_status,
@@ -505,36 +461,31 @@ const searchWhitelist = async (req, res) => {
         let whereConditions = [];
         let queryParams = [];
 
-        // General search across multiple fields
-        if (q) {
-            whereConditions.push(`(
-                w.plate_number LIKE ? OR 
-                w.verified_plate_number LIKE ? OR
-                w.ocr_raw_text LIKE ? OR
-                w.owner_name LIKE ? OR 
-                w.description LIKE ? OR
-                l.name LIKE ?
-            )`);
-            const searchTerm = `%${q}%`;
-            queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
-        }
+       if (q) {
+    whereConditions.push(`(
+        w.plate_number LIKE ? OR 
+        w.verified_plate_number LIKE ? OR
+        w.ocr_raw_text LIKE ? OR
+        w.description LIKE ? OR
+        REPLACE(REPLACE(w.plate_number, '-', ''), '.', '') LIKE ?
+    )`);
+    const searchTerm = `%${q}%`;
+    const cleanSearchTerm = `%${q.replace(/[-\.]/g, '')}%`; // Bỏ dấu - và .
+    queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, cleanSearchTerm);
+}
 
-        // Specific field searches
-        if (plate_number) {
-            whereConditions.push('(w.plate_number LIKE ? OR w.verified_plate_number LIKE ?)');
-            const plateSearchTerm = `%${plate_number}%`;
-            queryParams.push(plateSearchTerm, plateSearchTerm);
-        }
-
-        if (owner_name) {
-            whereConditions.push('w.owner_name LIKE ?');
-            queryParams.push(`%${owner_name}%`);
-        }
-
-        if (location_id) {
-            whereConditions.push('w.location_id = ?');
-            queryParams.push(location_id);
-        }
+// ✅ SỬA: Plate number search linh hoạt
+if (plate_number) {
+    whereConditions.push(`(
+        w.plate_number LIKE ? OR 
+        w.verified_plate_number LIKE ? OR
+        REPLACE(REPLACE(w.plate_number, '-', ''), '.', '') LIKE ? OR
+        REPLACE(REPLACE(w.verified_plate_number, '-', ''), '.', '') LIKE ?
+    )`);
+    const plateSearchTerm = `%${plate_number}%`;
+    const cleanPlateSearchTerm = `%${plate_number.replace(/[-\.]/g, '')}%`;
+    queryParams.push(plateSearchTerm, plateSearchTerm, cleanPlateSearchTerm, cleanPlateSearchTerm);
+}
 
         if (approval_status) {
             whereConditions.push('w.approval_status = ?');
@@ -596,18 +547,14 @@ const searchWhitelist = async (req, res) => {
         const [countResult] = await connection.execute(
             `SELECT COUNT(*) as total 
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              ${whereClause}`,
             countParams
         );
 
-        // Get search results
+        // ✅ FIXED: Removed location references from search results
         const searchParams = [...queryParams, parseInt(limit), parseInt(offset)];
         const [results] = await connection.execute(
             `SELECT w.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
-                    l.zone_type,
                     v.make, v.model, v.color, v.vehicle_type,
                     u1.name as created_by_name, 
                     u2.name as approved_by_name,
@@ -622,7 +569,6 @@ const searchWhitelist = async (req, res) => {
                         ELSE FALSE
                     END as has_images
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN vehicles v ON w.vehicle_id = v.id
              LEFT JOIN users u1 ON w.created_by = u1.id
              LEFT JOIN users u2 ON w.approved_by = u2.id
@@ -645,8 +591,6 @@ const searchWhitelist = async (req, res) => {
             search_criteria: {
                 general_query: q || null,
                 plate_number: plate_number || null,
-                owner_name: owner_name || null,
-                location_id: location_id || null,
                 approval_status: approval_status || null,
                 valid_status: valid_status || null,
                 verification_status: verification_status || null,
@@ -680,17 +624,9 @@ const getWhitelistStatistics = async (req, res) => {
     const connection = await db.promise();
     
     try {
-        const { location_id, time_period = '30' } = req.query;
+        const { time_period = '30' } = req.query;
 
-        let locationFilter = '';
-        let queryParams = [];
-
-        if (location_id) {
-            locationFilter = 'AND w.location_id = ?';
-            queryParams.push(location_id);
-        }
-
-        // Get general statistics
+        // ✅ FIXED: Removed location filter and location references
         const [generalStats] = await connection.execute(
             `SELECT 
                 COUNT(*) as total_entries,
@@ -709,84 +645,55 @@ const getWhitelistStatistics = async (req, res) => {
                 COUNT(CASE WHEN w.plate_image_path IS NOT NULL THEN 1 END) as entries_with_original_image,
                 COUNT(CASE WHEN w.plate_image_cropped_path IS NOT NULL THEN 1 END) as entries_with_cropped_image,
                 COUNT(CASE WHEN w.plate_image_processed_path IS NOT NULL THEN 1 END) as entries_with_processed_image
-             FROM vehicle_whitelist w
-             WHERE 1=1 ${locationFilter}`,
-            [time_period, ...queryParams]
-        );
-
-        // Get statistics by location
-        const locationStatsParams = location_id ? [location_id] : [];
-        const [locationStats] = await connection.execute(
-            `SELECT 
-                l.id, l.name as location_name, l.code as location_code, l.zone_type,
-                COUNT(w.id) as total_entries,
-                COUNT(CASE WHEN w.is_active = 1 THEN 1 END) as active_entries,
-                COUNT(CASE WHEN w.approval_status = 'pending' THEN 1 END) as pending_entries,
-                COUNT(CASE WHEN w.ocr_raw_text IS NOT NULL THEN 1 END) as entries_with_ocr,
-                AVG(w.ocr_confidence) as avg_ocr_confidence
-             FROM locations l
-             LEFT JOIN vehicle_whitelist w ON l.id = w.location_id ${location_id ? 'AND l.id = ?' : ''}
-             WHERE l.is_active = 1
-             GROUP BY l.id, l.name, l.code, l.zone_type
-             ORDER BY total_entries DESC`,
-            locationStatsParams
+             FROM vehicle_whitelist w`,
+            [time_period]
         );
 
         // Get verification status statistics
-        const verificationStatsParams = location_id ? [location_id] : [];
         const [verificationStats] = await connection.execute(
             `SELECT 
                 w.verification_status,
                 COUNT(*) as count,
                 AVG(w.ocr_confidence) as avg_confidence
              FROM vehicle_whitelist w
-             WHERE w.ocr_raw_text IS NOT NULL ${locationFilter}
+             WHERE w.ocr_raw_text IS NOT NULL
              GROUP BY w.verification_status
-             ORDER BY count DESC`,
-            verificationStatsParams
+             ORDER BY count DESC`
         );
 
         // Get recent activity
-        const recentActivityParams = [time_period, ...queryParams];
         const [recentActivity] = await connection.execute(
             `SELECT 
                 w.id, w.plate_number, w.created_at, w.approval_status, w.verification_status,
-                l.name as location_name,
                 u.name as created_by_name
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN users u ON w.created_by = u.id
-             WHERE w.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) ${locationFilter}
+             WHERE w.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
              ORDER BY w.created_at DESC
              LIMIT 20`,
-            recentActivityParams
+            [time_period]
         );
 
-        // Get top plates by detection count
-        const topPlatesParams = [time_period, ...queryParams];
+        // ✅ FIXED: Removed location references from top plates query
         const [topPlates] = await connection.execute(
             `SELECT 
                 w.plate_number, 
                 w.verified_plate_number,
-                l.name as location_name,
                 COUNT(lpd.id) as detection_count,
                 MAX(lpd.detected_at) as last_detection,
                 AVG(lpd.confidence_score) as avg_detection_confidence
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN license_plate_detections lpd ON w.plate_number = lpd.plate_number 
-                                                      AND w.location_id = lpd.location_id
                                                       AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-             WHERE w.is_active = 1 ${locationFilter}
-             GROUP BY w.plate_number, w.verified_plate_number, l.name
+             WHERE w.is_active = 1
+             GROUP BY w.plate_number, w.verified_plate_number
              HAVING detection_count > 0
              ORDER BY detection_count DESC
              LIMIT 10`,
-            topPlatesParams
+            [time_period]
         );
 
         // Get OCR accuracy statistics
-        const ocrAccuracyParams = location_id ? [location_id] : [];
         const [ocrAccuracyStats] = await connection.execute(
             `SELECT 
                 CASE 
@@ -798,10 +705,9 @@ const getWhitelistStatistics = async (req, res) => {
                 COUNT(*) as count,
                 COUNT(CASE WHEN w.verification_status = 'ocr_matched' THEN 1 END) as verified_matches
              FROM vehicle_whitelist w
-             WHERE w.ocr_confidence IS NOT NULL ${locationFilter}
+             WHERE w.ocr_confidence IS NOT NULL
              GROUP BY confidence_range
-             ORDER BY FIELD(confidence_range, 'high', 'medium', 'low', 'very_low')`,
-            ocrAccuracyParams
+             ORDER BY FIELD(confidence_range, 'high', 'medium', 'low', 'very_low')`
         );
 
         res.status(200).json({
@@ -809,13 +715,11 @@ const getWhitelistStatistics = async (req, res) => {
             message: 'Lấy thống kê whitelist thành công',
             data: {
                 general_statistics: generalStats[0] || {},
-                by_location: locationStats,
                 verification_statistics: verificationStats,
                 ocr_accuracy_statistics: ocrAccuracyStats,
                 recent_activity: recentActivity,
                 top_active_plates: topPlates,
-                time_period: `${time_period} days`,
-                location_filter: location_id || 'all'
+                time_period: `${time_period} days`
             }
         });
 
@@ -1001,7 +905,6 @@ const exportWhitelistData = async (req, res) => {
     try {
         const {
             format = 'csv',
-            location_id,
             approval_status,
             valid_status,
             include_images = 'false',
@@ -1013,12 +916,7 @@ const exportWhitelistData = async (req, res) => {
         let whereConditions = [];
         let queryParams = [];
 
-        // Build export filters
-        if (location_id) {
-            whereConditions.push('w.location_id = ?');
-            queryParams.push(location_id);
-        }
-
+        // Build export filters (removed location_id)
         if (approval_status) {
             whereConditions.push('w.approval_status = ?');
             queryParams.push(approval_status);
@@ -1048,12 +946,11 @@ const exportWhitelistData = async (req, res) => {
 
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
-        // Build SELECT fields based on export options
+        // ✅ FIXED: Removed owner fields and location references from export
         let selectFields = `
-            w.id, w.plate_number, w.vehicle_id, w.owner_name, w.owner_phone, w.contact_email,
+            w.id, w.plate_number, w.vehicle_id,
             w.valid_from, w.valid_to, w.description, w.approval_status, w.is_active,
             w.created_at, w.updated_at,
-            l.name as location_name, l.code as location_code, l.zone_type,
             v.make, v.model, v.color, v.vehicle_type,
             u1.name as created_by_name, u2.name as approved_by_name,
             CASE 
@@ -1078,11 +975,10 @@ const exportWhitelistData = async (req, res) => {
             `;
         }
 
-        // Get export data
+        // ✅ FIXED: Removed location JOIN from export query
         const [exportData] = await connection.execute(
             `SELECT ${selectFields}
              FROM vehicle_whitelist w
-             LEFT JOIN locations l ON w.location_id = l.id
              LEFT JOIN vehicles v ON w.vehicle_id = v.id
              LEFT JOIN users u1 ON w.created_by = u1.id
              LEFT JOIN users u2 ON w.approved_by = u2.id
@@ -1103,7 +999,6 @@ const exportWhitelistData = async (req, res) => {
                     format,
                     record_count: exportData.length,
                     filters: {
-                        location_id: location_id || null,
                         approval_status: approval_status || null,
                         valid_status: valid_status || null,
                         date_range: {
@@ -1225,7 +1120,6 @@ const getWhitelistAuditLog = async (req, res) => {
         });
     }
 };
-
 
 module.exports = {
     getAllWhitelist,
