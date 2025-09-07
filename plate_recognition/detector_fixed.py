@@ -3465,11 +3465,16 @@ def detect_license_plate_in_vehicle(vehicle_crop, plate_model):
         
         h, w = vehicle_crop.shape[:2]
         
-        # Use yolov8n.pt for plate detection with low threshold
+        # Initialize variables
+        best_plate = None
+        best_confidence = 0.0
+        best_bbox = None
+        
+        # Use yolov8n.pt for plate detection with very low threshold
         if plate_model is not None:
             try:
-                # Use low confidence threshold to catch more plates
-                results = plate_model(vehicle_crop, conf=0.1, iou=0.5, verbose=False)
+                # Use very low confidence threshold to catch more plates
+                results = plate_model(vehicle_crop, conf=0.01, iou=0.3, verbose=False)
                 
                 if results:
                     for result in results:
@@ -3487,8 +3492,8 @@ def detect_license_plate_in_vehicle(vehicle_crop, plate_model):
                                     x1, y1, x2, y2 = map(int, box)
                                     
                                     # Add padding
-                                    pad_x = max(10, int((x2 - x1) * 0.2))
-                                    pad_y = max(5, int((y2 - y1) * 0.2))
+                                    pad_x = max(5, int((x2 - x1) * 0.1))
+                                    pad_y = max(3, int((y2 - y1) * 0.1))
                                     
                                     x1p = max(0, x1 - pad_x)
                                     y1p = max(0, y1 - pad_y)
@@ -3956,6 +3961,95 @@ def safe_deepsort_update(tracker, detections, frame):
     except Exception as e:
         logger.error(f"Critical DeepSORT error: {e}")
         return []
+def simple_track_processing(track, frame, original_width, original_height):
+    """Simplified track processing for better OCR results"""
+    global ocr_reader
+    
+    try:
+        if not (hasattr(track, 'track_id') and hasattr(track, 'to_ltrb')):
+            return None
+            
+        track_id = track.track_id
+        ltrb = track.to_ltrb()
+        
+        if ltrb is None:
+            return None
+            
+        if isinstance(ltrb, np.ndarray):
+            ltrb = ltrb.flatten()
+            
+        if len(ltrb) < 4:
+            return None
+            
+        x1, y1, x2, y2 = map(int, ltrb[:4])
+        
+        # Clamp coordinates
+        x1 = max(0, min(x1, original_width-1))
+        y1 = max(0, min(y1, original_height-1))
+        x2 = max(x1+1, min(x2, original_width))
+        y2 = max(y1+1, min(y2, original_height))
+        
+        # Extract vehicle crop
+        try:
+            vehicle_crop = frame[y1:y2, x1:x2]
+            if vehicle_crop.size == 0:
+                return None
+        except Exception:
+            return None
+        
+        # Simple plate detection
+        plate_crop, plate_conf, plate_bbox_local = None, 0.0, None
+        
+        try:
+            logger.info(f"🔍 Running plate detection on track {track_id}, vehicle crop: {vehicle_crop.shape}")
+            plate_crop, plate_conf, plate_bbox_local = detect_license_plate_in_vehicle(vehicle_crop, plate_model)
+            logger.info(f"🔍 Plate detection result for track {track_id}: crop={plate_crop is not None}, conf={plate_conf:.3f}")
+        except Exception as e:
+            logger.error(f"Plate detection failed for track {track_id}: {e}")
+            plate_crop = None
+        
+        # Simple OCR if we have plate
+        plate_text = None
+        confidence = 0.0
+        plate_frame_bbox = None
+        
+        if plate_crop is not None and ocr_reader is not None:
+            try:
+                logger.info(f"🔤 Running OCR on track {track_id}, plate crop: {plate_crop.shape}")
+                # Run OCR on plate crop
+                ocr_result = ocr_reader.ocr(plate_crop, det=True, rec=True, cls=False)
+                plate_text, confidence = safe_extract_ocr_text(ocr_result)
+                logger.info(f"🔤 OCR result for track {track_id}: text='{plate_text}', conf={confidence:.3f}")
+                
+                if plate_text and plate_bbox_local:
+                    # Convert local bbox to frame coordinates
+                    px1, py1, px2, py2 = map(int, plate_bbox_local)
+                    plate_frame_bbox = [x1 + px1, y1 + py1, x1 + px2, y1 + py2]
+                    
+            except Exception as e:
+                logger.error(f"OCR failed for track {track_id}: {e}")
+        else:
+            logger.info(f"🔤 No plate crop or OCR reader for track {track_id}")
+        
+        # Return result
+        return {
+            'track_id': track_id,
+            'bbox': [x1, y1, x2, y2],
+            'plate_number': plate_text if plate_text else 'Đang nhận diện...',
+            'raw_text': plate_text,
+            'confidence': confidence,
+            'vehicle_crop': vehicle_crop,
+            'plate_crop': plate_crop,
+            'plate_frame_bbox': plate_frame_bbox,
+            'has_plate': plate_crop is not None,
+            'validation_passed': bool(plate_text and confidence > 0.1),
+            'class_id': getattr(track, 'class_id', -1)
+        }
+        
+    except Exception as e:
+        logger.error(f"Simple track processing error: {e}")
+        return None
+
 def safe_track_processing(track, frame, original_width, original_height):
     """ENHANCED: Track processing with timeout protection and comprehensive error handling"""
     global track_consistency, ocr_attempts_per_track
@@ -4327,9 +4421,9 @@ def detect_and_ocr(frame, video_processing=True):
                         ltrb = ltrb.flatten()
                     x1, y1, x2, y2 = map(int, ltrb[:4])
                     
-                    # Run OCR every 3 frames for better results
-                    if frame_count % 3 == 0 and ocr_reader is not None:
-                        tr = safe_track_processing(track, frame, original_width, original_height)
+                    # Always run OCR for better results
+                    if ocr_reader is not None:
+                        tr = simple_track_processing(track, frame, original_width, original_height)
                     else:
                         # Fast path: only geometry, no OCR
                         tr = {
