@@ -125,13 +125,13 @@ const getLocationDetailedView = async (req, res) => {
         // Get recent detections
         const [recentDetections] = await connection.execute(`
             SELECT 
-                lpd.id, lpd.plate_number, lpd.detection_time, lpd.confidence,
+                lpd.id, lpd.plate_number, lpd.detected_at, lpd.confidence,
                 lpd.direction, lpd.vehicle_color, lpd.is_verified,
                 c.name as camera_name
             FROM license_plate_detections lpd
             JOIN cameras c ON lpd.camera_id = c.id
             WHERE lpd.location_id = ?
-            ORDER BY lpd.detection_time DESC
+            ORDER BY lpd.detected_at DESC
             LIMIT 10
         `, [locationId]);
 
