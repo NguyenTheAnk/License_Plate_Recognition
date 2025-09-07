@@ -91,31 +91,94 @@ function SearchCamera({ filters, onFilterChange, onSearch, results, loading, err
               <Table>
                 <TableHead>
                   <TableRow sx={{ background: '#1976d2' }}>
+                    <TableCell sx={{ color: 'white', fontWeight: 700 }}>STT</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 700 }}>Tên camera</TableCell>
-                    <TableCell sx={{ color: 'white', fontWeight: 700 }}>Mã</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 700 }}>Mã camera</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 700 }}>Vị trí</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 700 }}>Độ phân giải</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 700 }}>Trạng thái</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 700 }}>Kết nối</TableCell>
+                    <TableCell sx={{ color: 'white', fontWeight: 700 }}>Phát hiện 24h</TableCell>
                     <TableCell sx={{ color: 'white', fontWeight: 700 }}>Thao tác</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {results.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} align="center">
+                      <TableCell colSpan={9} align="center">
                         <Typography color="text.secondary" sx={{ py: 4 }}>Không có kết quả</Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    results.map(item => (
+                    results.map((item, index) => (
                       <TableRow key={item.id || item.camera_key} hover>
-                        <TableCell>{item.name}</TableCell>
-                        <TableCell>{item.camera_key || item.camera_id}</TableCell>
-                        <TableCell>{item.location_name}</TableCell>
                         <TableCell>
-                          <Chip label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} color={item.is_active ? 'success' : 'default'} size="small" />
+                          <Typography variant="body2" fontWeight={500}>
+                            {index + 1}
+                          </Typography>
                         </TableCell>
                         <TableCell>
-                          <Button variant="outlined" size="small" onClick={() => handleOpenDetail(item)} startIcon={<Info />} sx={{ borderRadius: 2, fontWeight: 600 }}>Chi tiết</Button>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <CameraAlt sx={{ fontSize: 16, color: '#1976d2' }} />
+                            <Typography variant="body2" fontWeight={600}>
+                              {item.name}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color="text.secondary">
+                            {item.code || item.camera_key || item.camera_id}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Box>
+                            <Typography variant="body2" fontWeight={500}>
+                              {item.location_name}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {item.location_address}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={500}>
+                            {item.resolution || `${item.width}x${item.height}`}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.fps} FPS
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
+                            color={item.is_active ? 'success' : 'default'} 
+                            size="small" 
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={item.connection_status === 'online' ? 'Online' : 
+                                   item.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
+                            color={item.connection_status === 'online' ? 'success' : 
+                                   item.connection_status === 'warning' ? 'warning' : 'error'} 
+                            size="small" 
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={500} color="primary">
+                            {item.detections_24h || 0}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Button 
+                            variant="outlined" 
+                            size="small" 
+                            onClick={() => handleOpenDetail(item)} 
+                            startIcon={<Info />} 
+                            sx={{ borderRadius: 2, fontWeight: 600 }}
+                          >
+                            Xem chi tiết
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -136,19 +199,153 @@ function SearchCamera({ filters, onFilterChange, onSearch, results, loading, err
         </DialogTitle>
         <DialogContent dividers>
           {selectedItem && (
-            <Grid container spacing={2}>
+            <Grid container spacing={3}>
+              {/* Thông tin cơ bản */}
               <Grid item xs={12} md={4}>
                 <Avatar variant="rounded" sx={{ width: 120, height: 70, bgcolor: '#e0e0e0', mb: 2 }}>
                   <CameraAlt sx={{ fontSize: 40 }} />
                 </Avatar>
                 <Typography variant="h5" fontWeight={700} sx={{ mb: 1 }}>{selectedItem.name}</Typography>
-                <Typography variant="body2" color="text.secondary">Mã: {selectedItem.camera_key || selectedItem.camera_id}</Typography>
+                <Typography variant="body2" color="text.secondary">Mã: {selectedItem.code || selectedItem.camera_key || selectedItem.camera_id}</Typography>
                 <Typography variant="body2" color="text.secondary">Vị trí: {selectedItem.location_name}</Typography>
-                <Typography variant="body2" color="text.secondary">Trạng thái: {selectedItem.is_active ? 'Hoạt động' : 'Tạm dừng'}</Typography>
+                <Typography variant="body2" color="text.secondary">Địa chỉ: {selectedItem.location_address}</Typography>
+                <Box sx={{ mt: 2 }}>
+                  <Chip 
+                    label={selectedItem.is_active ? 'Hoạt động' : 'Tạm dừng'} 
+                    color={selectedItem.is_active ? 'success' : 'default'} 
+                    size="small" 
+                    sx={{ mr: 1 }}
+                  />
+                  <Chip 
+                    label={selectedItem.connection_status === 'online' ? 'Online' : 
+                           selectedItem.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
+                    color={selectedItem.connection_status === 'online' ? 'success' : 
+                           selectedItem.connection_status === 'warning' ? 'warning' : 'error'} 
+                    size="small" 
+                  />
+                </Box>
               </Grid>
+              
+              {/* Thông tin kỹ thuật */}
               <Grid item xs={12} md={8}>
-                <Typography variant="subtitle1" fontWeight={600} mb={1}>Thông tin chi tiết</Typography>
-                <Typography variant="body2">{selectedItem.description}</Typography>
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">Thông tin kỹ thuật</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Giao thức:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.protocol?.toUpperCase()}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Host:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.host}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Port:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.port}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Độ phân giải:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.resolution || `${selectedItem.width}x${selectedItem.height}`}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">FPS:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.fps}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Loại camera:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.camera_type}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Vai trò:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.camera_role}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Hướng:</Typography>
+                    <Typography variant="body2" fontWeight={500}>{selectedItem.direction}</Typography>
+                  </Grid>
+                </Grid>
+                
+                <Divider sx={{ my: 2 }} />
+                
+                {/* Thông tin cài đặt & bảo trì */}
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">Cài đặt & Bảo trì</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Ngày lắp đặt:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedItem.installation_date_formatted || selectedItem.installation_date || 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Số ngày hoạt động:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedItem.days_since_installation ? `${selectedItem.days_since_installation} ngày` : 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Lịch bảo trì:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedItem.maintenance_schedule || 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Khoảng cách bảo trì:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedItem.maintenance_interval_days ? `${selectedItem.maintenance_interval_days} ngày` : 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                </Grid>
+                
+                <Divider sx={{ my: 2 }} />
+                
+                {/* Thông tin phát hiện */}
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">Thông tin phát hiện</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Phát hiện 24h:</Typography>
+                    <Typography variant="body2" fontWeight={500} color="primary">
+                      {selectedItem.detections_24h || 0} lần
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Bật phát hiện:</Typography>
+                    <Chip 
+                      label={selectedItem.is_detect ? 'Có' : 'Không'} 
+                      color={selectedItem.is_detect ? 'success' : 'default'} 
+                      size="small" 
+                    />
+                  </Grid>
+                </Grid>
+                
+                <Divider sx={{ my: 2 }} />
+                
+                {/* Thông tin kết nối */}
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">Thông tin kết nối</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">RTSP URL:</Typography>
+                    <Typography variant="body2" fontWeight={500} sx={{ 
+                      wordBreak: 'break-all', 
+                      bgcolor: '#f5f5f5', 
+                      p: 1, 
+                      borderRadius: 1,
+                      fontFamily: 'monospace'
+                    }}>
+                      {selectedItem.rtsp_url || 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Lần ping cuối:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedItem.last_heartbeat_formatted || selectedItem.last_heartbeat || 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Giây từ lần ping cuối:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedItem.seconds_since_heartbeat ? `${selectedItem.seconds_since_heartbeat}s` : 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                </Grid>
               </Grid>
             </Grid>
           )}

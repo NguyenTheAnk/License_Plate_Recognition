@@ -77,51 +77,7 @@ function SearchWhitelist({
                 InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1 }} /> }} 
               />
             </Grid>
-            <Grid item xs={12} md={3}>
-              <TextField 
-                label="Chủ xe" 
-                value={filters.owner_name || ''} 
-                onChange={e => onFilterChange('owner_name', e.target.value)} 
-                fullWidth 
-                size="small" 
-                InputProps={{ startAdornment: <Person sx={{ mr: 1 }} /> }} 
-              />
-            </Grid>
-            <Grid item xs={12} md={2}>
-              <TextField 
-                label="SĐT chủ xe" 
-                value={filters.owner_phone || ''} 
-                onChange={e => onFilterChange('owner_phone', e.target.value)} 
-                fullWidth 
-                size="small" 
-                InputProps={{ startAdornment: <Phone sx={{ mr: 1 }} /> }} 
-              />
-            </Grid>
-            <Grid item xs={12} md={2}>
-              <TextField 
-                label="Email liên hệ" 
-                value={filters.contact_email || ''} 
-                onChange={e => onFilterChange('contact_email', e.target.value)} 
-                fullWidth 
-                size="small" 
-                InputProps={{ startAdornment: <Email sx={{ mr: 1 }} /> }} 
-              />
-            </Grid>
-            <Grid item xs={12} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Khu vực</InputLabel>
-                <Select 
-                  value={filters.location_id || ''} 
-                  label="Khu vực" 
-                  onChange={e => onFilterChange('location_id', e.target.value)}
-                >
-                  <MenuItem value="">Tất cả</MenuItem>
-                  {locations.map(loc => (
-                    <MenuItem key={loc.id} value={loc.id}>{loc.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+           
             <Grid item xs={12} md={2}>
               <FormControl fullWidth size="small">
                 <InputLabel>Hiệu lực</InputLabel>

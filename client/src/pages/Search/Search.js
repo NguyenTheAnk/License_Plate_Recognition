@@ -18,6 +18,10 @@ function SearchPage() {
   // Danh sách camera lấy từ API
   const [cameras, setCameras] = useState([]);
 
+  // State cho modal chi tiết camera
+  const [cameraDetailOpen, setCameraDetailOpen] = useState(false);
+  const [selectedCamera, setSelectedCamera] = useState(null);
+
   const statusOptions = [
     { value: '', label: 'Tất cả trạng thái', color: 'default' },
     { value: 'whitelist', label: 'Whitelist', color: 'success' },
@@ -88,13 +92,6 @@ function SearchPage() {
       color: 'info'
     },
     { 
-      label: 'Chủ xe', 
-      value: 'owner', 
-      icon: <Person />, 
-      description: 'Thông tin chủ xe',
-      color: 'secondary'
-    },
-    { 
       label: 'Camera', 
       value: 'camera', 
       icon: <CameraAlt />, 
@@ -140,7 +137,6 @@ function SearchPage() {
   // Enhanced state management
   const [filters, setFilters] = useState({
     plate_number: '',
-    owner_name: '',
     owner_phone: '',
     contact_email: '',
     location_id: '',
@@ -163,6 +159,15 @@ function SearchPage() {
   
   const [tab, setTab] = useState('all');
   const [loading, setLoading] = useState(false);
+  const [tabLoading, setTabLoading] = useState({
+    whitelist: false,
+    blacklist: false,
+    camera: false,
+    location: false,
+    journey: false,
+    plate: false,
+    access: false
+  });
   const [results, setResults] = useState([]);
   const [stats, setStats] = useState({});
   const [openDetail, setOpenDetail] = useState(false);
@@ -194,12 +199,17 @@ function SearchPage() {
     const fetchLocations = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetchDataFromAPI('/api/location/active', token, { params: { page: 1, limit: 1000 } });
+        const res = await fetchDataFromAPI('/api/location', token, { params: { page: 1, limit: 1000 } });
         if (res && (res.data?.locations || res.data)) {
           setLocations(res.data?.locations || res.data);
         }
       } catch (err) {
-        // Có thể log lỗi hoặc hiển thị thông báo nếu cần
+        console.error('Error fetching locations:', err);
+        setSnackbar({
+          open: true,
+          message: 'Lỗi khi tải danh sách khu vực',
+          severity: 'error'
+        });
       }
     };
     fetchLocations();
@@ -210,16 +220,39 @@ function SearchPage() {
     const fetchCameras = async () => {
       try {
         const token = localStorage.getItem('token');
-        const data = await fetchDataFromAPI('/api/cameras/streams/all', token);
-        // Lấy danh sách camera từ API (giống Sidebar)
+        const data = await fetchDataFromAPI('/api/cameras/search/cameras', token);
+        // Lấy danh sách camera từ API với connection_status
         const cameraList = data.data?.cameras || [];
+        console.log('📹 Fetched cameras:', cameraList.map(c => ({ 
+          id: c.id, 
+          name: c.name, 
+          connection_status: c.connection_status,
+          status: c.status 
+        })));
         setCameras(cameraList);
       } catch (error) {
         console.error('Error fetching cameras:', error);
+        setSnackbar({
+          open: true,
+          message: 'Lỗi khi tải danh sách camera',
+          severity: 'error'
+        });
       }
     };
     fetchCameras();
   }, []);
+
+  // Handler cho việc mở modal chi tiết camera
+  const handleViewCameraDetail = (camera) => {
+    setSelectedCamera(camera);
+    setCameraDetailOpen(true);
+  };
+
+  // Handler cho việc đóng modal chi tiết camera
+  const handleCloseCameraDetail = () => {
+    setCameraDetailOpen(false);
+    setSelectedCamera(null);
+  };
 
  const handleSearch = async () => {
   setLoading(true);
@@ -241,28 +274,39 @@ function SearchPage() {
       severity: 'info'
     });
 
-    // Parallel API calls with improved error handling
+    // Parallel API calls with improved error handling and correct endpoints
     const [whitelistRes, blacklistRes, cameraRes, locationRes, journeyRes, plateRes, accessRes] = await Promise.allSettled([
-      fetchDataFromAPI(`/api/whitelist`, token, { params }),
-      fetchDataFromAPI(`/api/blacklist`, token, { params }),
-      fetchDataFromAPI(`/api/cameras/streams/all`, token, { params }),
-      fetchDataFromAPI(`/api/location/active`, token, { params }),
-      fetchDataFromAPI(`/api/journey`, token, { params }),
-      fetchDataFromAPI(`/api/plates`, token, { params }),
-      fetchDataFromAPI(`/api/access-control`, token, { params })
+      fetchDataFromAPI(`/api/whitelist/search`, token, { params }),
+      fetchDataFromAPI(`/api/blacklist/search`, token, { params }),
+      fetchDataFromAPI(`/api/cameras/search/cameras`, token, { params }),
+      fetchDataFromAPI(`/api/location/search/locations`, token, { params }),
+      fetchDataFromAPI(`/api/journey/search`, token, { params }),
+      fetchDataFromAPI(`/api/plate-detections`, token, { params }),
+      fetchDataFromAPI(`/api/access-control/search`, token, { params })
     ]);
 
-    // Process results
-    const processResult = (result) => result.status === 'fulfilled' ? result.value?.data || [] : [];
+    // Process results with detailed error handling and loading states
+    const processResult = (result, apiName, tabKey) => {
+      if (result.status === 'fulfilled') {
+        const data = result.value?.data || result.value || [];
+        console.log(`✅ ${apiName} API success:`, data.length, 'items');
+        setTabLoading(prev => ({ ...prev, [tabKey]: false }));
+        return data;
+      } else {
+        console.error(`❌ ${apiName} API error:`, result.reason);
+        setTabLoading(prev => ({ ...prev, [tabKey]: false }));
+        return [];
+      }
+    };
     
     const newResults = {
-      whitelist: processResult(whitelistRes),
-      blacklist: processResult(blacklistRes),
-      camera: processResult(cameraRes),
-      location: processResult(locationRes)?.locations || processResult(locationRes),
-      journey: processResult(journeyRes),
-      plate: processResult(plateRes),
-      access: processResult(accessRes)
+      whitelist: processResult(whitelistRes, 'Whitelist', 'whitelist'),
+      blacklist: processResult(blacklistRes, 'Blacklist', 'blacklist'),
+      camera: processResult(cameraRes, 'Camera', 'camera'),
+      location: processResult(locationRes, 'Location', 'location')?.locations || processResult(locationRes, 'Location', 'location'),
+      journey: processResult(journeyRes, 'Journey', 'journey'),
+      plate: processResult(plateRes, 'Plate Detection', 'plate'),
+      access: processResult(accessRes, 'Access Control', 'access')
     };
 
     setAllResults(newResults);
@@ -272,17 +316,24 @@ function SearchPage() {
     const totalBlacklist = newResults.blacklist.length;
     const totalResults = totalWhitelist + totalBlacklist;
     
-    // THÊM: Xử lý thông tin phân trang từ API response
+    // Enhanced pagination handling from API responses
     let apiTotalCount = 0;
     let apiTotalPages = 1;
     
-    if (whitelistRes.status === 'fulfilled' && whitelistRes.value?.pagination) {
-      apiTotalCount = whitelistRes.value.pagination.total || 0;
-      apiTotalPages = whitelistRes.value.pagination.total_pages || 1;
-    } else if (blacklistRes.status === 'fulfilled' && blacklistRes.value?.pagination) {
-      apiTotalCount = blacklistRes.value.pagination.total || 0;
-      apiTotalPages = blacklistRes.value.pagination.total_pages || 1;
-    }
+    // Check pagination from different API responses
+    const responses = [whitelistRes, blacklistRes, cameraRes, locationRes, journeyRes, plateRes, accessRes];
+    const responseNames = ['Whitelist', 'Blacklist', 'Camera', 'Location', 'Journey', 'Plate Detection', 'Access Control'];
+    
+    responses.forEach((res, index) => {
+      if (res.status === 'fulfilled' && res.value?.pagination) {
+        const pagination = res.value.pagination;
+        if (pagination.total > apiTotalCount) {
+          apiTotalCount = pagination.total;
+          apiTotalPages = pagination.total_pages || 1;
+          console.log(`📊 Using pagination from ${responseNames[index]}:`, pagination);
+        }
+      }
+    });
     
     setTotalItems(apiTotalCount || totalResults);
     setTotalPages(apiTotalPages || Math.ceil((apiTotalCount || totalResults) / itemsPerPage));
@@ -310,7 +361,7 @@ function SearchPage() {
     setTotalCount(totalResults);
 
     // Add to search history
-    const searchTerm = filters.plate_number || filters.owner_name || filters.q || 'Tìm kiếm tổng quát';
+    const searchTerm = filters.plate_number || filters.q || 'Tìm kiếm tổng quát';
     setSearchHistory(prev => [
       { term: searchTerm, timestamp: new Date(), results: totalResults },
       ...prev.slice(0, 4)
@@ -390,7 +441,6 @@ function getPaginationItems(current, total) {
   const handleClearFilters = () => {
   setFilters({
     plate_number: '',
-    owner_name: '',
     owner_phone: '',
     contact_email: '',
     location_id: '',
@@ -451,21 +501,7 @@ function getPaginationItems(current, total) {
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
             />
           </Grid>
-          <Grid item xs={12} md={3}>
-            <TextField
-              label="Chủ xe"
-              value={filters.owner_name}
-              onChange={e => handleFilterChange('owner_name', e.target.value)}
-              fullWidth
-              size="medium"
-              InputProps={{
-                startAdornment: <InputAdornment position="start"><Person color="secondary" sx={{ fontSize: 22 }} /></InputAdornment>,
-                sx: { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }
-              }}
-              InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
-            />
-          </Grid>
+
           <Grid item xs={12} md={3}>
             <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
               <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Khu vực</InputLabel>
@@ -722,8 +758,12 @@ useEffect(() => {
     setLoading(true);
     setError(null);
     const token = localStorage.getItem('token');
-    // THÊM: Tham số phân trang
-    let params = { page: currentPage, limit: itemsPerPage };
+    // THÊM: Tham số phân trang và filters
+    let params = { 
+      page: currentPage, 
+      limit: itemsPerPage,
+      ...filters // Thêm filters vào params
+    };
     try {
       let data = [];
       let totalCountFromAPI = 0;
@@ -737,13 +777,72 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
           break;
         case 'blacklist':
-          data = await fetchDataFromAPI(`/api/blacklist`, token, { params });
-          setResults(data.data || []);
-          totalCountFromAPI = data.pagination?.total || data.pagination?.total_records || data.total || (Array.isArray(data.data) ? data.data.length : 0) || (Array.isArray(data) ? data.length : 0);
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
+          try {
+            const token = localStorage.getItem('token');
+            console.log('Loading blacklist with token (filtered):', token ? 'Token exists' : 'No token');
+            
+            const params = new URLSearchParams();
+            params.append('page', currentPage.toString());
+            params.append('limit', itemsPerPage.toString());
+            
+            // Add filters to params
+            Object.entries(filters).forEach(([key, value]) => {
+              if (value !== '' && value !== null && value !== undefined) {
+                params.append(key, value);
+              }
+            });
+
+            const headers = {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            };
+
+            const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/blacklist?${params.toString()}`, {
+              method: 'GET',
+              headers
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('Blacklist API response (fetchFilteredData):', data);
+            console.log('Blacklist params sent (fetchFilteredData):', params.toString());
+
+            if (data.success) {
+              console.log('Blacklist loaded (filtered):', data.data);
+              
+              // Process data like BlackList.js
+              const processedData = data.data.map(item => ({
+                ...item,
+                _refreshTimestamp: Date.now(),
+                detected_plate_image: item.detected_plate_image,
+                plate_image_path: item.plate_image_path
+              }));
+              
+              setResults(processedData);
+              console.log('Blacklist results after setResults (filtered):', processedData);
+              
+              if (data.pagination) {
+                totalCountFromAPI = data.pagination.total || 0;
+                totalPagesFromAPI = data.pagination.total_pages || 1;
+              }
+            } else {
+              console.warn('Blacklist API returned error (filtered):', data.message);
+              setResults([]);
+              totalCountFromAPI = 0;
+              totalPagesFromAPI = 1;
+            }
+          } catch (error) {
+            console.error('Error loading blacklist (filtered):', error);
+            setResults([]);
+            totalCountFromAPI = 0;
+            totalPagesFromAPI = 1;
+          }
           break;
         case 'camera':
-          data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
+          data = await fetchDataFromAPI(`/api/cameras`, token, { params });
           // Đảm bảo setResults là mảng camera
           const cameraList = (data.data && Array.isArray(data.data.cameras)) ? data.data.cameras : [];
           setResults(cameraList);
@@ -751,7 +850,7 @@ useEffect(() => {
           totalPagesFromAPI = Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'location':
-          data = await fetchDataFromAPI(`/api/location/active`, token, { params });
+          data = await fetchDataFromAPI(`/api/location`, token, { params });
           console.log('Location API response:', data);
           console.log('Params sent:', params);
           if (data.data && data.data.locations) {
@@ -783,7 +882,7 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'plate':
-          data = await fetchDataFromAPI(`/api/plates`, token, { params });
+          data = await fetchDataFromAPI(`/api/plate-detections/list`, token, { params });
           setResults(data.data || []);
           totalCountFromAPI = data.total || data.pagination?.total || 0;
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
@@ -814,7 +913,7 @@ useEffect(() => {
     }
   };
   if (tab !== 'all') fetchTabData();
-}, [tab, currentPage, itemsPerPage]);
+}, [tab, currentPage, itemsPerPage, filters]); // Thêm filters vào dependencies
 
 useEffect(() => {
   if (tab === 'all') return;
@@ -835,17 +934,77 @@ useEffect(() => {
         case 'whitelist':
           data = await fetchDataFromAPI(`/api/whitelist`, token, { params });
           setResults(data.data || []);
+          console.log('Blacklist results after setResults (filtered):', data.data || []);
           totalCountFromAPI = data.pagination?.total || data.pagination?.total_records || data.total || (Array.isArray(data.data) ? data.data.length : 0) || (Array.isArray(data) ? data.length : 0);
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
           break;
         case 'blacklist':
-          data = await fetchDataFromAPI(`/api/blacklist`, token, { params });
-          setResults(data.data || []);
-          totalCountFromAPI = data.pagination?.total || data.pagination?.total_records || data.total || (Array.isArray(data.data) ? data.data.length : 0) || (Array.isArray(data) ? data.length : 0);
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage) || 1;
+          try {
+            const token = localStorage.getItem('token');
+            console.log('Loading blacklist with token (filtered):', token ? 'Token exists' : 'No token');
+            
+            const params = new URLSearchParams();
+            params.append('page', currentPage.toString());
+            params.append('limit', itemsPerPage.toString());
+            
+            // Add filters to params
+            Object.entries(filters).forEach(([key, value]) => {
+              if (value !== '' && value !== null && value !== undefined) {
+                params.append(key, value);
+              }
+            });
+
+            const headers = {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            };
+
+            const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/blacklist?${params.toString()}`, {
+              method: 'GET',
+              headers
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('Blacklist API response (fetchFilteredData):', data);
+            console.log('Blacklist params sent (fetchFilteredData):', params.toString());
+
+            if (data.success) {
+              console.log('Blacklist loaded (filtered):', data.data);
+              
+              // Process data like BlackList.js
+              const processedData = data.data.map(item => ({
+                ...item,
+                _refreshTimestamp: Date.now(),
+                detected_plate_image: item.detected_plate_image,
+                plate_image_path: item.plate_image_path
+              }));
+              
+              setResults(processedData);
+              console.log('Blacklist results after setResults (filtered):', processedData);
+              
+              if (data.pagination) {
+                totalCountFromAPI = data.pagination.total || 0;
+                totalPagesFromAPI = data.pagination.total_pages || 1;
+              }
+            } else {
+              console.warn('Blacklist API returned error (filtered):', data.message);
+              setResults([]);
+              totalCountFromAPI = 0;
+              totalPagesFromAPI = 1;
+            }
+          } catch (error) {
+            console.error('Error loading blacklist (filtered):', error);
+            setResults([]);
+            totalCountFromAPI = 0;
+            totalPagesFromAPI = 1;
+          }
           break;
         case 'camera':
-          data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
+          data = await fetchDataFromAPI(`/api/cameras`, token, { params });
           // Đảm bảo setResults là mảng camera
           const cameraList = (data.data && Array.isArray(data.data.cameras)) ? data.data.cameras : [];
           setResults(cameraList);
@@ -894,7 +1053,7 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'plate':
-          data = await fetchDataFromAPI(`/api/plates`, token, { params });
+          data = await fetchDataFromAPI(`/api/plate-detections/list`, token, { params });
           setResults(data.data || []);
           totalCountFromAPI = data.total || data.pagination?.total || 0;
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
@@ -965,49 +1124,105 @@ useEffect(() => {
     }
   };
 
+  // Helper function to format date
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString; // Return original if invalid date
+    
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  };
+
+  // Helper functions from BlackList.js
   const getStatusChip = (status) => {
     const statusConfig = {
-      'valid': { label: 'Có hiệu lực', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
-      'expired': { label: 'Hết hạn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
-      'future': { label: 'Chưa có hiệu lực', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
-      'permanent': { label: 'Vĩnh viễn', sx: { bgcolor: '#e3f2fd', color: '#1976d2', border: '1px solid #64b5f6' } },
-      'active': { label: 'Đang chặn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
-      'inactive': { label: 'Không hoạt động', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
+      // Camera status
+      'online': { label: 'Trực tuyến', color: 'success' },
+      'offline': { label: 'Ngoại tuyến', color: 'error' },
+      'warning': { label: 'Cảnh báo', color: 'warning' },
+      'never': { label: 'Chưa kết nối', color: 'default' },
+      // General status
+      'valid': { label: 'Còn hiệu lực', color: 'success' },
+      'expired': { label: 'Hết hạn', color: 'error' },
+      'future': { label: 'Chưa hiệu lực', color: 'warning' },
+      'permanent': { label: 'Vĩnh viễn', color: 'info' },
+      'active': { label: 'Hoạt động', color: 'success' },
+      'inactive': { label: 'Không hoạt động', color: 'error' }
     };
-    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
-    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
+    
+    const config = statusConfig[status] || { label: status || 'N/A', color: 'default' };
+    
+    return <Chip 
+      label={config.label} 
+      color={config.color} 
+      size="small" 
+      sx={{ fontWeight: 600 }}
+    />;
   };
-  const getApprovalChip = (status) => {
-    const statusConfig = {
-      'approved': { label: 'Đã phê duyệt', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
-      'pending': { label: 'Chờ phê duyệt', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
-      'rejected': { label: 'Từ chối', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } }
-    };
-    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
-    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
-  };
+
   const getViolationTypeChip = (type) => {
     const typeConfig = {
-      'unauthorized': { label: 'Không được phép', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
-      'security_threat': { label: 'Nguy cơ an ninh', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
-      'unpaid_fine': { label: 'Chưa nộp phạt', sx: { bgcolor: '#e3f2fd', color: '#1976d2', border: '1px solid #64b5f6' } },
-      'banned': { label: 'Bị cấm', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } },
-      'suspicious': { label: 'Đáng ngờ', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
-      'other': { label: 'Khác', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
+      'unauthorized': { label: 'Không phép', color: 'error' },
+      'security_threat': { label: 'Nguy cơ an ninh', color: 'error' },
+      'unpaid_fine': { label: 'Chưa nộp phạt', color: 'warning' },
+      'banned': { label: 'Cấm', color: 'error' },
+      'suspicious': { label: 'Đáng ngờ', color: 'warning' },
+      'other': { label: 'Khác', color: 'default' }
     };
-    const config = typeConfig[type] || { label: type, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
-    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
+    
+    const config = typeConfig[type] || { label: type || 'N/A', color: 'default' };
+    
+    return <Chip 
+      label={config.label} 
+      color={config.color} 
+      size="small" 
+      sx={{ fontWeight: 600 }}
+    />;
   };
+
   const getSeverityChip = (severity) => {
     const severityConfig = {
-      'low': { label: 'Thấp', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
-      'medium': { label: 'Trung bình', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
-      'high': { label: 'Cao', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
-      'critical': { label: 'Nghiêm trọng', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
+      'low': { label: 'Thấp', color: 'success' },
+      'medium': { label: 'Trung bình', color: 'warning' },
+      'high': { label: 'Cao', color: 'error' },
+      'critical': { label: 'Nghiêm trọng', color: 'error' }
     };
-    const config = severityConfig[severity] || { label: severity, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
-    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
+    
+    const config = severityConfig[severity] || { label: severity || 'N/A', color: 'default' };
+    
+    return <Chip 
+      label={config.label} 
+      color={config.color} 
+      size="small" 
+      sx={{ fontWeight: 600 }}
+    />;
   };
+
+  const getApprovalChip = (status) => {
+    const statusConfig = {
+      'approved': { label: 'Đã phê duyệt', color: 'success' },
+      'pending': { label: 'Chờ phê duyệt', color: 'warning' },
+      'rejected': { label: 'Từ chối', color: 'error' }
+    };
+    
+    const config = statusConfig[status] || { label: status || 'N/A', color: 'default' };
+    
+    return <Chip 
+      label={config.label} 
+      color={config.color} 
+      size="small" 
+      sx={{ fontWeight: 600 }}
+    />;
+  };
+
+  // Debug: Log results state
+  console.log('Current results state:', results);
+  console.log('Current tab:', tab);
+  console.log('Current loading state:', loading);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8f9fa', py: 3 }}>
@@ -1061,21 +1276,7 @@ useEffect(() => {
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
                 />
               </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Chủ xe"
-                  value={filters.owner_name}
-                  onChange={e => handleFilterChange('owner_name', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start"><Person color="secondary" sx={{ fontSize: 22 }} /></InputAdornment>,
-                    sx: { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }
-                  }}
-                  InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)', fontSize: 16, fontWeight: 600, transition: 'box-shadow 0.2s', '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' }, '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' } } }}
-                />
-              </Grid>
+
               <Grid item xs={12} md={3}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 4, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
                   <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Khu vực</InputLabel>
@@ -1343,10 +1544,10 @@ useEffect(() => {
                   </Typography>
                 </Alert>
               </Box>
-            ) : (
-              <>
-                <TableContainer>
-                  <Table>
+                          ) : (
+                <>
+                  <TableContainer>
+                    <Table>
                     <TableHead>
                       <TableRow sx={{ 
                         background: getTableHeaderStyle()
@@ -1359,7 +1560,25 @@ useEffect(() => {
                         </TableCell>
 
                         {/* Dynamic headers based on tab */}
-                        {tab === 'camera' ? (
+                        {tab === 'whitelist' || tab === 'blacklist' ? (
+                          <>
+                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>
+                              <Box display="flex" alignItems="center" gap={1}>
+                                <DirectionsCar />
+                                Biển số xe
+                              </Box>
+                            </TableCell>
+                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Ảnh biển số</TableCell>
+                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Trạng thái</TableCell>
+                            {tab === 'whitelist' && (
+                              <TableCell sx={{ color: 'white', fontWeight: 700 }}>Phê duyệt</TableCell>
+                            )}
+                            {tab === 'blacklist' && (
+                              <TableCell sx={{ color: 'white', fontWeight: 700 }}>Loại vi phạm</TableCell>
+                            )}
+                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Thao tác</TableCell>
+                          </>
+                        ) : tab === 'camera' ? (
                           <>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>
                               <Box display="flex" alignItems="center" gap={1}>
@@ -1369,7 +1588,10 @@ useEffect(() => {
                             </TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Mã camera</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Vị trí</TableCell>
+                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Độ phân giải</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Trạng thái</TableCell>
+                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Kết nối</TableCell>
+                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Phát hiện 24h</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Thao tác</TableCell>
                           </>
                         ) : tab === 'location' ? (
@@ -1435,7 +1657,6 @@ useEffect(() => {
                               </Box>
                             </TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Hình ảnh</TableCell>
-                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Chủ xe</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Khu vực</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Trạng thái</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Phê duyệt</TableCell>
@@ -1448,7 +1669,7 @@ useEffect(() => {
                       {tab === 'camera' ? (
                         cameras.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={6} align="center">
+                            <TableCell colSpan={9} align="center">
                               <Typography color="text.secondary" sx={{ py: 4 }}>
                                 Không có camera nào
                               </Typography>
@@ -1457,18 +1678,69 @@ useEffect(() => {
                         ) : (
                           cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
                             <TableRow key={item.id || index} hover>
-                              <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
-                              <TableCell>{item.name}</TableCell>
-                              <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
-                              <TableCell>{item.location_name || item.location || ''}</TableCell>
                               <TableCell>
-                                {getStatusChip(item.connection_status || item.status)}
+                                <Typography variant="body2" fontWeight={500}>
+                                  {((currentPage - 1) * itemsPerPage) + index + 1}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  <CameraAlt sx={{ fontSize: 16, color: '#1976d2' }} />
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {item.name}
+                                  </Typography>
+                                </Box>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2" color="text.secondary">
+                                  {item.code || item.camera_key || item.camera_id || item.id}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Box>
+                                  <Typography variant="body2" fontWeight={500}>
+                                    {item.location_name || item.location || ''}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {item.location_address || ''}
+                                  </Typography>
+                                </Box>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2" fontWeight={500}>
+                                  {item.resolution || `${item.width}x${item.height}`}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {item.fps} FPS
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
+                                  color={item.is_active ? 'success' : 'default'} 
+                                  size="small" 
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Chip 
+                                  label={item.connection_status === 'online' ? 'Online' : 
+                                         item.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
+                                  color={item.connection_status === 'online' ? 'success' : 
+                                         item.connection_status === 'warning' ? 'warning' : 'error'} 
+                                  size="small" 
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2" fontWeight={500} color="primary">
+                                  {item.detections_24h || 0}
+                                </Typography>
                               </TableCell>
                               <TableCell>
                                 <Button 
                                   variant="outlined" 
                                   size="small" 
                                   startIcon={<Visibility />} 
+                                  onClick={() => handleViewCameraDetail(item)}
                                   sx={{ borderRadius: 2, textTransform: 'none' }}
                                 >
                                   Xem chi tiết
@@ -1480,6 +1752,7 @@ useEffect(() => {
                       ) : (
                         results?.map((item, index) => {
                           const avatarStyle = getAvatarColor();
+                          console.log('Rendering item:', item, 'at index:', index);
                           return (
                             <Fade in key={item.id || index} timeout={200 + index * 50}>
                               <TableRow 
@@ -1500,29 +1773,80 @@ useEffect(() => {
 
                                 {/* Dynamic table rows based on tab */}
                                 {tab === 'camera' ? (
-                                  cameras.length === 0 ? (
+                                  allResults.camera.length === 0 ? (
                                     <TableRow>
-                                      <TableCell colSpan={6} align="center">
+                                      <TableCell colSpan={9} align="center">
                                         <Typography color="text.secondary" sx={{ py: 4 }}>
                                           Không có camera nào
                                         </Typography>
                                       </TableCell>
                                     </TableRow>
                                   ) : (
-                                    cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
+                                    allResults.camera.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
                                       <TableRow key={item.id || index} hover>
-                                        <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
-                                        <TableCell>{item.name}</TableCell>
-                                        <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
-                                        <TableCell>{item.location_name || item.location || ''}</TableCell>
                                         <TableCell>
-                                          {getStatusChip(item.connection_status || item.status)}
+                                          <Typography variant="body2" fontWeight={500}>
+                                            {((currentPage - 1) * itemsPerPage) + index + 1}
+                                          </Typography>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Box display="flex" alignItems="center" gap={1}>
+                                            <CameraAlt sx={{ fontSize: 16, color: '#1976d2' }} />
+                                            <Typography variant="body2" fontWeight={600}>
+                                              {item.name}
+                                            </Typography>
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Typography variant="body2" color="text.secondary">
+                                            {item.code || item.camera_key || item.camera_id || item.id}
+                                          </Typography>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Box>
+                                            <Typography variant="body2" fontWeight={500}>
+                                              {item.location_name || item.location || ''}
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                              {item.location_address || ''}
+                                            </Typography>
+                                          </Box>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Typography variant="body2" fontWeight={500}>
+                                            {item.resolution || `${item.width}x${item.height}`}
+                                          </Typography>
+                                          <Typography variant="caption" color="text.secondary">
+                                            {item.fps} FPS
+                                          </Typography>
+                                        </TableCell>
+                                        <TableCell>
+                                          <Chip 
+                                            label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
+                                            color={item.is_active ? 'success' : 'default'} 
+                                            size="small" 
+                                          />
+                                        </TableCell>
+                                        <TableCell>
+                                          <Chip 
+                                            label={item.connection_status === 'online' ? 'Online' : 
+                                                   item.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
+                                            color={item.connection_status === 'online' ? 'success' : 
+                                                   item.connection_status === 'warning' ? 'warning' : 'error'} 
+                                            size="small" 
+                                          />
+                                        </TableCell>
+                                        <TableCell>
+                                          <Typography variant="body2" fontWeight={500} color="primary">
+                                            {item.detections_24h || 0}
+                                          </Typography>
                                         </TableCell>
                                         <TableCell>
                                           <Button 
                                             variant="outlined" 
                                             size="small" 
                                             startIcon={<Visibility />} 
+                                            onClick={() => handleViewCameraDetail(item)}
                                             sx={{ borderRadius: 2, textTransform: 'none' }}
                                           >
                                             Xem chi tiết
@@ -1580,7 +1904,7 @@ useEffect(() => {
                                     </TableCell>
                                     <TableCell>
                                       <Typography variant="body2">
-                                        {item.journey_date || item.date}
+                                        {formatDate(item.journey_date || item.date)}
                                       </Typography>
                                     </TableCell>
                                     <TableCell>
@@ -1641,7 +1965,7 @@ useEffect(() => {
                                     </TableCell>
                                     <TableCell>
                                       <Typography variant="body2" color="text.secondary">
-                                        {item.detected_at || item.timestamp || 'N/A'}
+                                        {formatDate(item.detected_at || item.timestamp) || 'N/A'}
                                       </Typography>
                                     </TableCell>
                                     <TableCell>
@@ -1695,10 +2019,9 @@ useEffect(() => {
                                       </Button>
                                     </TableCell>
                                   </>
-                                ) : (
-                                  // Default table row for whitelist/blacklist and general search
+                                ) : tab === 'whitelist' || tab === 'blacklist' ? (
                                   <>
-                                    <TableCell /* Biển số Cell */ sx={{ color: 'black', fontSize: 14 }}>
+                                    <TableCell sx={{ color: 'black', fontSize: 14, fontWeight: 600 }}>
                                       {item.plate_number}
                                     </TableCell>
                                     <TableCell>
@@ -1716,21 +2039,50 @@ useEffect(() => {
                                       </Avatar>
                                     </TableCell>
                                     <TableCell>
-                                      <Box>
-                                        <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                                          <Person sx={{ fontSize: 16, color: 'primary.main' }} />
-                                          <Typography variant="body2" fontWeight={600}>
-                                            {item.owner_name || 'Chưa có thông tin'}
-                                          </Typography>
-                                        </Box>
-                                        <Box display="flex" alignItems="center" gap={1}>
-                                          <Phone sx={{ fontSize: 14, color: 'text.secondary' }} />
-                                          <Typography variant="caption" color="text.secondary">
-                                            {item.owner_phone || 'N/A'}
-                                          </Typography>
-                                        </Box>
-                                      </Box>
+                                      {getStatusChip(item.current_status)}
                                     </TableCell>
+                                    {tab === 'whitelist' && (
+                                      <TableCell>
+                                        {getApprovalChip(item.approval_status)}
+                                      </TableCell>
+                                    )}
+                                    {tab === 'blacklist' && (
+                                      <TableCell>
+                                        {getViolationTypeChip(item.violation_type)}
+                                      </TableCell>
+                                    )}
+                                    <TableCell>
+                                      <Button 
+                                        variant="outlined" 
+                                        size="small" 
+                                        startIcon={<Visibility />}
+                                        sx={{ borderRadius: 2, textTransform: 'none' }}
+                                      >
+                                        Xem chi tiết
+                                      </Button>
+                                    </TableCell>
+                                  </>
+                                ) : (
+                                  // Default table row for other tabs
+                                  <>
+                                    <TableCell sx={{ color: 'black', fontSize: 14 }}>
+                                      {item.plate_number}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Avatar
+                                        variant="rounded"
+                                        src={item.detected_plate_image || item.plate_image}
+                                        sx={{ 
+                                          width: 80, 
+                                          height: 48,
+                                          ...avatarStyle
+                                        }}
+                                        imgProps={{ style: { objectFit: 'cover', width: '100%', height: '100%' } }}
+                                      >
+                                        <DirectionsCar sx={{ color: avatarStyle.iconColor }} />
+                                      </Avatar>
+                                    </TableCell>
+
                                     <TableCell>
                                       <Box display="flex" alignItems="center" gap={1}>
                                         <LocationOn sx={{ fontSize: 16, color: 'primary.main' }} />
@@ -1819,26 +2171,32 @@ useEffect(() => {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 3,
-            boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+            borderRadius: 2,
+            boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+            overflow: 'hidden'
           }
         }}
       >
         <DialogTitle 
           sx={{ 
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+            background: '#1976d2', 
             color: 'white', 
             display: 'flex', 
             alignItems: 'center', 
             gap: 2,
-            py: 3
+            py: 3,
+            px: 3
           }}
         >
-          <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
-            <Info sx={{ fontSize: 24 }} />
+          <Avatar sx={{ 
+            bgcolor: 'rgba(255,255,255,0.2)', 
+            width: 40, 
+            height: 40
+          }}>
+            <Info sx={{ fontSize: 20 }} />
           </Avatar>
           <Box flex={1}>
-            <Typography variant="h5" fontWeight={700}>
+            <Typography variant="h5" fontWeight={600}>
               Thông tin chi tiết
             </Typography>
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
@@ -1849,9 +2207,8 @@ useEffect(() => {
             onClick={handleCloseDetail} 
             sx={{ 
               color: 'white',
-              bgcolor: 'rgba(255,255,255,0.1)',
               '&:hover': {
-                bgcolor: 'rgba(255,255,255,0.2)'
+                bgcolor: 'rgba(255,255,255,0.1)'
               }
             }}
           >
@@ -1863,7 +2220,11 @@ useEffect(() => {
           {selectedItem && (
             <Box>
               {/* Header Section */}
-              <Box sx={{ p: 3, bgcolor: alpha(theme.palette.primary.main, 0.02) }}>
+              <Box sx={{ 
+                p: 3, 
+                background: '#f5f5f5',
+                borderBottom: '1px solid #e0e0e0'
+              }}>
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={4}>
                     <Box display="flex" flexDirection="column" alignItems="center">
@@ -1871,26 +2232,34 @@ useEffect(() => {
                         variant="rounded" 
                         src={selectedItem.detected_plate_image || selectedItem.plate_image || ''} 
                         sx={{ 
-                          width: 200, 
-                          height: 120, 
-                          bgcolor: alpha(theme.palette.primary.main, 0.1),
-                          border: `3px solid ${alpha(theme.palette.primary.main, 0.2)}`,
+                          width: 180, 
+                          height: 110, 
+                          bgcolor: '#e3f2fd',
+                          border: '2px solid #1976d2',
                           mb: 2
                         }}
                       >
-                        <DirectionsCar sx={{ fontSize: 60, color: 'primary.main' }} />
+                        <DirectionsCar sx={{ fontSize: 50, color: '#1976d2' }} />
                       </Avatar>
                       
-                      <Typography variant="h4" fontWeight={700} color="primary.main" mb={1}>
+                      <Typography variant="h4" fontWeight={600} color="primary.main" mb={2}>
                         {selectedItem.plate_number}
                       </Typography>
                       
                       <Stack direction="row" spacing={1} mb={2} flexWrap="wrap" justifyContent="center">
                         {selectedItem.status === 'whitelist' && (
-                          <Chip label="Whitelist" color="success" sx={{ fontWeight: 600 }} />
+                          <Chip 
+                            label="Whitelist" 
+                            color="success"
+                            sx={{ fontWeight: 600 }} 
+                          />
                         )}
                         {selectedItem.status === 'blacklist' && (
-                          <Chip label="Blacklist" color="error" sx={{ fontWeight: 600 }} />
+                          <Chip 
+                            label="Blacklist" 
+                            color="error"
+                            sx={{ fontWeight: 600 }} 
+                          />
                         )}
                         {selectedItem.current_status && (
                           <Chip 
@@ -1927,35 +2296,51 @@ useEffect(() => {
                   <Grid item xs={12} md={8}>
                     <Grid container spacing={3}>
                       {/* Vehicle Information */}
+                      {/* Vehicle Information */}
                       <Grid item xs={12}>
-                        <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-                          <Typography variant="h6" fontWeight={600} mb={2} color="primary.main">
-                            <DirectionsCar sx={{ mr: 1, verticalAlign: 'middle' }} />
+                        <Paper sx={{ 
+                          p: 2, 
+                          borderRadius: 2, 
+                          bgcolor: 'background.paper', 
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}>
+                          <Typography variant="h6" fontWeight={600} mb={2} color="primary.main" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <DirectionsCar sx={{ fontSize: 20, color: 'primary.main' }} />
                             Thông tin phương tiện
                           </Typography>
-                          <Grid container spacing={2}>
-                            <Grid item xs={6}>
-                              <Typography variant="body2" color="text.secondary">Biển số</Typography>
-                              <Typography variant="h6" fontWeight={600}>{selectedItem.plate_number}</Typography>
-                            </Grid>
-                            <Grid item xs={6}>
-                              <Typography variant="body2" color="text.secondary">Loại xe</Typography>
-                              <Typography variant="body1">
-                                {selectedItem.vehicle_type || selectedItem.make + ' ' + selectedItem.model || 'N/A'}
-                              </Typography>
-                            </Grid>
-                            <Grid item xs={6}>
-                              <Typography variant="body2" color="text.secondary">Khu vực</Typography>
-                              <Box display="flex" alignItems="center" gap={1}>
-                                <LocationOn sx={{ fontSize: 16, color: 'primary.main' }} />
-                                <Typography variant="body1">{selectedItem.location_name || 'N/A'}</Typography>
+                          <Grid container spacing={3}>
+                            <Grid item xs={12} md={6}>
+                              <Box>
+                                <Typography variant="body2" color="text.secondary" mb={1}>
+                                  Biển số xe
+                                </Typography>
+                                <Typography variant="h6" fontWeight={600} color="primary.main">
+                                  {selectedItem.plate_number}
+                                </Typography>
                               </Box>
                             </Grid>
-                            <Grid item xs={6}>
-                              <Typography variant="body2" color="text.secondary">Camera phát hiện</Typography>
-                              <Box display="flex" alignItems="center" gap={1}>
-                                <CameraAlt sx={{ fontSize: 16, color: 'warning.main' }} />
-                                <Typography variant="body1">{selectedItem.camera_name || 'N/A'}</Typography>
+                            <Grid item xs={12} md={6}>
+                              <Box>
+                                <Typography variant="body2" color="text.secondary" mb={1}>
+                                  Trạng thái
+                                </Typography>
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  {selectedItem.current_status && (
+                                    <Chip 
+                                      label={
+                                        selectedItem.current_status === 'valid' ? 'Còn hiệu lực' : 
+                                        selectedItem.current_status === 'expired' ? 'Hết hạn' : 
+                                        selectedItem.current_status === 'future' ? 'Chưa hiệu lực' : 'Vĩnh viễn'
+                                      }
+                                      color={
+                                        selectedItem.current_status === 'valid' ? 'success' : 
+                                        selectedItem.current_status === 'expired' ? 'error' : 
+                                        selectedItem.current_status === 'future' ? 'warning' : 'info'
+                                      }
+                                      size="small"
+                                    />
+                                  )}
+                                </Box>
                               </Box>
                             </Grid>
                           </Grid>
@@ -1965,51 +2350,47 @@ useEffect(() => {
                       {/* Owner Information */}
                       {(selectedItem.owner_name || selectedItem.owner_phone || selectedItem.contact_email) && (
                         <Grid item xs={12}>
-                          <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-                            <Typography variant="h6" fontWeight={600} mb={2} color="secondary.main">
-                              <Person sx={{ mr: 1, verticalAlign: 'middle' }} />
-                              Thông tin chủ xe
-                            </Typography>
-                            <Grid container spacing={2}>
-                              <Grid item xs={12} md={4}>
-                                <Box display="flex" alignItems="center" gap={2} mb={1}>
-                                  <Avatar sx={{ bgcolor: 'secondary.light', width: 32, height: 32 }}>
-                                    <Person sx={{ fontSize: 18 }} />
-                                  </Avatar>
+                                                  <Paper sx={{ 
+                          p: 2, 
+                          borderRadius: 2, 
+                          bgcolor: 'background.paper', 
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}>
+                          <Typography variant="h6" fontWeight={600} mb={2} color="secondary.main" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Person sx={{ fontSize: 20, color: 'secondary.main' }} />
+                            Thông tin chủ xe
+                          </Typography>
+                            <Grid container spacing={3}>
+                                                              <Grid item xs={12} md={4}>
                                   <Box>
-                                    <Typography variant="body2" color="text.secondary">Họ tên</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={1}>
+                                      Họ tên
+                                    </Typography>
                                     <Typography variant="body1" fontWeight={500}>
                                       {selectedItem.owner_name || 'Chưa có thông tin'}
                                     </Typography>
                                   </Box>
-                                </Box>
-                              </Grid>
-                              <Grid item xs={12} md={4}>
-                                <Box display="flex" alignItems="center" gap={2} mb={1}>
-                                  <Avatar sx={{ bgcolor: 'success.light', width: 32, height: 32 }}>
-                                    <Phone sx={{ fontSize: 18 }} />
-                                  </Avatar>
+                                </Grid>
+                                <Grid item xs={12} md={4}>
                                   <Box>
-                                    <Typography variant="body2" color="text.secondary">Số điện thoại</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={1}>
+                                      Số điện thoại
+                                    </Typography>
                                     <Typography variant="body1" fontWeight={500}>
                                       {selectedItem.owner_phone || 'N/A'}
                                     </Typography>
                                   </Box>
-                                </Box>
-                              </Grid>
-                              <Grid item xs={12} md={4}>
-                                <Box display="flex" alignItems="center" gap={2} mb={1}>
-                                  <Avatar sx={{ bgcolor: 'warning.light', width: 32, height: 32 }}>
-                                    <Email sx={{ fontSize: 18 }} />
-                                  </Avatar>
+                                </Grid>
+                                <Grid item xs={12} md={4}>
                                   <Box>
-                                    <Typography variant="body2" color="text.secondary">Email</Typography>
+                                    <Typography variant="body2" color="text.secondary" mb={1}>
+                                      Email
+                                    </Typography>
                                     <Typography variant="body1" fontWeight={500}>
                                       {selectedItem.contact_email || 'N/A'}
                                     </Typography>
                                   </Box>
-                                </Box>
-                              </Grid>
+                                </Grid>
                             </Grid>
                           </Paper>
                         </Grid>
@@ -2017,66 +2398,73 @@ useEffect(() => {
 
                       {/* Additional Information */}
                       <Grid item xs={12}>
-                        <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-                          <Typography variant="h6" fontWeight={600} mb={2} color="info.main">
-                            <Info sx={{ mr: 1, verticalAlign: 'middle' }} />
+                        <Paper sx={{ 
+                          p: 2, 
+                          borderRadius: 2, 
+                          bgcolor: 'background.paper', 
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}>
+                          <Typography variant="h6" fontWeight={600} mb={2} color="info.main" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Info sx={{ fontSize: 20, color: 'info.main' }} />
                             Thông tin bổ sung
                           </Typography>
-                          <Grid container spacing={2}>
-                            <Grid item xs={12} md={6}>
-                              <Box display="flex" alignItems="center" gap={2} mb={2}>
-                                <Description sx={{ color: 'text.secondary' }} />
+                          <Grid container spacing={3}>
+                            {selectedItem.violation_type && (
+                              <Grid item xs={12} md={6}>
                                 <Box>
-                                  <Typography variant="body2" color="text.secondary">Loại vi phạm</Typography>
-                                  <Typography variant="body1">
-                                    {selectedItem.violation_type ? 
-                                      getViolationTypeChip(selectedItem.violation_type)
-                                      : 'Không có vi phạm'
-                                    }
+                                  <Typography variant="body2" color="text.secondary" mb={1}>
+                                    Loại vi phạm
                                   </Typography>
-                                </Box>
-                              </Box>
-                            </Grid>
-                            <Grid item xs={12} md={6}>
-                              <Box display="flex" alignItems="center" gap={2} mb={2}>
-                                <Event sx={{ color: 'text.secondary' }} />
-                                <Box>
-                                  <Typography variant="body2" color="text.secondary">Lịch sử phát hiện</Typography>
-                                  <Typography variant="body1">
-                                    {selectedItem.history_count || 0} lần
-                                  </Typography>
-                                </Box>
-                              </Box>
-                            </Grid>
-                            {selectedItem.valid_from && (
-                              <Grid item xs={12}>
-                                <Box display="flex" alignItems="center" gap={2} mb={1}>
-                                  <Event sx={{ color: 'text.secondary' }} />
                                   <Box>
-                                    <Typography variant="body2" color="text.secondary">Thời gian hiệu lực</Typography>
-                                    <Typography variant="body1">
-                                      {selectedItem.valid_from} - {selectedItem.valid_to || 'Vĩnh viễn'}
-                                    </Typography>
+                                    {getViolationTypeChip(selectedItem.violation_type)}
                                   </Box>
                                 </Box>
                               </Grid>
                             )}
+                            <Grid item xs={12} md={6}>
+                              <Box>
+                                <Typography variant="body2" color="text.secondary" mb={1}>
+                                  Lịch sử phát hiện
+                                </Typography>
+                                <Typography variant="body1" fontWeight={500}>
+                                  {selectedItem.history_count || 0} lần
+                                </Typography>
+                              </Box>
+                            </Grid>
+                            {selectedItem.valid_from && (
+                              <Grid item xs={12} md={6}>
+                                <Box>
+                                  <Typography variant="body2" color="text.secondary" mb={1}>
+                                    Thời gian hiệu lực
+                                  </Typography>
+                                  <Typography variant="body1" fontWeight={500}>
+                                    {formatDate(selectedItem.valid_from)} - {selectedItem.valid_to ? formatDate(selectedItem.valid_to) : 'Vĩnh viễn'}
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
                             {selectedItem.created_at && (
-                              <Grid item xs={12}>
-                                <Box display="flex" alignItems="center" gap={2} mb={1}>
-                                  <Event sx={{ color: 'text.secondary' }} />
-                                  <Box>
-                                    <Typography variant="body2" color="text.secondary">Ngày tạo</Typography>
-                                    <Typography variant="body1">{selectedItem.created_at}</Typography>
-                                  </Box>
+                              <Grid item xs={12} md={6}>
+                                <Box>
+                                  <Typography variant="body2" color="text.secondary" mb={1}>
+                                    Ngày tạo
+                                  </Typography>
+                                  <Typography variant="body1" fontWeight={500}>
+                                    {formatDate(selectedItem.created_at)}
+                                  </Typography>
                                 </Box>
                               </Grid>
                             )}
                             {selectedItem.description && (
                               <Grid item xs={12}>
-                                <Divider sx={{ my: 2 }} />
-                                <Typography variant="body2" color="text.secondary" mb={1}>Mô tả chi tiết</Typography>
-                                <Typography variant="body1">{selectedItem.description}</Typography>
+                                <Box>
+                                  <Typography variant="body2" color="text.secondary" mb={1}>
+                                    Mô tả chi tiết
+                                  </Typography>
+                                  <Typography variant="body1" sx={{ lineHeight: 1.6 }}>
+                                    {selectedItem.description}
+                                  </Typography>
+                                </Box>
                               </Grid>
                             )}
                           </Grid>
@@ -2090,7 +2478,12 @@ useEffect(() => {
           )}
         </DialogContent>
         
-        <DialogActions sx={{ p: 3, gap: 2 }}>
+        <DialogActions sx={{ 
+          p: 2, 
+          gap: 2, 
+          background: '#fafafa',
+          borderTop: '1px solid #e0e0e0'
+        }}>
           <Button 
             onClick={handleCloseDetail} 
             variant="outlined" 
@@ -2098,9 +2491,9 @@ useEffect(() => {
             sx={{ 
               borderRadius: 2,
               px: 3,
-              py: 1.5,
+              py: 1,
               textTransform: 'none',
-              fontWeight: 600
+              fontWeight: 500
             }}
           >
             Đóng
@@ -2111,12 +2504,217 @@ useEffect(() => {
             sx={{ 
               borderRadius: 2,
               px: 3,
-              py: 1.5,
+              py: 1,
               textTransform: 'none',
-              fontWeight: 600
+              fontWeight: 500
             }}
           >
             Xem lịch sử
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Modal chi tiết camera */}
+      <Dialog 
+        open={cameraDetailOpen} 
+        onClose={handleCloseCameraDetail} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle sx={{ 
+          background: 'linear-gradient(90deg, #1976d2 60%, #42a5f5 100%)', 
+          color: 'white', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 2 
+        }}>
+          <CameraAlt sx={{ mr: 1 }} /> 
+          Chi tiết camera
+          <IconButton onClick={handleCloseCameraDetail} sx={{ ml: 'auto', color: 'white' }}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedCamera && (
+            <Grid container spacing={3}>
+              {/* Thông tin cơ bản */}
+              <Grid item xs={12} md={4}>
+                <Avatar variant="rounded" sx={{ width: 120, height: 70, bgcolor: '#e0e0e0', mb: 2 }}>
+                  <CameraAlt sx={{ fontSize: 40 }} />
+                </Avatar>
+                <Typography variant="h5" fontWeight={700} sx={{ mb: 1 }}>
+                  {selectedCamera.name}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Mã: {selectedCamera.code || selectedCamera.camera_key || selectedCamera.camera_id}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Vị trí: {selectedCamera.location_name}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Địa chỉ: {selectedCamera.location_address}
+                </Typography>
+                <Box sx={{ mt: 2 }}>
+                  <Chip 
+                    label={selectedCamera.is_active ? 'Hoạt động' : 'Tạm dừng'} 
+                    color={selectedCamera.is_active ? 'success' : 'default'} 
+                    size="small" 
+                    sx={{ mr: 1 }}
+                  />
+                  <Chip 
+                    label={selectedCamera.connection_status === 'online' ? 'Online' : 
+                           selectedCamera.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
+                    color={selectedCamera.connection_status === 'online' ? 'success' : 
+                           selectedCamera.connection_status === 'warning' ? 'warning' : 'error'} 
+                    size="small" 
+                  />
+                </Box>
+              </Grid>
+              
+              {/* Thông tin kỹ thuật */}
+              <Grid item xs={12} md={8}>
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
+                  Thông tin kỹ thuật
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Giao thức:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.protocol?.toUpperCase()}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Host:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.host}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Port:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.port}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Độ phân giải:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.resolution || `${selectedCamera.width}x${selectedCamera.height}`}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">FPS:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.fps}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Loại camera:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.camera_type}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Vai trò:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.camera_role}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Hướng:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.direction}
+                    </Typography>
+                  </Grid>
+                </Grid>
+                
+                <Divider sx={{ my: 2 }} />
+                
+                {/* Thông tin cài đặt & bảo trì */}
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
+                  Cài đặt & Bảo trì
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Ngày lắp đặt:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.installation_date_formatted || selectedCamera.installation_date || 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Số ngày hoạt động:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.days_since_installation ? `${selectedCamera.days_since_installation} ngày` : 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Lịch bảo trì:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.maintenance_schedule || 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Khoảng cách bảo trì:</Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {selectedCamera.maintenance_interval_days ? `${selectedCamera.maintenance_interval_days} ngày` : 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                </Grid>
+                
+                <Divider sx={{ my: 2 }} />
+                
+                {/* Thông tin phát hiện */}
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
+                  Thông tin phát hiện
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Phát hiện 24h:</Typography>
+                    <Typography variant="body2" fontWeight={500} color="primary">
+                      {selectedCamera.detections_24h || 0} lần
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">Bật phát hiện:</Typography>
+                    <Chip 
+                      label={selectedCamera.is_detect ? 'Có' : 'Không'} 
+                      color={selectedCamera.is_detect ? 'success' : 'default'} 
+                      size="small" 
+                    />
+                  </Grid>
+                </Grid>
+                
+                <Divider sx={{ my: 2 }} />
+                
+                {/* Thông tin kết nối */}
+                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
+                  Thông tin kết nối
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">RTSP URL:</Typography>
+                    <Typography variant="body2" fontWeight={500} sx={{ 
+                      wordBreak: 'break-all', 
+                      bgcolor: '#f5f5f5', 
+                      p: 1, 
+                      borderRadius: 1,
+                      fontFamily: 'monospace'
+                    }}>
+                      {selectedCamera.rtsp_url || 'Chưa có'}
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={handleCloseCameraDetail} 
+            variant="outlined" 
+            startIcon={<CloseIcon />} 
+            sx={{ borderRadius: 2 }}
+          >
+            Đóng
           </Button>
         </DialogActions>
       </Dialog>
