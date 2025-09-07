@@ -1,6 +1,9 @@
 // API configuration
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
+// Flask API configuration for license plate detection
+const FLASK_API_BASE_URL = process.env.REACT_APP_FLASK_API_URL || 'http://localhost:5000';
+
 // Utility function to clean URL (remove extra slashes)
 const cleanUrl = (url) => {
     return url.startsWith('/') ? url.slice(1) : url;
@@ -26,6 +29,30 @@ const handleApiError = (error) => {
     return error;
 };
 
+// Thêm function để kiểm tra token validity
+export const checkTokenValidity = () => {
+    const token = localStorage.getItem('token');
+    if (!token) return false;
+    
+    try {
+        // Decode JWT token để kiểm tra expiration
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const currentTime = Date.now() / 1000;
+        
+        if (payload.exp && payload.exp < currentTime) {
+            console.warn('Token has expired');
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error checking token validity:', error);
+        return false;
+    }
+};
+
 // Thêm hàm buildQueryString để nối params vào URL
 function buildQueryString(params) {
     if (!params) return '';
@@ -42,6 +69,11 @@ function buildQueryString(params) {
 export const fetchDataFromAPI = async (url, token = null, options = {}) => {
     try {
         console.log('fetchDataFromAPI called with:', { url, hasToken: !!token, options });
+        
+        // Kiểm tra token validity trước khi gọi API
+        if (token && !checkTokenValidity()) {
+            throw new Error('Token has expired or is invalid');
+        }
         
         const headers = {};
         if (token && token.trim() !== '') {
@@ -70,6 +102,13 @@ export const fetchDataFromAPI = async (url, token = null, options = {}) => {
             const error = new Error(errorData.message || `HTTP error! status: ${response.status}`);
             error.status = response.status;
             error.response = { status: response.status, data: errorData };
+            
+            // Xử lý đặc biệt cho lỗi 401
+            if (response.status === 401) {
+                console.warn('401 Unauthorized - Clearing invalid token');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+            }
             
             throw error;
         }
@@ -212,7 +251,23 @@ export const editData = async (url, requestData, token = null) => {
         console.log('Response status:', response.status);
         console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
-        const data = await response.json();
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        let data;
+        
+        if (contentType && contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            // If not JSON, get text
+            const textResponse = await response.text();
+            console.log('Non-JSON response:', textResponse);
+            data = { 
+                success: false, 
+                message: 'Server trả về response không phải JSON',
+                raw_response: textResponse 
+            };
+        }
+        
         console.log('Response data:', data);
 
         if (!response.ok) {
@@ -230,6 +285,14 @@ export const editData = async (url, requestData, token = null) => {
         if (error.response) {
             console.error('Error response data:', error.response.data);
             console.error('Error response status:', error.response.status);
+        }
+        
+        // Handle JSON parsing errors
+        if (error.message && error.message.includes('Unexpected token')) {
+            console.error('JSON parsing error - server may have returned HTML instead of JSON');
+            const newError = new Error('Server trả về dữ liệu không đúng định dạng. Vui lòng kiểm tra server.');
+            newError.originalError = error;
+            throw newError;
         }
         
         throw error;
@@ -365,6 +428,76 @@ export const deleteImages = async (url, image, token) => {
         return data;
     } catch (error) {
         console.error('deleteImages error:', error);
+        throw error;
+    }
+};
+
+// Hàm lấy dữ liệu từ Flask API (GET request) - Cho license plate detection
+export const fetchDataFromFlaskAPI = async (url, token = null, options = {}) => {
+    try {
+        console.log('fetchDataFromFlaskAPI called with:', { url, hasToken: !!token, options });
+        
+        const headers = {};
+        if (token && token.trim() !== '') {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        let fullUrl = `${FLASK_API_BASE_URL}/${cleanUrl(url)}`;
+        if (options.params) {
+            fullUrl += buildQueryString(options.params);
+        }
+        
+        console.log('Making Flask API request to:', fullUrl);
+        console.log('Request headers:', headers);
+        
+        const response = await fetch(fullUrl, {
+            method: 'GET',
+            headers
+        });
+        
+        console.log('Flask API Response status:', response.status);
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('Flask API Error Response:', errorData);
+            
+            const error = new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            error.status = response.status;
+            error.response = { status: response.status, data: errorData };
+            throw error;
+        }
+        
+        const data = await response.json();
+        console.log('Flask API Success Response:', data);
+        return data;
+    } catch (error) {
+        console.error('fetchDataFromFlaskAPI error:', error);
+        throw error;
+    }
+};
+
+// Hàm gọi Flask API với DELETE method
+export const deleteFromFlaskAPI = async (url) => {
+    try {
+        const fullUrl = `${FLASK_API_BASE_URL}/${cleanUrl(url)}`;
+        console.log('Making Flask API DELETE request to:', fullUrl);
+        
+        const response = await fetch(fullUrl, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('deleteFromFlaskAPI error:', error);
         throw error;
     }
 };
