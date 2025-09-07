@@ -22,16 +22,6 @@ ROI_PERCENT_YMAX = 0.95
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-# Import the simplified detection function
-try:
-    from detector_fixed import detect_and_ocr_simplified as detect_and_ocr_simplified
-    logger = logging.getLogger(__name__)
-    logger.info("✅ Successfully imported detect_and_ocr_simplified")
-except ImportError as e:
-    logger = logging.getLogger(__name__)
-    logger.error(f"❌ Failed to import detect_and_ocr_simplified: {e}")
-    detect_and_ocr_simplified = None
-
 def validate_vietnamese_plate_format(plate_text):
     """Kiểm tra format biển số Việt Nam"""
     if not plate_text or not isinstance(plate_text, str):
@@ -62,13 +52,13 @@ def calculate_roi_coordinates(width, height):
 
 # Import detector (simple)
 try:
-    from detector_fixed import detect_and_ocr_simplified as detect_and_ocr
+    from detector_fixed import detect_and_ocr
     print("Simple Detector imported successfully")
 except ImportError as e:
     print(f"Error importing simple detector: {e}")
     # Fallback to fixed detector
     try:
-        from detector_fixed import detect_and_ocr_simplified as detect_and_ocr
+        from detector_fixed import detect_and_ocr
         print("Fallback to Fixed Detector")
     except ImportError as e2:
         print(f"Error importing fallback detector: {e2}")
@@ -133,9 +123,9 @@ def server_status():
     try:
         # Check if models are available
         try:
-            from detector_fixed import yolo_model, ocr_reader
+            from detector_fixed import yolo_model, plate_model, ocr_reader
         except ImportError:
-            from detector import yolo_model, ocr_reader
+            from detector import yolo_model, plate_model, ocr_reader
         
         status = {
             'success': True,
@@ -143,7 +133,7 @@ def server_status():
             'timestamp': datetime.now().isoformat(),
             'models': {
                 'yolo_model': yolo_model is not None,
-                'plate_model': yolo_model is not None,  # Using yolo_model for both
+                'plate_model': plate_model is not None,
                 'ocr_reader': ocr_reader is not None
             }
         }
@@ -165,11 +155,10 @@ def initialize_models_safely():
         
         # Import detector functions
         try:
-            from detector_fixed import check_pytorch_compatibility, check_model_availability, initialize_models_properly, initialize_ocr
+            from detector_fixed import check_pytorch_compatibility, check_model_availability, initialize_ocr
             logger.info("✅ Using fixed detector initialization")
             check_pytorch_compatibility()
             check_model_availability()
-            initialize_models_properly()  # Initialize models first
             initialize_ocr()
         except ImportError as e:
             logger.warning(f"⚠️ Fixed detector failed: {e}, falling back to simple detector")
@@ -192,9 +181,6 @@ def initialize_models_safely():
         
         # Check model availability
         check_model_availability()
-        
-        # Initialize models
-        initialize_models_properly()
         
         # Initialize OCR
         initialize_ocr()
@@ -514,11 +500,7 @@ def recognize_ws(ws):
                             processing_start = time.time()
                             FRAME_TIMEOUT = 3.0  # 3 second timeout per frame
                             
-                            if detect_and_ocr_simplified is not None:
-                                result = detect_and_ocr_simplified(frame, video_processing=True)
-                            else:
-                                logger.error("detect_and_ocr_simplified is not available")
-                                result = create_fallback_frame_result(frame)
+                            result = detect_and_ocr(frame, video_processing=True)
                             processing_time = time.time() - processing_start
                             
                             if processing_time > FRAME_TIMEOUT:
@@ -544,11 +526,10 @@ def recognize_ws(ws):
                         
                         # SAFE database processing
                         try:
-                            # No more tracking - just process detections directly
-                            boxes = result.get('boxes', [])
-                            ocr_results = result.get('ocr_results', [])
-                            if boxes:
-                                logger.info(f"Frame {frame_count}: processing {len(boxes)} detections")
+                            tracked_objects_data = result.get('tracked_objects')
+                            if tracked_objects_data and isinstance(tracked_objects_data, dict) and len(tracked_objects_data) > 0:
+                                logger.info(f"Frame {frame_count}: processing {len(tracked_objects_data)} tracked objects")
+                                process_tracked_objects_safely(tracked_objects_data)
                             else:
                                 logger.debug(f"Frame {frame_count}: no tracked objects for database")
                         except Exception as db_error:
@@ -576,11 +557,7 @@ def recognize_ws(ws):
                                 
                         except Exception as send_error:
                             logger.error(f"Frame {frame_count}: failed to send frame: {send_error}")
-                            # Check if connection is closed and break if so
-                            if "Connection closed" in str(send_error) or "1001" in str(send_error):
-                                logger.info("WebSocket connection closed by client")
-                                break
-                            # Continue processing, don't break the connection for other errors
+                            # Continue processing, don't break the connection
                             continue
                         
                         # Send metadata safely
@@ -641,8 +618,7 @@ def create_fallback_frame_result(original_frame):
             'boxes': [],
             'labels': [],
             'ocr_results': [],
-            'boxes': [],
-            'ocr_results': [],
+            'tracked_objects': {},
             'ids': [],
             'frame_width': w,
             'frame_height': h,
@@ -655,14 +631,84 @@ def create_fallback_frame_result(original_frame):
             'boxes': [],
             'labels': [],
             'ocr_results': [],
-            'boxes': [],
-            'ocr_results': [],
+            'tracked_objects': {},
             'ids': []
         }
 
-# Removed process_tracked_objects_safely - no longer needed
+def process_tracked_objects_safely(tracked_objects_data):
+    """Safely process tracked objects for database"""
+    try:
+        saved_count = 0
+        for track_id, obj in tracked_objects_data.items():
+            try:
+                plate_number = obj.get('plate_number', '')
+                confidence = obj.get('confidence', 0.0)
+                
+                # Skip invalid entries
+                if (not plate_number or 
+                    plate_number == 'Đang nhận diện...' or
+                    not isinstance(confidence, (int, float)) or
+                    confidence < 0.3):
+                    continue
+                
+                # Quick database save attempt
+                if save_detection_safely(obj, track_id):
+                    saved_count += 1
+                    
+            except Exception as obj_error:
+                logger.debug(f"Error processing object {track_id}: {obj_error}")
+                continue
+                
+        if saved_count > 0:
+            logger.info(f"Successfully saved {saved_count} objects to database")
+            
+    except Exception as e:
+        logger.error(f"Error in safe tracked objects processing: {e}")
 
-# Removed save_detection_safely - no longer needed
+def save_detection_safely(obj, track_id):
+    """Safely save detection to database with comprehensive error handling"""
+    try:
+        plate_number = obj.get('plate_number', '')
+        confidence = obj.get('confidence', 0.0)
+        bbox = obj.get('bbox', [0, 0, 0, 0])
+        
+        if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+            bbox = [0, 0, 0, 0]
+        
+        db_detection = {
+            'plate_number': str(plate_number)[:50],
+            'raw_plate_text': str(plate_number)[:255],
+            'camera_id': 1,
+            'location_id': 1,
+            'detected_at': float(time.time()),
+            'direction': 'unknown',
+            'confidence_score': max(0.0, min(1.0, float(confidence))),
+            'ocr_confidence': max(0.0, min(1.0, float(confidence))),
+            'detection_confidence': max(0.0, min(1.0, float(confidence))),
+            'cropped_plate_image_path': '',
+            'detected_vehicle_type': 'car',
+            'bbox_x1': int(bbox[0]),
+            'bbox_y1': int(bbox[1]),
+            'bbox_x2': int(bbox[2]),
+            'bbox_y2': int(bbox[3]),
+            'processing_time_ms': 0,
+            'ai_model_version': 'yolov8n-deepsort-v1.0',
+            'raw_detection_data': '{}',
+            'is_verified': False,
+            'is_whitelist_match': False,
+            'is_blacklist_match': False,
+            'alert_triggered': False
+        }
+        
+        result_id = save_detection_to_db(db_detection)
+        if result_id:
+            logger.debug(f"Saved detection for track {track_id}: '{plate_number}' (DB ID: {result_id})")
+            return True
+        return False
+        
+    except Exception as e:
+        logger.debug(f"Failed to save detection for track {track_id}: {e}")
+        return False
 
 def send_error_frame(ws, error_message):
     """Send error frame to keep stream alive"""
@@ -1045,8 +1091,30 @@ def get_detected_plates():
         limit = min(100, max(1, limit))  # Giá»›i háº¡n tá»‘i Ä‘a 100 items per page
         offset = (page - 1) * limit
         
-        # No more tracking - return empty list
+        # Get list from tracked_objects
+        try:
+            from detector_fixed import tracked_objects
+        except ImportError:
+            from detector import tracked_objects
         plates_list = []
+        for obj_id, obj in tracked_objects.items():
+            if 'plate_number' in obj and obj['plate_number'] != 'Äang nháº­n diá»‡n...':
+                plates_list.append({
+                    'id': obj_id,
+                    'plate_number': obj['plate_number'],
+                    'confidence': obj.get('confidence', 0),
+                    'bbox': obj.get('bbox', []),
+                    'first_seen': obj.get('first_seen', time.time()),
+                    'last_seen': obj.get('last_seen', time.time()),
+                    'crop_filename': obj.get('crop_filename', ''),
+                    'frame_count': 0,
+                    'ocr_raw_text': obj.get('plate_number', ''),
+                    'ocr_processed_at': obj.get('last_seen', time.time()),
+                    'verification_status': 'pending',
+                    'verified_plate_number': '',
+                    'has_crop': bool(obj.get('crop_filename')),
+                    'active': True
+                })
         
         # Lá»c theo plate_number náº¿u cÃ³
         if plate_number:
@@ -1543,11 +1611,8 @@ def video_feed():
         if video_processing:
             logger.info(f"Processing detection for frame {current_frame}")
             try:
-                if detect_and_ocr_simplified is not None:
-                    result = detect_and_ocr_simplified(frame)
-                else:
-                    logger.error("detect_and_ocr_simplified is not available")
-                    result = None
+                from detector_fixed import detect_and_ocr
+                result = detect_and_ocr(frame)
                 if result and result.get('frame'):
                     logger.info(f"Detection successful for frame {current_frame}")
                     cap.release()
@@ -1714,7 +1779,7 @@ def video_stream():
             detection_result = None
             if video_processing:
                 try:
-                    from detector_fixed import detect_and_ocr_simplified as detect_and_ocr
+                    from detector_fixed import detect_and_ocr
                     # Pass video_processing flag to detector
                     detection_result = detect_and_ocr(frame, video_processing=True)
                     if detection_result:
