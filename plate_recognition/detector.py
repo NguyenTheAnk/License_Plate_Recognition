@@ -4134,10 +4134,10 @@ def enhance_plate_for_ocr(plate_crop):
         if plate_crop is None or plate_crop.size == 0:
             return plate_crop
         
-        # Resize to minimum size for OCR
+        # Resize to optimal size for OCR
         height, width = plate_crop.shape[:2]
-        if width < 200 or height < 60:
-            scale_factor = max(200/width, 60/height)
+        if width < 300 or height < 80:
+            scale_factor = max(300/width, 80/height)
             new_width = int(width * scale_factor)
             new_height = int(height * scale_factor)
             plate_crop = cv2.resize(plate_crop, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
@@ -4148,12 +4148,26 @@ def enhance_plate_for_ocr(plate_crop):
         else:
             gray = plate_crop
         
-        # Apply contrast enhancement
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # Apply multiple enhancement techniques
+        # 1. Apply CLAHE for better contrast
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
         
-        # Apply Gaussian blur to reduce noise
-        enhanced = cv2.GaussianBlur(enhanced, (3, 3), 0)
+        # 2. Apply bilateral filter to reduce noise while preserving edges
+        enhanced = cv2.bilateralFilter(enhanced, 9, 75, 75)
+        
+        # 3. Apply morphological operations to clean up the image
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        enhanced = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+        
+        # 4. Apply sharpening filter
+        kernel_sharpen = np.array([[-1,-1,-1],
+                                  [-1, 9,-1],
+                                  [-1,-1,-1]])
+        enhanced = cv2.filter2D(enhanced, -1, kernel_sharpen)
+        
+        # 5. Normalize the image
+        enhanced = cv2.normalize(enhanced, None, 0, 255, cv2.NORM_MINMAX)
         
         # Convert back to BGR for PaddleOCR
         enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
@@ -4201,8 +4215,202 @@ def clean_and_validate_plate_text(text):
         logger.error(f"Text cleaning failed: {e}")
         return ""
 
+def is_valid_vietnamese_plate(plate_text):
+    """Validate Vietnamese license plate format"""
+    try:
+        if not plate_text:
+            return False
+        
+        # Clean the text
+        cleaned = clean_and_validate_plate_text(plate_text)
+        if not cleaned:
+            return False
+        
+        # Vietnamese plate patterns (updated for current format)
+        patterns = [
+            r'^\d{2}[A-Z]-\d{3}\.\d{2}$',  # 30A-123.45
+            r'^\d{2}[A-Z]-\d{4}\.\d{2}$',  # 30A-1234.56
+            r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',  # 30AB-12.34
+            r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',  # 30AB-123.45
+            r'^\d{2}[A-Z]-\d{4,5}$',  # 30A-1234
+            r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',  # 30A1-123.45
+            r'^\d{2}[A-Z]-\d{3}$',  # 30A-123
+            r'^\d{2}[A-Z]-\d{4}$',  # 30A-1234
+            r'^\d{2}[A-Z]{2}-\d{3}$',  # 30AB-123
+            r'^\d{2}[A-Z]{2}-\d{4}$',  # 30AB-1234
+        ]
+        
+        for pattern in patterns:
+            if re.match(pattern, cleaned):
+                return True
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"Plate validation failed: {e}")
+        return False
+
+def detect_license_plate_in_vehicle_optimized(vehicle_crop):
+    """Optimized license plate detection within vehicle crop"""
+    try:
+        if vehicle_crop is None or vehicle_crop.size == 0:
+            return None
+        
+        height, width = vehicle_crop.shape[:2]
+        
+        # Convert to grayscale
+        if len(vehicle_crop.shape) == 3:
+            gray = cv2.cvtColor(vehicle_crop, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = vehicle_crop
+        
+        # Apply multiple preprocessing techniques
+        # 1. Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        
+        # 2. Apply CLAHE for better contrast
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(blurred)
+        
+        # 3. Apply morphological operations to connect text regions
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        morphed = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+        
+        # 4. Apply adaptive threshold
+        thresh = cv2.adaptiveThreshold(morphed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        
+        # 5. Find contours
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filter contours for license plate characteristics
+        plate_candidates = []
+        for contour in contours:
+            # Get bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Skip very small contours
+            if w < 20 or h < 8:
+                continue
+            
+            # Filter by aspect ratio (license plates are typically wider than tall)
+            aspect_ratio = w / h
+            if 1.5 <= aspect_ratio <= 8.0:  # More flexible aspect ratio
+                # Filter by size (relative to vehicle)
+                area = w * h
+                if area > (width * height * 0.005) and area < (width * height * 0.4):  # 0.5-40% of vehicle area
+                    # Filter by position (plates are usually in lower part of vehicle)
+                    if y > height * 0.2:  # Lower 80% of vehicle
+                        # Calculate score based on multiple factors
+                        position_score = 1.0 - (y / height)  # Prefer lower positions
+                        size_score = min(area / (width * height * 0.1), 1.0)  # Prefer medium sizes
+                        aspect_score = 1.0 - abs(aspect_ratio - 3.0) / 3.0  # Prefer aspect ratio around 3.0
+                        
+                        total_score = position_score * 0.4 + size_score * 0.3 + aspect_score * 0.3
+                        plate_candidates.append((x, y, w, h, area, total_score))
+        
+        # Sort by score (highest first) and return the best candidate
+        if plate_candidates:
+            plate_candidates.sort(key=lambda x: x[5], reverse=True)
+            x, y, w, h, _, score = plate_candidates[0]
+            
+            # Only return if score is above threshold
+            if score > 0.3:
+                # Add some padding to the detected region
+                padding = 5
+                x = max(0, x - padding)
+                y = max(0, y - padding)
+                w = min(width - x, w + 2 * padding)
+                h = min(height - y, h + 2 * padding)
+                
+                return (x, y, x + w, y + h)
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"License plate detection in vehicle failed: {e}")
+        return None
+
+def check_plate_lists(plate_text):
+    """Check if plate is in BlackList or WhiteList - synchronized with app.py"""
+    try:
+        if not plate_text:
+            return False, False
+        
+        # Clean the plate text
+        cleaned_plate = clean_and_validate_plate_text(plate_text)
+        if not cleaned_plate:
+            return False, False
+        
+        connection = get_db_connection()
+        if not connection:
+            return False, False
+        
+        cursor = connection.cursor(dictionary=True)
+        
+        # Check whitelist (synchronized with app.py)
+        whitelist_query = """
+        SELECT id FROM vehicle_whitelist 
+        WHERE plate_number = %s AND is_active = 1 
+        AND (valid_from IS NULL OR valid_from <= NOW()) 
+        AND (valid_to IS NULL OR valid_to >= NOW())
+        """
+        cursor.execute(whitelist_query, (cleaned_plate,))
+        is_whitelist = cursor.fetchone() is not None
+        
+        # Check blacklist (synchronized with app.py)
+        blacklist_query = """
+        SELECT id FROM vehicle_blacklist 
+        WHERE plate_number = %s AND is_active = 1 
+        AND (valid_from IS NULL OR valid_from <= NOW()) 
+        AND (valid_to IS NULL OR valid_to >= NOW())
+        """
+        cursor.execute(blacklist_query, (cleaned_plate,))
+        is_blacklist = cursor.fetchone() is not None
+        
+        cursor.close()
+        connection.close()
+        
+        return is_blacklist, is_whitelist
+        
+    except Exception as e:
+        logger.error(f"Plate list check failed: {e}")
+        return False, False
+
+def save_plate_crop(plate_crop, plate_text, frame_count):
+    """Save plate crop image to static/crops directory"""
+    try:
+        if plate_crop is None or plate_crop.size == 0:
+            return ""
+        
+        # Create crops directory if it doesn't exist
+        crops_dir = "static/crops"
+        os.makedirs(crops_dir, exist_ok=True)
+        
+        # Generate filename with timestamp and plate number
+        timestamp = int(time.time() * 1000)
+        clean_plate = clean_and_validate_plate_text(plate_text)
+        if not clean_plate:
+            clean_plate = "unknown"
+        
+        # Create unique filename
+        filename = f"plate_{timestamp}_{clean_plate}_{frame_count}.jpg"
+        filepath = os.path.join(crops_dir, filename)
+        
+        # Save the image
+        success = cv2.imwrite(filepath, plate_crop)
+        if success:
+            logger.info(f"✅ Saved plate crop: {filename}")
+            return filename
+        else:
+            logger.error(f"Failed to save plate crop: {filename}")
+            return ""
+            
+    except Exception as e:
+        logger.error(f"Error saving plate crop: {e}")
+        return ""
+
 def detect_and_ocr(frame, video_processing=True):
-    """Simplified plate detection and OCR - no vehicle tracking"""
+    """Optimized plate detection and OCR - only license plates, immediate ROI detection"""
     global yolo_model, ocr_reader, frame_count
     
     try:
@@ -4224,7 +4432,7 @@ def detect_and_ocr(frame, video_processing=True):
         display_frame = frame.copy()
         frame_count += 1
 
-        # Draw ROI
+        # Calculate ROI coordinates
         try:
             roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
             cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
@@ -4240,11 +4448,11 @@ def detect_and_ocr(frame, video_processing=True):
         ocr_results = []
         tracked_objects = {}
         
-        # Direct plate detection using YOLOv9s.pt
+        # Optimized plate detection - only license plates
         try:
             if yolo_model is not None:
-                # Run YOLO detection with low confidence threshold for plates
-                results = yolo_model(frame, conf=0.3, verbose=False)
+                # Run YOLO detection with optimized settings for license plates
+                results = yolo_model(frame, conf=0.25, verbose=False, classes=[2])  # Only detect cars/vehicles
                 
                 for result in results:
                     if result.boxes is not None:
@@ -4256,51 +4464,109 @@ def detect_and_ocr(frame, video_processing=True):
                             
                             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                             
-                            # Check if detection is in ROI
+                            # Check if detection is in ROI (immediate detection)
                             if is_bbox_in_roi([x1, y1, x2, y2], original_width, original_height):
-                                # Crop plate region
-                                plate_crop = frame[y1:y2, x1:x2]
+                                # Crop vehicle region for plate detection
+                                vehicle_crop = frame[y1:y2, x1:x2]
                                 
-                                if plate_crop.size > 0:
-                                    # Run OCR on plate crop
-                                    plate_text, ocr_conf = run_ocr_on_plate(plate_crop)
+                                if vehicle_crop.size > 0:
+                                    # Detect license plate within vehicle
+                                    plate_bbox = detect_license_plate_in_vehicle_optimized(vehicle_crop)
                                     
-                                    if plate_text and len(plate_text.strip()) > 0:
-                                        # Draw detection box
-                                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-                                        cv2.putText(display_frame, f"{plate_text} ({conf:.2f})", (x1, max(10, y1-8)),
-                                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                                    if plate_bbox:
+                                        # Convert plate coordinates to frame coordinates
+                                        px1, py1, px2, py2 = plate_bbox
+                                        frame_px1 = x1 + px1
+                                        frame_py1 = y1 + py1
+                                        frame_px2 = x1 + px2
+                                        frame_py2 = y1 + py2
                                         
-                                        # Add to results
-                                        boxes.append([x1, y1, x2, y2])
-                                        labels.append(plate_text)
-                                        ocr_results.append([plate_text, float(ocr_conf)])
+                                        # Crop plate region from original frame
+                                        plate_crop = frame[frame_py1:frame_py2, frame_px1:frame_px2]
                                         
-                                        # Create unique ID for this detection
-                                        detection_id = f"plate_{frame_count}_{len(boxes)}"
-                                        tracked_objects[detection_id] = {
-                                            'plate_number': plate_text,
-                                            'confidence': float(conf),
-                                            'bbox': [x1, y1, x2, y2],
-                                            'first_seen': time.time(),
-                                            'last_seen': time.time(),
-                                            'crop_filename': '',
-                                            'ocr_confidence': float(ocr_conf)
-                                        }
-                                        
-                                        logger.info(f"✅ Detected plate: {plate_text} (conf: {conf:.3f}, OCR: {ocr_conf:.3f})")
+                                        if plate_crop.size > 0:
+                                            # Run OCR on plate crop
+                                            plate_text, ocr_conf = run_ocr_on_plate(plate_crop)
+                                            
+                                            # Validate Vietnamese plate format
+                                            if plate_text and is_valid_vietnamese_plate(plate_text):
+                                                # Check BlackList/WhiteList
+                                                is_blacklist, is_whitelist = check_plate_lists(plate_text)
+                                                
+                                                # Determine color based on validation
+                                                if is_blacklist:
+                                                    box_color = (0, 0, 255)  # Red for blacklist
+                                                    text_color = (255, 255, 255)  # White text
+                                                    status = "BLACKLIST"
+                                                elif is_whitelist:
+                                                    box_color = (0, 255, 0)  # Green for whitelist
+                                                    text_color = (0, 0, 0)  # Black text
+                                                    status = "WHITELIST"
+                                                else:
+                                                    box_color = (255, 255, 0)  # Yellow for normal
+                                                    text_color = (0, 0, 0)  # Black text
+                                                    status = "NORMAL"
+                                                
+                                                # Save plate crop image
+                                                crop_filename = save_plate_crop(plate_crop, plate_text, frame_count)
+                                                
+                                                # Draw plate bounding box with better visibility
+                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), box_color, 4)
+                                                
+                                                # Draw text background for better readability
+                                                text = f"{plate_text} ({status})"
+                                                text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+                                                text_x = frame_px1
+                                                text_y = max(25, frame_py1 - 10)
+                                                
+                                                # Draw background rectangle for text
+                                                cv2.rectangle(display_frame, 
+                                                            (text_x - 5, text_y - text_size[1] - 5), 
+                                                            (text_x + text_size[0] + 5, text_y + 5), 
+                                                            box_color, -1)
+                                                
+                                                # Draw text
+                                                cv2.putText(display_frame, text, (text_x, text_y),
+                                                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
+                                                
+                                                # Add to results
+                                                boxes.append([frame_px1, frame_py1, frame_px2, frame_py2])
+                                                labels.append(plate_text)
+                                                ocr_results.append([plate_text, float(ocr_conf)])
+                                                
+                                                # Create unique ID for this detection
+                                                detection_id = f"plate_{frame_count}_{len(boxes)}"
+                                                tracked_objects[detection_id] = {
+                                                    'plate_number': plate_text,
+                                                    'confidence': float(conf),
+                                                    'bbox': [frame_px1, frame_py1, frame_px2, frame_py2],
+                                                    'first_seen': time.time(),
+                                                    'last_seen': time.time(),
+                                                    'crop_filename': crop_filename,
+                                                    'ocr_confidence': float(ocr_conf),
+                                                    'is_blacklist': is_blacklist,
+                                                    'is_whitelist': is_whitelist,
+                                                    'status': status,
+                                                    'validated': True
+                                                }
+                                                
+                                                logger.info(f"✅ Valid plate detected: {plate_text} ({status}) - conf: {conf:.3f}, OCR: {ocr_conf:.3f}")
+                                            else:
+                                                # Invalid format - draw in gray
+                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), (128, 128, 128), 2)
+                                                cv2.putText(display_frame, f"INVALID FORMAT", (frame_px1, max(10, frame_py1-8)),
+                                                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1)
+                                                
+                                                logger.debug(f"Invalid plate format: {plate_text}")
                                     else:
-                                        # Draw detection box without text
-                                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                                        cv2.putText(display_frame, f"PLATE ({conf:.2f})", (x1, max(10, y1-8)),
-                                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-                                        boxes.append([x1, y1, x2, y2])
-                                        labels.append("PLATE")
-                                        ocr_results.append(["", 0.0])
+                                        # No plate detected in vehicle - draw vehicle box in blue
+                                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                                        cv2.putText(display_frame, f"VEHICLE ({conf:.2f})", (x1, max(10, y1-8)),
+                                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
                                         
         except Exception as e:
             logger.error(f"Plate detection failed: {e}")
-        
+
         # Encode frame
         try:
             _, buffer = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -4308,7 +4574,7 @@ def detect_and_ocr(frame, video_processing=True):
         except Exception as e:
             logger.error(f"Frame encoding failed: {e}")
             frame_bytes = b''
-        
+
         return {
             'frame': frame_bytes,
             'boxes': boxes,
