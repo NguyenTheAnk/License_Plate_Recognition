@@ -1139,6 +1139,7 @@ os.makedirs(CROPS_FOLDER, exist_ok=True)
 
 # Global variables
 tracked_objects = {}
+plate_tracking = {}  # Track plates separately for continuous display
 frame_count = 0
 yolo_model = None
 plate_model = None  # Model chuyên dụng cho biển số
@@ -4184,32 +4185,52 @@ def clean_and_validate_plate_text(text):
         if not text:
             return ""
         
-        # Remove unwanted characters
-        cleaned = re.sub(r'[^A-Z0-9\-\.]', '', text.upper().strip())
+        # Convert to uppercase
+        cleaned = text.upper().strip()
+        
+        # Common OCR error corrections
+        ocr_corrections = {
+            'O': '0',  # Letter O to number 0
+            'I': '1',  # Letter I to number 1
+            'S': '5',  # Letter S to number 5 (in some contexts)
+            'B': '8',  # Letter B to number 8 (in some contexts)
+            'G': '6',  # Letter G to number 6 (in some contexts)
+            ' ': '',   # Remove spaces
+            '_': '',   # Remove underscores
+            '|': '',   # Remove pipes
+            'l': '1',  # Lowercase l to 1
+            'o': '0',  # Lowercase o to 0
+        }
+        
+        # Apply OCR corrections
+        for wrong, correct in ocr_corrections.items():
+            cleaned = cleaned.replace(wrong, correct)
+        
+        # Remove non-alphanumeric characters except dash and dot
+        cleaned = re.sub(r'[^0-9A-Z\-\.]', '', cleaned)
         
         # Basic validation for Vietnamese plates
         if len(cleaned) < 5 or len(cleaned) > 12:
             return ""
         
-        # Check for common Vietnamese plate patterns
-        patterns = [
-            r'^\d{2}[A-Z]-\d{3}\.\d{2}$',  # 30A-123.45
-            r'^\d{2}[A-Z]-\d{4}\.\d{2}$',  # 30A-1234.56
-            r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',  # 30AB-12.34
-            r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',  # 30AB-123.45
-            r'^\d{2}[A-Z]-\d{4,5}$',  # 30A-1234
-            r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',  # 30A1-123.45
-        ]
+        # Try to fix common formatting issues
+        # Add missing dashes if pattern suggests it
+        if re.match(r'^\d{2}[A-Z]\d{3,5}$', cleaned):
+            # 30A1234 -> 30A-1234
+            cleaned = re.sub(r'^(\d{2}[A-Z])(\d{3,5})$', r'\1-\2', cleaned)
+        elif re.match(r'^\d{2}[A-Z]{2}\d{2,4}$', cleaned):
+            # 30AB123 -> 30AB-123
+            cleaned = re.sub(r'^(\d{2}[A-Z]{2})(\d{2,4})$', r'\1-\2', cleaned)
         
-        for pattern in patterns:
-            if re.match(pattern, cleaned):
-                return cleaned
+        # Try to add missing dots for decimal parts
+        if re.match(r'^\d{2}[A-Z]-\d{5}$', cleaned):
+            # 30A-12345 -> 30A-123.45
+            cleaned = re.sub(r'^(\d{2}[A-Z]-\d{3})(\d{2})$', r'\1.\2', cleaned)
+        elif re.match(r'^\d{2}[A-Z]-\d{6}$', cleaned):
+            # 30A-123456 -> 30A-1234.56
+            cleaned = re.sub(r'^(\d{2}[A-Z]-\d{4})(\d{2})$', r'\1.\2', cleaned)
         
-        # If no pattern matches, return cleaned text if it looks reasonable
-        if re.match(r'^[0-9A-Z\-\.]+$', cleaned) and len(cleaned) >= 5:
-            return cleaned
-        
-        return ""
+        return cleaned
         
     except Exception as e:
         logger.error(f"Text cleaning failed: {e}")
@@ -4226,29 +4247,166 @@ def is_valid_vietnamese_plate(plate_text):
         if not cleaned:
             return False
         
-        # Vietnamese plate patterns (updated for current format)
+        # Comprehensive Vietnamese plate patterns (all current formats)
         patterns = [
+            # Standard formats
             r'^\d{2}[A-Z]-\d{3}\.\d{2}$',  # 30A-123.45
             r'^\d{2}[A-Z]-\d{4}\.\d{2}$',  # 30A-1234.56
-            r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',  # 30AB-12.34
-            r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',  # 30AB-123.45
-            r'^\d{2}[A-Z]-\d{4,5}$',  # 30A-1234
-            r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',  # 30A1-123.45
             r'^\d{2}[A-Z]-\d{3}$',  # 30A-123
             r'^\d{2}[A-Z]-\d{4}$',  # 30A-1234
+            r'^\d{2}[A-Z]-\d{5}$',  # 30A-12345
+            
+            # Two-letter formats
+            r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',  # 30AB-12.34
+            r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',  # 30AB-123.45
+            r'^\d{2}[A-Z]{2}-\d{2}$',  # 30AB-12
             r'^\d{2}[A-Z]{2}-\d{3}$',  # 30AB-123
             r'^\d{2}[A-Z]{2}-\d{4}$',  # 30AB-1234
+            
+            # Mixed formats
+            r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',  # 30A1-123.45
+            r'^\d{2}[A-Z]\d-\d{3}$',  # 30A1-123
+            r'^\d{2}[A-Z]\d-\d{4}$',  # 30A1-1234
+            
+            # Without dots (common OCR errors)
+            r'^\d{2}[A-Z]-\d{3}\d{2}$',  # 30A-12345
+            r'^\d{2}[A-Z]-\d{4}\d{2}$',  # 30A-123456
+            r'^\d{2}[A-Z]{2}-\d{2}\d{2}$',  # 30AB-1234
+            r'^\d{2}[A-Z]{2}-\d{3}\d{2}$',  # 30AB-12345
+            
+            # With spaces instead of dashes
+            r'^\d{2}[A-Z] \d{3}\.\d{2}$',  # 30A 123.45
+            r'^\d{2}[A-Z] \d{4}\.\d{2}$',  # 30A 1234.56
+            r'^\d{2}[A-Z] \d{3}$',  # 30A 123
+            r'^\d{2}[A-Z] \d{4}$',  # 30A 1234
+            
+            # Without separators (common OCR errors)
+            r'^\d{2}[A-Z]\d{3}\.\d{2}$',  # 30A123.45
+            r'^\d{2}[A-Z]\d{4}\.\d{2}$',  # 30A1234.56
+            r'^\d{2}[A-Z]\d{3}$',  # 30A123
+            r'^\d{2}[A-Z]\d{4}$',  # 30A1234
+            r'^\d{2}[A-Z]\d{5}$',  # 30A12345
+            
+            # Two-letter without separators
+            r'^\d{2}[A-Z]{2}\d{2}\.\d{2}$',  # 30AB12.34
+            r'^\d{2}[A-Z]{2}\d{3}\.\d{2}$',  # 30AB123.45
+            r'^\d{2}[A-Z]{2}\d{2}$',  # 30AB12
+            r'^\d{2}[A-Z]{2}\d{3}$',  # 30AB123
+            r'^\d{2}[A-Z]{2}\d{4}$',  # 30AB1234
         ]
         
         for pattern in patterns:
             if re.match(pattern, cleaned):
+                logger.info(f"✅ Valid plate pattern matched: {cleaned}")
                 return True
         
+        # Additional flexible validation for common OCR errors
+        # Check if it contains at least 2 digits, 1 letter, and reasonable length
+        if (len(cleaned) >= 5 and len(cleaned) <= 12 and 
+            re.search(r'\d', cleaned) and 
+            re.search(r'[A-Z]', cleaned) and
+            re.match(r'^[0-9A-Z\-\.\s]+$', cleaned)):
+            logger.info(f"✅ Flexible validation passed: {cleaned}")
+            return True
+        
+        logger.warning(f"❌ Invalid plate format: {cleaned}")
         return False
         
     except Exception as e:
         logger.error(f"Plate validation failed: {e}")
         return False
+
+def detect_license_plate_simple(vehicle_crop):
+    """Simple and fast license plate detection"""
+    try:
+        if vehicle_crop is None or vehicle_crop.size == 0:
+            return None
+        
+        height, width = vehicle_crop.shape[:2]
+        
+        # Convert to grayscale
+        if len(vehicle_crop.shape) == 3:
+            gray = cv2.cvtColor(vehicle_crop, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = vehicle_crop
+        
+        # Simple edge detection
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Find best plate candidate
+        best_plate = None
+        best_score = 0
+        
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Basic filters
+            if w < 50 or h < 15 or w > width * 0.8 or h > height * 0.5:
+                continue
+            
+            aspect_ratio = w / h
+            if aspect_ratio < 2.0 or aspect_ratio > 6.0:
+                continue
+            
+            # Score based on position and size
+            position_score = 1.0 - (y / height)  # Prefer lower positions
+            size_score = min((w * h) / (width * height * 0.1), 1.0)  # Prefer medium sizes
+            aspect_score = 1.0 - abs(aspect_ratio - 3.0) / 3.0  # Prefer aspect ratio around 3.0
+            
+            total_score = position_score * 0.4 + size_score * 0.3 + aspect_score * 0.3
+            
+            if total_score > best_score:
+                best_score = total_score
+                best_plate = (x, y, x + w, y + h)
+        
+        return best_plate if best_score > 0.3 else None
+        
+    except Exception as e:
+        logger.error(f"Simple plate detection failed: {e}")
+        return None
+
+def run_ocr_simple(plate_crop):
+    """Simple and fast OCR"""
+    try:
+        if plate_crop is None or plate_crop.size == 0:
+            return "", 0.0
+        
+        # Simple preprocessing
+        if len(plate_crop.shape) == 3:
+            gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = plate_crop
+        
+        # Resize if too small
+        height, width = gray.shape[:2]
+        if width < 100 or height < 30:
+            scale = max(100/width, 30/height)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+        
+        # Simple enhancement
+        gray = cv2.equalizeHist(gray)
+        
+        # Run OCR
+        if ocr_reader is not None:
+            result = ocr_reader.ocr(gray, det=False, rec=True, cls=False)
+            if result and result[0]:
+                text = result[0][0][0] if len(result[0][0]) > 0 else ""
+                conf = result[0][0][1] if len(result[0][0]) > 1 else 0.0
+                
+                # Clean text
+                cleaned_text = clean_and_validate_plate_text(text)
+                return cleaned_text, float(conf)
+        
+        return "", 0.0
+        
+    except Exception as e:
+        logger.error(f"Simple OCR failed: {e}")
+        return "", 0.0
 
 def detect_license_plate_in_vehicle_optimized(vehicle_crop):
     """Optimized license plate detection within vehicle crop"""
@@ -4341,7 +4499,14 @@ def check_plate_lists(plate_text):
         if not cleaned_plate:
             return False, False
         
-        connection = get_db_connection()
+        # Import get_db_connection from app
+        try:
+            from app import get_db_connection
+            connection = get_db_connection()
+        except ImportError:
+            logger.error("Cannot import get_db_connection from app")
+            return False, False
+            
         if not connection:
             return False, False
         
@@ -4410,8 +4575,8 @@ def save_plate_crop(plate_crop, plate_text, frame_count):
         return ""
 
 def detect_and_ocr(frame, video_processing=True):
-    """Optimized plate detection and OCR - only license plates, immediate ROI detection"""
-    global yolo_model, ocr_reader, frame_count
+    """Simplified and optimized plate detection and OCR"""
+    global yolo_model, ocr_reader, frame_count, tracked_objects
     
     try:
         # Initialize models if needed
@@ -4432,29 +4597,25 @@ def detect_and_ocr(frame, video_processing=True):
         display_frame = frame.copy()
         frame_count += 1
 
-        # Calculate ROI coordinates
+        # Draw ROI
         try:
             roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
             cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
             
-            # Draw text with background for better visibility
+            # Draw ROI text
             text = "PLATE DETECTION ZONE"
             text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
             text_x = roi_xmin + 10
             text_y = roi_ymin - 15
             
-            # Draw background rectangle for text
             cv2.rectangle(display_frame, 
                         (text_x - 5, text_y - text_size[1] - 5), 
                         (text_x + text_size[0] + 5, text_y + 5), 
-                        (0, 0, 0), -1)  # Black background
-            
-            # Draw text in white
+                        (0, 0, 0), -1)
             cv2.putText(display_frame, text, (text_x, text_y), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         except Exception as e:
             logger.error(f"ROI drawing failed: {e}")
-            cv2.rectangle(display_frame, (50, 50), (original_width-50, original_height-50), (0, 255, 255), 3)
 
         # Initialize response arrays
         boxes = []
@@ -4462,84 +4623,76 @@ def detect_and_ocr(frame, video_processing=True):
         ocr_results = []
         tracked_objects = {}
         
-        # Optimized plate detection - only license plates
-        try:
-            if yolo_model is not None:
-                # Run YOLO detection with optimized settings for faster detection
-                results = yolo_model(frame, conf=0.15, verbose=False, classes=[2])  # Lower confidence for faster detection
+        # Simple plate detection
+        if yolo_model is not None:
+            try:
+                # Run YOLO detection
+                results = yolo_model(frame, conf=0.2, verbose=False, classes=[2])
                 
                 for result in results:
                     if result.boxes is not None:
                         for box in result.boxes:
-                            # Get box coordinates and confidence
                             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                             conf = box.conf[0].cpu().numpy()
-                            class_id = int(box.cls[0].cpu().numpy())
-                            
                             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                             
-                            # Check if detection is in ROI (immediate detection)
+                            # Check if vehicle is in ROI
                             if is_bbox_in_roi([x1, y1, x2, y2], original_width, original_height):
-                                # Crop vehicle region for plate detection
+                                # Crop vehicle region
                                 vehicle_crop = frame[y1:y2, x1:x2]
                                 
                                 if vehicle_crop.size > 0:
-                                    # Detect license plate within vehicle
-                                    plate_bbox = detect_license_plate_in_vehicle_optimized(vehicle_crop)
+                                    # Simple plate detection in vehicle
+                                    plate_bbox = detect_license_plate_simple(vehicle_crop)
                                     
                                     if plate_bbox:
-                                        # Convert plate coordinates to frame coordinates
                                         px1, py1, px2, py2 = plate_bbox
                                         frame_px1 = x1 + px1
                                         frame_py1 = y1 + py1
                                         frame_px2 = x1 + px2
                                         frame_py2 = y1 + py2
                                         
-                                        # Crop plate region from original frame
+                                        # Crop plate region
                                         plate_crop = frame[frame_py1:frame_py2, frame_px1:frame_px2]
                                         
                                         if plate_crop.size > 0:
-                                            # Run OCR on plate crop
-                                            plate_text, ocr_conf = run_ocr_on_plate(plate_crop)
+                                            # Simple OCR
+                                            plate_text, ocr_conf = run_ocr_simple(plate_crop)
                                             
-                                            # Validate Vietnamese plate format
                                             if plate_text and is_valid_vietnamese_plate(plate_text):
-                                                # Check BlackList/WhiteList
+                                                # Check lists
                                                 is_blacklist, is_whitelist = check_plate_lists(plate_text)
                                                 
-                                                # Determine color based on validation
+                                                # Determine colors
                                                 if is_blacklist:
-                                                    box_color = (0, 0, 255)  # Red for blacklist
-                                                    text_color = (255, 255, 255)  # White text
+                                                    box_color = (0, 0, 255)
+                                                    text_color = (255, 255, 255)
                                                     status = "BLACKLIST"
                                                 elif is_whitelist:
-                                                    box_color = (0, 255, 0)  # Green for whitelist
-                                                    text_color = (0, 0, 0)  # Black text
+                                                    box_color = (0, 255, 0)
+                                                    text_color = (0, 0, 0)
                                                     status = "WHITELIST"
                                                 else:
-                                                    box_color = (255, 255, 0)  # Yellow for normal
-                                                    text_color = (0, 0, 0)  # Black text
+                                                    box_color = (255, 255, 0)
+                                                    text_color = (0, 0, 0)
                                                     status = "NORMAL"
                                                 
-                                                # Save plate crop image
+                                                # Save crop image
                                                 crop_filename = save_plate_crop(plate_crop, plate_text, frame_count)
                                                 
-                                                # Draw plate bounding box with better visibility
+                                                # Draw plate box
                                                 cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), box_color, 4)
                                                 
-                                                # Draw text background for better readability
+                                                # Draw text
                                                 text = f"{plate_text} ({status})"
                                                 text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
                                                 text_x = frame_px1
                                                 text_y = max(25, frame_py1 - 10)
                                                 
-                                                # Draw background rectangle for text
                                                 cv2.rectangle(display_frame, 
                                                             (text_x - 5, text_y - text_size[1] - 5), 
                                                             (text_x + text_size[0] + 5, text_y + 5), 
                                                             box_color, -1)
-                                                
-                                                # Draw text
                                                 cv2.putText(display_frame, text, (text_x, text_y),
                                                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
                                                 
@@ -4548,7 +4701,7 @@ def detect_and_ocr(frame, video_processing=True):
                                                 labels.append(plate_text)
                                                 ocr_results.append([plate_text, float(ocr_conf)])
                                                 
-                                                # Create unique ID for this detection
+                                                # Create detection object
                                                 detection_id = f"plate_{frame_count}_{len(boxes)}"
                                                 tracked_objects[detection_id] = {
                                                     'plate_number': plate_text,
@@ -4564,37 +4717,20 @@ def detect_and_ocr(frame, video_processing=True):
                                                     'validated': True
                                                 }
                                                 
-                                                logger.info(f"✅ Valid plate detected: {plate_text} ({status}) - conf: {conf:.3f}, OCR: {ocr_conf:.3f}")
+                                                logger.info(f"✅ Plate detected: {plate_text} ({status})")
                                             else:
-                                                # Invalid format - draw with better visibility
-                                                invalid_color = (0, 0, 255)  # Red for invalid
-                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), invalid_color, 3)
-                                                
-                                                # Draw text with background for better visibility
-                                                text = "INVALID FORMAT"
-                                                text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                                                text_x = frame_px1
-                                                text_y = max(25, frame_py1 - 10)
-                                                
-                                                # Draw background rectangle for text
-                                                cv2.rectangle(display_frame, 
-                                                            (text_x - 5, text_y - text_size[1] - 5), 
-                                                            (text_x + text_size[0] + 5, text_y + 5), 
-                                                            invalid_color, -1)
-                                                
-                                                # Draw text in white
-                                                cv2.putText(display_frame, text, (text_x, text_y),
+                                                # Invalid format
+                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), (0, 0, 255), 3)
+                                                cv2.putText(display_frame, "INVALID FORMAT", (frame_px1, max(25, frame_py1 - 10)),
                                                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                                                
-                                                logger.debug(f"Invalid plate format: {plate_text}")
                                     else:
-                                        # No plate detected in vehicle - draw vehicle box in blue
+                                        # No plate detected
                                         cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
                                         cv2.putText(display_frame, f"VEHICLE ({conf:.2f})", (x1, max(10, y1-8)),
                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
                                         
-        except Exception as e:
-            logger.error(f"Plate detection failed: {e}")
+            except Exception as e:
+                logger.error(f"Detection failed: {e}")
 
         # Encode frame
         try:
