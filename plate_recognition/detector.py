@@ -8,6 +8,8 @@ import redis
 from statistics import mean
 from cjm_byte_track.core import BYTETracker 
 from collections import defaultdict
+import requests
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,6 +58,43 @@ fps_counter = 0
 last_fps_time = time.time()
 current_fps = 0
 last_redis_update = 0
+sent_plates = {}
+plate_cooldown = 300  # 5 phút (300 giây)
+FRAMES_FOLDER = '../public/frames_crops'
+os.makedirs(FRAMES_FOLDER, exist_ok=True)
+
+# Gửi dữ liệu biển số tới server Node.js
+def send_plate_to_server(track_id, plate_data, frame_path=None):
+    try:
+        current_time = time.time()
+        plate_text = plate_data['plate']
+        
+        # Kiểm tra nếu biển số đã được gửi trong vòng 5 phút
+        if plate_text in sent_plates:
+            last_sent_time = sent_plates[plate_text]
+            if current_time - last_sent_time < plate_cooldown:
+                logger.info(f"Biển số {plate_text} đã được gửi gần đây, bỏ qua")
+                return
+        
+        url = "http://localhost:5000/api/plates"
+        data = {
+            "track_id": track_id,
+            "plate_number": plate_data['plate'],
+            "confidence": plate_data['confidence'],
+            "bbox": plate_data['bbox'],
+            "timestamp": current_time,
+            "frame_path": frame_path
+        }
+        
+        response = requests.post(url, json=data, timeout=2)
+        if response.status_code == 200:
+            logger.info(f"Biển số {plate_data['plate']} đã gửi tới server thành công")
+            # Cập nhật thời gian gửi cuối cùng
+            sent_plates[plate_text] = current_time
+        else:
+            logger.error(f"Lỗi gửi biển số tới server: {response.status_code}")
+    except Exception as e:
+        logger.error(f"Lỗi khi gửi biển số tới server: {str(e)}")
 
 def levenshtein_distance(s1, s2):
     """Tính khoảng cách Levenshtein giữa hai chuỗi."""
@@ -295,10 +334,36 @@ def detect_and_ocr(frame):
     
     # Cleanup inactive tracks
     if curr_time - last_redis_update > 10.0:
+        tracks_to_remove = []
         for track_id in list(track_info.keys()):
             if curr_time - track_info[track_id]['last_seen'] > 10.0:
-                del track_info[track_id]
-                if track_id in plate_history:
-                    del plate_history[track_id]
+                
+                # Lấy thông tin biển số
+                plate_text = track_info[track_id]['plate']
+                
+                clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
+                
+                # Tạo tên file mới với định dạng: biển_số_xe_trackID_timestamp.jpg
+                frame_filename = f"{clean_plate_text}_{int(curr_time)}.jpg"
+                frame_path = f"/frame_crops/{frame_filename}"
+                
+                # Lưu frame gốc (không có vẽ bounding box hay chữ)
+                absolute_frame_path = os.path.join(FRAMES_FOLDER, frame_filename)
+                
+                # Sử dụng frame gốc thay vì frame_with_boxes
+                success = cv2.imwrite(absolute_frame_path, frame)  # Lưu frame gốc
+                if success:
+                    print(f"Original frame saved to {absolute_frame_path}")
+                else:
+                    print(f"Failed to save original frame to {absolute_frame_path}")
+                
+                # Gửi dữ liệu biển số tới server Node.js
+                send_plate_to_server(track_id, track_info[track_id], frame_path)
+                tracks_to_remove.append(track_id)
+        
+        for track_id in tracks_to_remove:
+            del track_info[track_id]
+            if track_id in plate_history:
+                del plate_history[track_id]
 
     return frame

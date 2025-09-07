@@ -7,6 +7,7 @@ const bodyParser = require("body-parser");
 const http = require("http");
 const WebSocket = require("ws");
 const db = require("./db");
+const fs = require('fs');
 const streamingService = require("./services/streamingService");
 const app = express();
 
@@ -90,7 +91,52 @@ app.use("/api/user", userRoute);
 app.use("/api/location", locationRoute);
 app.use("/api/whitelist", whiteList);
 app.use("/api/blacklist", blackList);
+// Route phục vụ ảnh cắt từ khung hình
+app.use("/frame_crops", express.static(path.join(__dirname, "../../public/frame_crops")));
 
+// Đảm bảo thư mục tồn tại
+const frameCropsDir = path.join(__dirname, "../../public/frame_crops");
+if (!fs.existsSync(frameCropsDir)) {
+  fs.mkdirSync(frameCropsDir, { recursive: true });
+}
+
+// Thêm endpoint mới để nhận dữ liệu biển số từ Python
+app.post("/api/plates", async (req, res) => {
+  const connection = await db.promise();
+  try {
+    const { track_id, plate_number, confidence, bbox, timestamp, frame_path } =
+      req.body;
+
+    // Kiểm tra dữ liệu đầu vào
+    if (!plate_number) {
+      return res.status(400).json({ error: "Thiếu số biển số" });
+    }
+
+    // Kiểm tra xem biển số đã tồn tại chưa (trong vòng 5 phút)
+    const [existingPlates] = await connection.execute(
+      "SELECT id FROM license_plates WHERE plate_number = ? AND detected_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE)",
+      [plate_number]
+    );
+
+    // Nếu biển số đã tồn tại trong 5 phút gần đây, không lưu lại
+    if (existingPlates.length > 0) {
+      return res
+        .status(200)
+        .json({ message: "Biển số đã tồn tại, không lưu trùng" });
+    }
+
+    // Thực thi query để lưu biển số và đường dẫn frame
+    await connection.execute(
+      "INSERT INTO license_plates (track_id, plate_number, confidence, bbox, detected_at, frame_path) VALUES (?, ?, ?, ?, FROM_UNIXTIME(?), ?)",
+      [track_id, plate_number, confidence, bbox, timestamp, frame_path || null]
+    );
+
+    res.status(200).json({ message: "Lưu biển số thành công" });
+  } catch (error) {
+    console.error("Lỗi khi lưu biển số:", error);
+    res.status(500).json({ error: "Lỗi server nội bộ" });
+  }
+});
 // Global error handler (luôn trả về JSON)
 app.use((err, req, res, next) => {
   console.error("Global error:", err);

@@ -193,8 +193,10 @@ class StreamingService {
           "ultrafast",
           "-tune",
           "zerolatency",
-          "-c:a",
-          "aac",
+          "-sc_threshold",
+          "0",
+          // "-c:a",
+          // "aac",
           "-f",
           "hls",
           "-hls_time",
@@ -202,7 +204,7 @@ class StreamingService {
           "-hls_list_size",
           "4",
           "-hls_flags",
-          "delete_segments+discont_start+split_by_time", // Bỏ split_segments
+          "delete_segments+discont_start+split_by_time",
           "-hls_segment_type",
           "mpegts",
           "-hls_allow_cache",
@@ -213,6 +215,11 @@ class StreamingService {
           `expr:gte(t,n_forced*${segmentTime})`,
           "-hls_segment_filename",
           path.join(outputDir, "segment_%03d.ts"),
+          "-muxdelay",
+          "0", // Giảm muxing delay
+          "-muxpreload",
+          "0", // Giảm muxing preload
+          "-an"
         ])
         .output(outputPath)
         .on("start", (cmdLine) => {
