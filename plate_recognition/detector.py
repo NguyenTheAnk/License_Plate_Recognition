@@ -4134,10 +4134,10 @@ def enhance_plate_for_ocr(plate_crop):
         if plate_crop is None or plate_crop.size == 0:
             return plate_crop
         
-        # Resize to optimal size for OCR
+        # Resize to optimal size for OCR (reduced for faster processing)
         height, width = plate_crop.shape[:2]
-        if width < 300 or height < 80:
-            scale_factor = max(300/width, 80/height)
+        if width < 200 or height < 60:
+            scale_factor = max(200/width, 60/height)
             new_width = int(width * scale_factor)
             new_height = int(height * scale_factor)
             plate_crop = cv2.resize(plate_crop, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
@@ -4313,8 +4313,8 @@ def detect_license_plate_in_vehicle_optimized(vehicle_crop):
             plate_candidates.sort(key=lambda x: x[5], reverse=True)
             x, y, w, h, _, score = plate_candidates[0]
             
-            # Only return if score is above threshold
-            if score > 0.3:
+            # Only return if score is above threshold (lowered for faster detection)
+            if score > 0.2:
                 # Add some padding to the detected region
                 padding = 5
                 x = max(0, x - padding)
@@ -4436,8 +4436,22 @@ def detect_and_ocr(frame, video_processing=True):
         try:
             roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
             cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
-            cv2.putText(display_frame, "PLATE DETECTION ZONE", (roi_xmin + 10, roi_ymin - 15), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            
+            # Draw text with background for better visibility
+            text = "PLATE DETECTION ZONE"
+            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+            text_x = roi_xmin + 10
+            text_y = roi_ymin - 15
+            
+            # Draw background rectangle for text
+            cv2.rectangle(display_frame, 
+                        (text_x - 5, text_y - text_size[1] - 5), 
+                        (text_x + text_size[0] + 5, text_y + 5), 
+                        (0, 0, 0), -1)  # Black background
+            
+            # Draw text in white
+            cv2.putText(display_frame, text, (text_x, text_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         except Exception as e:
             logger.error(f"ROI drawing failed: {e}")
             cv2.rectangle(display_frame, (50, 50), (original_width-50, original_height-50), (0, 255, 255), 3)
@@ -4451,8 +4465,8 @@ def detect_and_ocr(frame, video_processing=True):
         # Optimized plate detection - only license plates
         try:
             if yolo_model is not None:
-                # Run YOLO detection with optimized settings for license plates
-                results = yolo_model(frame, conf=0.25, verbose=False, classes=[2])  # Only detect cars/vehicles
+                # Run YOLO detection with optimized settings for faster detection
+                results = yolo_model(frame, conf=0.15, verbose=False, classes=[2])  # Lower confidence for faster detection
                 
                 for result in results:
                     if result.boxes is not None:
@@ -4552,10 +4566,25 @@ def detect_and_ocr(frame, video_processing=True):
                                                 
                                                 logger.info(f"✅ Valid plate detected: {plate_text} ({status}) - conf: {conf:.3f}, OCR: {ocr_conf:.3f}")
                                             else:
-                                                # Invalid format - draw in gray
-                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), (128, 128, 128), 2)
-                                                cv2.putText(display_frame, f"INVALID FORMAT", (frame_px1, max(10, frame_py1-8)),
-                                                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128, 128, 128), 1)
+                                                # Invalid format - draw with better visibility
+                                                invalid_color = (0, 0, 255)  # Red for invalid
+                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), invalid_color, 3)
+                                                
+                                                # Draw text with background for better visibility
+                                                text = "INVALID FORMAT"
+                                                text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                                                text_x = frame_px1
+                                                text_y = max(25, frame_py1 - 10)
+                                                
+                                                # Draw background rectangle for text
+                                                cv2.rectangle(display_frame, 
+                                                            (text_x - 5, text_y - text_size[1] - 5), 
+                                                            (text_x + text_size[0] + 5, text_y + 5), 
+                                                            invalid_color, -1)
+                                                
+                                                # Draw text in white
+                                                cv2.putText(display_frame, text, (text_x, text_y),
+                                                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                                                 
                                                 logger.debug(f"Invalid plate format: {plate_text}")
                                     else:
