@@ -7,14 +7,14 @@ import {
   Alert, 
   InputAdornment,
   IconButton,
-  Divider,
   LinearProgress,
-  Container,
   Card,
   CardContent,
   Avatar,
-  Chip,
-  Collapse
+  Link,
+  Collapse,
+  Fade,
+  Slide
 } from '@mui/material';
 import { 
   Visibility, 
@@ -23,8 +23,10 @@ import {
   Person,
   Lock,
   Email,
-  Error as ErrorIcon,
-  Phone
+  Phone,
+  Security,
+  Shield,
+  VpnKey
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { postData } from '../../utils/auth.js';
@@ -41,6 +43,7 @@ function Register() {
   const [passwordErrors, setPasswordErrors] = useState([]);
   const [showPassword, setShowPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
+  const [showWelcome] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -89,9 +92,9 @@ function Register() {
   };
 
   const getStrengthColor = (strength) => {
-    if (strength < 40) return '#f44336';
-    if (strength < 80) return '#ff9800';
-    return '#4caf50';
+    if (strength < 40) return '#ef4444';
+    if (strength < 80) return '#f59e0b';
+    return '#10b981';
   };
 
   const getStrengthText = (strength) => {
@@ -181,424 +184,602 @@ function Register() {
   };
 
   return (
-    <Box sx={{ 
+    <Box sx={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 50%, #45b7d1 100%)',
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      py: 3
+      flexDirection: 'row',
+      background: { xs: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', md: 'none' },
     }}>
-      <Container maxWidth="md">
-        <Card 
-          elevation={24}
-          sx={{ 
-            borderRadius: 4,
-            overflow: 'hidden',
-            background: 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255, 255, 255, 0.2)'
-          }}
-        >
-          {loading && (
-            <LinearProgress 
-              sx={{ 
-                height: 3,
-                backgroundColor: 'rgba(255, 107, 107, 0.1)',
-                '& .MuiLinearProgress-bar': {
-                  background: 'linear-gradient(90deg, #ff6b6b 0%, #4ecdc4 50%, #45b7d1 100%)'
-                }
-              }} 
-            />
-          )}
-          
-          <CardContent sx={{ p: 5 }}>
-            {/* Header */}
-            <Box sx={{ textAlign: 'center', mb: 4 }}>
+      {/* Left: Background + Welcome */}
+      <Box
+        sx={{
+          flex: { xs: 0, md: '0 0 70%' },
+          display: { xs: 'none', md: 'flex' },
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'url(/background.png)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          position: 'relative',
+          overflow: 'hidden',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            //background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.7) 0%, rgba(118, 75, 162, 0.7) 100%)',
+            zIndex: 0,
+          }
+        }}
+      >
+        <Box sx={{
+          position: 'relative',
+          zIndex: 1,
+          color: '#fff',
+          textAlign: 'center',
+          px: 6,
+          py: 8,
+          maxWidth: 700,
+        }}>
+          <Slide direction="right" in={true} timeout={800}>
+            <Box>
               <Avatar 
                 sx={{ 
-                  width: 80, 
-                  height: 80, 
+                  width: 120, 
+                  height: 120, 
                   mx: 'auto', 
-                  mb: 2,
-                  background: 'linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 50%, #45b7d1 100%)',
-                  fontSize: '2rem'
+                  mb: 4,
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  backdropFilter: 'blur(10px)',
+                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
                 }}
               >
-                <PersonAdd fontSize="large" />
+                <Shield sx={{ fontSize: '4rem', color: '#fff' }} />
               </Avatar>
-              
-              <Typography 
-                variant="h4" 
-                component="h1"
-                sx={{ 
-                  fontWeight: 700,
-                  background: 'linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 50%, #45b7d1 100%)',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  mb: 1
-                }}
-              >
-                Tạo tài khoản mới
-              </Typography>
-              
-              <Typography 
-                variant="body1" 
-                color="text.secondary"
-                sx={{ fontWeight: 400 }}
-              >
-                Điền thông tin để bắt đầu sử dụng hệ thống
+              <Typography variant="h2" component="h1" sx={{ 
+                fontWeight: 800, 
+                mb: 3, 
+                textShadow: '2px 2px 4px rgba(0,0,0,0.3)',
+                background: 'linear-gradient(45deg, #fff, #e3f2fd)',
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                fontSize: { xs: '2.5rem', md: '3.5rem' }
+              }}>
+                LPR SYSTEM
               </Typography>
             </Box>
+          </Slide>
+          <Fade in={true} timeout={1500}>
+            <Typography variant="h4" sx={{ 
+              mb: 4, 
+              textShadow: '1px 1px 3px rgba(0,0,0,0.2)',
+              fontWeight: 600,
+              color: 'rgba(255, 255, 255, 0.95)'
+            }}>
+              Hệ thống nhận diện biển số xe
+            </Typography>
+          </Fade>
+          <Fade in={true} timeout={2000}>
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'center', 
+              gap: 4, 
+              mb: 4,
+              flexWrap: 'wrap'
+            }}>
+              {[
+                { icon: <Security />, text: 'Bảo mật cao' },
+                { icon: <VpnKey />, text: 'Tin cậy' },
+                { icon: <Shield />, text: 'Hiệu quả' }
+              ].map((item, index) => (
+                <Box key={index} sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 1,
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  px: 3,
+                  py: 1.5,
+                  borderRadius: 3,
+                  border: '1px solid rgba(255, 255, 255, 0.2)'
+                }}>
+                  {item.icon}
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                    {item.text}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          </Fade>
+          <Fade in={true} timeout={2500}>
+            <Typography variant="body1" sx={{ 
+              opacity: 0.9, 
+              textShadow: '1px 1px 2px rgba(0,0,0,0.1)',
+              fontSize: '1.1rem',
+              lineHeight: 1.6,
+              maxWidth: 500,
+              mx: 'auto'
+            }}>
+              Giải pháp công nghệ tiên tiến cho việc quản lý và giám sát phương tiện giao thông
+            </Typography>
+          </Fade>
+        </Box>
+      </Box>
 
-            {/* Alerts */}
-            {error && (
-              <Alert 
-                severity="error" 
+      {/* Right: Register form */}
+      <Box
+        sx={{
+          flex: { xs: 1, md: '0 0 30%' },
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: { 
+            xs: 'rgba(255, 255, 255, 0.1)', 
+            md: 'linear-gradient(145deg, #f8fafc 0%, #e2e8f0 100%)' 
+          },
+          backdropFilter: { xs: 'blur(20px)', md: 'none' },
+          position: 'relative',
+          px: { xs: 3, md: 4 },
+        }}
+      >
+        <Slide direction="left" in={showWelcome} timeout={800}>
+          <Card 
+            elevation={24}
+            sx={{ 
+              borderRadius: 6,
+              overflow: 'hidden',
+              background: 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.1)',
+              transition: 'all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1)',
+              width: { xs: '100%', sm: '520px' },
+              maxWidth: '100%',
+              maxHeight: '95vh',
+              overflowY: 'auto',
+              '&:hover': {
+                transform: 'translateY(-8px)',
+                boxShadow: '0 32px 80px rgba(0, 0, 0, 0.15)'
+              }
+            }}
+          >
+            {loading && (
+              <LinearProgress 
                 sx={{ 
-                  mb: 3,
-                  borderRadius: 2,
-                  '& .MuiAlert-icon': { fontSize: '1.5rem' }
-                }}
-              >
-                {error}
-              </Alert>
+                  height: 4,
+                  background: 'linear-gradient(90deg, #667eea, #764ba2)',
+                  '& .MuiLinearProgress-bar': {
+                    background: 'linear-gradient(90deg, #667eea, #764ba2)',
+                  }
+                }} 
+              />
             )}
+            
+            <CardContent sx={{ p: 4 }}>
+              <Box sx={{ textAlign: 'center', mb: 3 }}>
+                <Fade in={true} timeout={1000}>
+                  <Avatar 
+                    sx={{ 
+                      width: 80, 
+                      height: 80, 
+                      mx: 'auto', 
+                      mb: 2,
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      fontSize: '2rem',
+                      boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
+                      transition: 'transform 0.3s ease',
+                      '&:hover': {
+                        transform: 'scale(1.05)'
+                      }
+                    }}
+                  >
+                    <PersonAdd fontSize="large" />
+                  </Avatar>
+                </Fade>
+                
+                <Typography 
+                  variant="h4" 
+                  component="h1"
+                  sx={{ 
+                    fontWeight: 700,
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    mb: 1
+                  }}
+                >
+                  Tạo tài khoản
+                </Typography>
+                <Typography 
+                  variant="body1" 
+                  color="text.secondary"
+                  sx={{ fontWeight: 400 }}
+                >
+                  Điền thông tin để bắt đầu sử dụng
+                </Typography>
+              </Box>
 
-            {success && (
-              <Alert 
-                severity="success" 
-                sx={{ 
-                  mb: 3,
-                  borderRadius: 2,
-                  '& .MuiAlert-icon': { fontSize: '1.5rem' }
-                }}
-              >
-                {success}
-              </Alert>
-            )}
-
-            {/* Form */}
-            <Box component="form" onSubmit={handleSubmit}>
-              {/* Name Field */}
-              <TextField
-                label="Họ và tên"
-                fullWidth
-                margin="normal"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                disabled={loading}
-                required
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Person color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 3,
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                    },
-                    '&.Mui-focused': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(255, 107, 107, 0.3)'
-                    }
-                  }
-                }}
-              />
-
-              {/* Username Field */}
-              <TextField
-                label="Tên đăng nhập"
-                fullWidth
-                margin="normal"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                disabled={loading}
-                required
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Person color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 3,
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                    },
-                    '&.Mui-focused': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(255, 107, 107, 0.3)'
-                    }
-                  }
-                }}
-              />
-
-              {/* Email Field */}
-              <TextField
-                label="Email"
-                type="email"
-                fullWidth
-                margin="normal"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                disabled={loading}
-                required
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Email color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 3,
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                    },
-                    '&.Mui-focused': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(78, 205, 196, 0.3)'
-                    }
-                  }
-                }}
-              />
-
-              {/* Phone Field */}
-              <TextField
-                label="Số điện thoại"
-                fullWidth
-                margin="normal"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                disabled={loading}
-                required
-                placeholder="0123456789"
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Phone color="action" />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 3,
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                    },
-                    '&.Mui-focused': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(69, 183, 209, 0.3)'
-                    }
-                  }
-                }}
-              />
-
-              {/* Password Field */}
-              <TextField
-                label="Mật khẩu"
-                type={showPassword ? 'text' : 'password'}
-                fullWidth
-                margin="normal"
-                value={password}
-                onChange={e => {
-                  setPassword(e.target.value);
-                  validatePassword(e.target.value);
-                }}
-                disabled={loading}
-                required
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Lock color="action" />
-                    </InputAdornment>
-                  ),
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        onClick={() => setShowPassword(!showPassword)}
-                        edge="end"
-                        disabled={loading}
-                      >
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{
-                  mb: 1,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 3,
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                    },
-                    '&.Mui-focused': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(69, 183, 209, 0.3)'
-                    }
-                  }
-                }}
-              />
-
-              {/* Password Strength Indicator */}
-              {password && (
-                <Box sx={{ mb: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                    <Typography variant="body2" sx={{ mr: 1 }}>
-                      Độ mạnh:
-                    </Typography>
-                    <Chip 
-                      label={getStrengthText(passwordStrength)}
-                      size="small"
-                      sx={{ 
-                        backgroundColor: getStrengthColor(passwordStrength),
-                        color: 'white',
-                        fontWeight: 600
-                      }}
-                    />
-                  </Box>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={passwordStrength} 
-                    sx={{
-                      height: 6,
+              {error && (
+                <Fade in={!!error}>
+                  <Alert 
+                    severity="error" 
+                    sx={{ 
+                      mb: 3,
                       borderRadius: 3,
-                      backgroundColor: 'rgba(0,0,0,0.1)',
-                      '& .MuiLinearProgress-bar': {
-                        backgroundColor: getStrengthColor(passwordStrength),
+                      border: '1px solid #ffcdd2',
+                      background: 'linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%)',
+                      animation: 'shake 0.5s ease-in-out',
+                      '@keyframes shake': {
+                        '0%': { transform: 'translateX(0)' },
+                        '25%': { transform: 'translateX(-5px)' },
+                        '50%': { transform: 'translateX(5px)' },
+                        '75%': { transform: 'translateX(-5px)' },
+                        '100%': { transform: 'translateX(0)' }
+                      }
+                    }}
+                  >
+                    {error}
+                  </Alert>
+                </Fade>
+              )}
+
+              {success && (
+                <Fade in={!!success}>
+                  <Alert 
+                    severity="success" 
+                    sx={{ 
+                      mb: 3,
+                      borderRadius: 3,
+                      border: '1px solid #c8e6c9',
+                      background: 'linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%)',
+                    }}
+                  >
+                    {success}
+                  </Alert>
+                </Fade>
+              )}
+
+              <Box component="form" onSubmit={handleSubmit}>
+                {/* Name and Username Fields */}
+                <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, mb: 2 }}>
+                  <TextField
+                    label="Họ và tên"
+                    fullWidth
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    disabled={loading}
+                    required
+                    placeholder="Nhập họ và tên"
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Person sx={{ color: '#667eea' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
                         borderRadius: 3,
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.15)'
+                        },
+                        '&.Mui-focused': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.25)'
+                        }
+                      }
+                    }}
+                  />
+
+                  <TextField
+                    label="Tên đăng nhập"
+                    fullWidth
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    disabled={loading}
+                    required
+                    placeholder="Tên đăng nhập"
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Person sx={{ color: '#667eea' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 3,
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.15)'
+                        },
+                        '&.Mui-focused': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.25)'
+                        }
                       }
                     }}
                   />
                 </Box>
-              )}
 
-              {/* Password Requirements */}
-              <Collapse in={passwordErrors.length > 0}>
-                <Alert 
-                  severity="warning" 
-                  sx={{ 
+                {/* Email and Phone Fields */}
+                <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, mb: 2 }}>
+                  <TextField
+                    label="Email"
+                    type="email"
+                    fullWidth
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    disabled={loading}
+                    required
+                    placeholder="Email của bạn"
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Email sx={{ color: '#667eea' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 3,
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.15)'
+                        },
+                        '&.Mui-focused': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.25)'
+                        }
+                      }
+                    }}
+                  />
+
+                  <TextField
+                    label="Số điện thoại"
+                    fullWidth
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    disabled={loading}
+                    required
+                    placeholder="0123456789"
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Phone sx={{ color: '#667eea' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 3,
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.15)'
+                        },
+                        '&.Mui-focused': {
+                          boxShadow: '0 4px 20px rgba(102, 126, 234, 0.25)'
+                        }
+                      }
+                    }}
+                  />
+                </Box>
+
+                {/* Password Field */}
+                <TextField
+                  label="Mật khẩu"
+                  type={showPassword ? 'text' : 'password'}
+                  fullWidth
+                  margin="normal"
+                  value={password}
+                  onChange={e => {
+                    setPassword(e.target.value);
+                    validatePassword(e.target.value);
+                  }}
+                  disabled={loading}
+                  required
+                  placeholder="Nhập mật khẩu"
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <Lock sx={{ color: '#667eea' }} />
+                      </InputAdornment>
+                    ),
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          onClick={() => setShowPassword(!showPassword)}
+                          edge="end"
+                          disabled={loading}
+                        >
+                          {showPassword ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={{
                     mb: 2,
-                    borderRadius: 2,
-                    '& .MuiAlert-message': { width: '100%' }
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 3,
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        boxShadow: '0 4px 20px rgba(102, 126, 234, 0.15)'
+                      },
+                      '&.Mui-focused': {
+                        boxShadow: '0 4px 20px rgba(102, 126, 234, 0.25)'
+                      }
+                    }
+                  }}
+                />
+
+                {/* Password Strength Indicator */}
+                {password && (
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2" sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
+                        Độ mạnh mật khẩu:
+                      </Typography>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          fontSize: '0.875rem',
+                          fontWeight: 600,
+                          color: getStrengthColor(passwordStrength),
+                          textTransform: 'uppercase'
+                        }}
+                      >
+                        {getStrengthText(passwordStrength)}
+                      </Typography>
+                    </Box>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={passwordStrength} 
+                      sx={{
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: '#e2e8f0',
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: getStrengthColor(passwordStrength),
+                          borderRadius: 4,
+                          transition: 'all 0.3s ease'
+                        }
+                      }}
+                    />
+                  </Box>
+                )}
+
+                {/* Password Requirements */}
+                <Collapse in={passwordErrors.length > 0}>
+                  <Box sx={{ 
+                    mb: 3, 
+                    p: 2.5, 
+                    borderRadius: 3, 
+                    background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+                    border: '1px solid #f59e0b'
+                  }}>
+                    <Typography variant="body2" fontWeight={600} sx={{ mb: 1.5, color: '#d97706', fontSize: '0.9rem' }}>
+                      ⚠️ Yêu cầu mật khẩu:
+                    </Typography>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1 }}>
+                      {passwordErrors.map((error, index) => (
+                        <Box
+                          key={index}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            fontSize: '0.8rem',
+                            color: '#b45309',
+                            fontWeight: 500,
+                            p: 0.5,
+                            borderRadius: 2,
+                            background: 'rgba(185, 83, 9, 0.1)',
+                            '&::before': {
+                              content: '"•"',
+                              marginRight: 0.5,
+                              color: '#f59e0b'
+                            }
+                          }}
+                        >
+                          {error}
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                </Collapse>
+
+                {/* Submit Button */}
+                <Button
+                  type="submit"
+                  fullWidth
+                  variant="contained"
+                  disabled={loading || passwordErrors.length > 0}
+                  sx={{
+                    py: 1.8,
+                    borderRadius: 3,
+                    fontSize: '1.1rem',
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
+                    mb: 3,
+                    '&:hover': {
+                      background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
+                      boxShadow: '0 12px 40px rgba(102, 126, 234, 0.5)',
+                      transform: 'translateY(-2px)'
+                    },
+                    '&:disabled': {
+                      background: '#e2e8f0',
+                      boxShadow: 'none',
+                      transform: 'none'
+                    }
                   }}
                 >
-                  <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>
-                    Yêu cầu mật khẩu:
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                    {passwordErrors.map((error, index) => (
-                      <Chip
-                        key={index}
-                        label={error}
-                        size="small"
-                        color="warning"
-                        icon={<ErrorIcon />}
-                      />
-                    ))}
-                  </Box>
-                </Alert>
-              </Collapse>
-
-              {/* Submit Button */}
-              <Button
-                type="submit"
-                fullWidth
-                variant="contained"
-                disabled={loading || passwordErrors.length > 0}
-                sx={{
-                  py: 1.5,
-                  mb: 2,
-                  borderRadius: 3,
-                  fontSize: '1.1rem',
-                  fontWeight: 600,
-                  textTransform: 'none',
-                  background: 'linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 50%, #45b7d1 100%)',
-                  boxShadow: '0 4px 15px rgba(255, 107, 107, 0.4)',
-                  transition: 'all 0.3s ease',
-                  '&:hover': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: '0 6px 20px rgba(255, 107, 107, 0.6)',
-                  },
-                  '&:disabled': {
-                    background: '#cccccc',
-                    transform: 'none',
-                    boxShadow: 'none'
-                  }
-                }}
-              >
-                {loading ? 'Đang tạo tài khoản...' : 'Tạo tài khoản'}
-              </Button>
-
-              {/* Divider */}
-              <Divider sx={{ my: 3 }}>
-                <Typography variant="body2" color="text.secondary">
-                  hoặc
+                  {loading ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <PersonAdd sx={{ mr: 1, animation: 'spin 1s linear infinite' }} />
+                      Đang tạo tài khoản...
+                    </Box>
+                  ) : (
+                    'Tạo tài khoản'
+                  )}
+                </Button>
+              </Box>
+              
+              <Box sx={{ textAlign: 'center', mb: 2 }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Đã có tài khoản? 
                 </Typography>
-              </Divider>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => navigate('/login')}
+                  startIcon={<Person />}
+                  sx={{
+                    py: 1.2,
+                    borderRadius: 3,
+                    fontSize: '1rem',
+                    fontWeight: 500,
+                    textTransform: 'none',
+                    borderColor: '#667eea',
+                    color: '#667eea',
+                    borderWidth: 2,
+                    '&:hover': {
+                      borderColor: '#5a6fd8',
+                      backgroundColor: 'rgba(102, 126, 234, 0.04)',
+                      borderWidth: 2,
+                      transform: 'translateY(-1px)'
+                    }
+                  }}
+                >
+                  Chuyển đến đăng nhập
+                </Button>
+              </Box>
+              
+              <Box sx={{ textAlign: 'center', pt: 2, borderTop: '1px solid #e2e8f0' }}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  © 2025 License Plate Recognition System
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Phiên bản 2.1.0 • Bảo mật & An toàn
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
+        </Slide>
+      </Box>
 
-              {/* Login Button */}
-              <Button
-                fullWidth
-                variant="outlined"
-                onClick={() => navigate('/login')}
-                disabled={loading}
-                sx={{
-                  py: 1.5,
-                  borderRadius: 3,
-                  fontSize: '1rem',
-                  fontWeight: 500,
-                  textTransform: 'none',
-                  borderColor: '#ff6b6b',
-                  color: '#ff6b6b',
-                  transition: 'all 0.3s ease',
-                  '&:hover': {
-                    borderColor: '#ff6b6b',
-                    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-                    transform: 'translateY(-2px)',
-                    boxShadow: '0 4px 12px rgba(255, 107, 107, 0.2)'
-                  }
-                }}
-              >
-                Đã có tài khoản? Đăng nhập
-              </Button>
-            </Box>
-
-            {/* Footer */}
-            <Box sx={{ textAlign: 'center', mt: 4 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                Bằng việc đăng ký, bạn đồng ý với điều khoản sử dụng
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                © 2025 License Plate Recognition System
-              </Typography>
-            </Box>
-          </CardContent>
-        </Card>
-      </Container>
+      {/* CSS for animations */}
+      <style jsx>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </Box>
   );
 }
