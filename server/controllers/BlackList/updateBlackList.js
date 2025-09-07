@@ -107,12 +107,6 @@ const updateBlacklist = async (req, res) => {
     try {
         const { id } = req.params;
         
-        // THÊM: Debug logging chi tiết hơn
-        console.log('=== UPDATE BLACKLIST DEBUG ===');
-        console.log('Request params:', req.params);
-        console.log('Request body raw:', req.body);
-        console.log('Request files:', req.files ? Object.keys(req.files) : 'No files');
-        console.log('Content-Type:', req.get('Content-Type'));
         
         // SỬA: Xử lý FormData duplicates và convert types
         const processFormData = (body) => {
@@ -136,7 +130,7 @@ const updateBlacklist = async (req, res) => {
                 }
                 
                 // Convert empty string to null for certain fields
-                if (processed[key] === '' && ['vehicle_id', 'owner_name', 'owner_phone', 'description', 'valid_from', 'valid_to'].includes(key)) {
+                if (processed[key] === '' && ['vehicle_id', 'description', 'valid_from', 'valid_to'].includes(key)) {
                     processed[key] = null;
                 }
             });
@@ -149,14 +143,11 @@ const updateBlacklist = async (req, res) => {
         console.log('Cleaned body:', cleanedBody);
         
         const {
-            location_id,
             plate_number,
             vehicle_id,
             violation_type,
             reason,
             severity,
-            owner_name,
-            owner_phone,
             valid_from,
             valid_to,
             description,
@@ -173,9 +164,8 @@ const updateBlacklist = async (req, res) => {
 
         // Check if blacklist entry exists
         const [existingEntry] = await connection.execute(
-            `SELECT b.*, l.name as location_name, v.plate_number as vehicle_plate
+            `SELECT b.*, v.plate_number as vehicle_plate
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              LEFT JOIN vehicles v ON b.vehicle_id = v.id
              WHERE b.id = ?`,
             [id]
@@ -215,12 +205,7 @@ const updateBlacklist = async (req, res) => {
         const updateFields = [];
         const updateValues = [];
         
-        // Location ID
-        if (location_id !== undefined && safeCompare(location_id, currentEntry.location_id)) {
-            updateFields.push('location_id = ?');
-            updateValues.push(location_id || null);
-            console.log('[UPDATE] location_id:', currentEntry.location_id, '->', location_id);
-        }
+       
 
         // Plate Number
         if (plate_number !== undefined && safeCompare(plate_number, currentEntry.plate_number)) {
@@ -258,29 +243,9 @@ const updateBlacklist = async (req, res) => {
             console.log('[UPDATE] severity:', currentEntry.severity, '->', severity);
         }
 
-        // Owner Name
-        if (owner_name !== undefined && safeCompare(owner_name, currentEntry.owner_name)) {
-            updateFields.push('owner_name = ?');
-            updateValues.push(owner_name || null);
-            console.log('[UPDATE] owner_name:', currentEntry.owner_name, '->', owner_name);
-        }
+       
 
-        // Owner Phone with safe validation
-        if (owner_phone !== undefined && safeCompare(owner_phone, currentEntry.owner_phone)) {
-            // SỬA: Validate phone với type checking an toàn
-            if (!validatePhone(owner_phone)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Định dạng số điện thoại không hợp lệ',
-                    errors: [`Số điện thoại "${owner_phone}" không đúng định dạng`]
-                });
-            }
-            
-            updateFields.push('owner_phone = ?');
-            updateValues.push(owner_phone || null);
-            console.log('[UPDATE] owner_phone:', currentEntry.owner_phone, '->', owner_phone);
-        }
-
+       
         // Valid From Date
         if (valid_from !== undefined) {
             const processedValidFrom = valid_from ? formatDateForMySQL(valid_from) : null;
@@ -496,7 +461,7 @@ const updateBlacklist = async (req, res) => {
 
             // Get updated entry
            const [updatedEntry] = await connection.execute(
-                `SELECT b.*, l.name as location_name, l.code as location_code, l.zone_type,
+                `SELECT b.*,
                         v.make, v.model, v.color, v.vehicle_type,
                         u.name as created_by_name,
                         CASE 
@@ -510,7 +475,6 @@ const updateBlacklist = async (req, res) => {
                             ELSE FALSE
                         END as has_images
                 FROM vehicle_blacklist b
-                LEFT JOIN locations l ON b.location_id = l.id
                 LEFT JOIN vehicles v ON b.vehicle_id = v.id
                 LEFT JOIN users u ON b.created_by = u.id
                 WHERE b.id = ?`,
@@ -605,7 +569,7 @@ const updateBlacklistStatus = async (req, res) => {
 
         // Check if blacklist entry exists
         const [existingEntry] = await connection.execute(
-            'SELECT id, plate_number, is_active, location_id FROM vehicle_blacklist WHERE id = ?',
+            'SELECT id, plate_number, is_active FROM vehicle_blacklist WHERE id = ?',
             [id]
         );
 
@@ -621,8 +585,8 @@ const updateBlacklistStatus = async (req, res) => {
         // If activating, check for duplicates
         if (is_active && !currentEntry.is_active) {
             const [duplicateEntry] = await connection.execute(
-                'SELECT id FROM vehicle_blacklist WHERE location_id = ? AND plate_number = ? AND id != ? AND is_active = 1',
-                [currentEntry.location_id, currentEntry.plate_number, id]
+                'SELECT id FROM vehicle_blacklist WHERE plate_number = ? AND id != ? AND is_active = 1',
+                [currentEntry.plate_number, id]
             );
 
             if (duplicateEntry.length > 0) {
@@ -701,7 +665,7 @@ const bulkUpdateBlacklist = async (req, res) => {
 
         const allowedFields = [
             'is_active', 'violation_type', 'severity', 'valid_from', 'valid_to', 
-            'description', 'owner_name', 'owner_phone', 'reason',
+            'description', 'reason',
             'verification_status', 'verified_plate_number'
         ];
 
@@ -763,7 +727,7 @@ const bulkUpdateBlacklist = async (req, res) => {
 
         // Get existing entries for logging
         const [existingEntries] = await connection.execute(
-            `SELECT id, plate_number, location_id, violation_type, severity, is_active
+            `SELECT id, plate_number, violation_type, severity, is_active
              FROM vehicle_blacklist WHERE id IN (${placeholders})`,
             ids
         );

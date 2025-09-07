@@ -78,7 +78,7 @@ const bulkDeleteBlacklist = async (req, res) => {
         // Get existing entries before deletion for logging
         const placeholders = ids.map(() => '?').join(',');
         const [existingEntries] = await connection.execute(
-            `SELECT id, plate_number, location_id FROM vehicle_blacklist WHERE id IN (${placeholders})`,
+            `SELECT id, plate_number FROM vehicle_blacklist WHERE id IN (${placeholders})`,
             ids
         );
 
@@ -147,7 +147,7 @@ const deleteExpiredBlacklist = async (req, res) => {
 
         // Get expired entries
         const [expiredEntries] = await connection.execute(
-            `SELECT id, plate_number, location_id, valid_to 
+            `SELECT id, plate_number, valid_to 
              FROM vehicle_blacklist 
              WHERE valid_to IS NOT NULL AND valid_to < ? AND is_active = 1`,
             [cutoffDateStr]

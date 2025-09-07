@@ -7,7 +7,6 @@ const getAllBlacklist = async (req, res) => {
         const {
             page = 1,
             limit = 50,
-            location_id,
             plate_number,
             violation_type,
             severity,
@@ -26,11 +25,7 @@ const getAllBlacklist = async (req, res) => {
         let whereConditions = [];
         let queryParams = [];
 
-        if (location_id) {
-            whereConditions.push('b.location_id = ?');
-            queryParams.push(location_id);
-        }
-
+       
         if (plate_number) {
             whereConditions.push('b.plate_number LIKE ?');
             queryParams.push(`%${plate_number}%`);
@@ -69,7 +64,7 @@ const getAllBlacklist = async (req, res) => {
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
         // Validate sort parameters
-        const allowedSortFields = ['created_at', 'plate_number', 'location_name', 'violation_type', 'severity', 'valid_from', 'valid_to'];
+        const allowedSortFields = ['created_at', 'plate_number', 'violation_type', 'severity', 'valid_from', 'valid_to'];
         const sortBy = allowedSortFields.includes(sort_by) ? sort_by : 'created_at';
         const sortOrder = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -77,7 +72,6 @@ const getAllBlacklist = async (req, res) => {
         const [countResult] = await connection.execute(
             `SELECT COUNT(*) as total 
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              ${whereClause}`,
             queryParams
         );
@@ -87,8 +81,6 @@ const getAllBlacklist = async (req, res) => {
         // Get blacklist entries with pagination
         const dataQuery = `
             SELECT b.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
                     v.make, v.model, v.color, v.vehicle_type,
                     u.name as created_by_name,
                     CASE 
@@ -98,14 +90,13 @@ const getAllBlacklist = async (req, res) => {
                         ELSE 'active'
                     END as current_status
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              LEFT JOIN vehicles v ON b.vehicle_id = v.id
              LEFT JOIN users u ON b.created_by = u.id
              ${whereClause}
-             ORDER BY ${sortBy === 'location_name' ? 'l.name' : `b.${sortBy}`} ${sortOrder}
+             ORDER BY b.${sortBy} ${sortOrder}
              LIMIT ${parsedLimit} OFFSET ${offset}`;
 
-        const [blacklistEntries] = await connection.execute(dataQuery, queryParams);
+        const [blacklistEntries] = await connection.query(dataQuery, queryParams);
 
         // Log access
         await connection.execute(
@@ -152,14 +143,7 @@ const getBlacklistById = async (req, res) => {
 
         const [blacklistEntry] = await connection.execute(
             `SELECT b.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
-                    l.address as location_address,
-                    l.zone_type,
                     v.make, v.model, v.color, v.vehicle_type, v.year_manufactured,
-                    v.owner_name as vehicle_owner_name,
-                    v.owner_phone as vehicle_owner_phone,
-                    v.owner_email as vehicle_owner_email,
                     u.name as created_by_name, 
                     u.email as created_by_email,
                     CASE 
@@ -170,7 +154,6 @@ const getBlacklistById = async (req, res) => {
                     END as current_status,
                     DATEDIFF(COALESCE(b.valid_to, '9999-12-31'), CURDATE()) as days_until_expiry
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              LEFT JOIN vehicles v ON b.vehicle_id = v.id
              LEFT JOIN users u ON b.created_by = u.id
              WHERE b.id = ?`,
@@ -190,10 +173,10 @@ const getBlacklistById = async (req, res) => {
                     CASE WHEN lpd.is_blacklist_match = 1 THEN 'Triggered' ELSE 'Normal' END as alert_status
              FROM license_plate_detections lpd
              LEFT JOIN cameras c ON lpd.camera_id = c.id
-             WHERE lpd.plate_number = ? AND lpd.location_id = ?
+             WHERE lpd.plate_number = ?
              ORDER BY lpd.detected_at DESC
              LIMIT 10`,
-            [blacklistEntry[0].plate_number, blacklistEntry[0].location_id]
+            [blacklistEntry[0].plate_number]
         );
 
         // Get detection statistics
@@ -205,18 +188,18 @@ const getBlacklistById = async (req, res) => {
                 MAX(lpd.detected_at) as last_detection,
                 COUNT(CASE WHEN lpd.detected_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as detections_last_30_days
              FROM license_plate_detections lpd
-             WHERE lpd.plate_number = ? AND lpd.location_id = ?`,
-            [blacklistEntry[0].plate_number, blacklistEntry[0].location_id]
+             WHERE lpd.plate_number = ?`,
+            [blacklistEntry[0].plate_number]
         );
 
         // Get related alerts
         const [relatedAlerts] = await connection.execute(
             `SELECT id, alert_type, severity, title, status, created_at
              FROM alerts 
-             WHERE plate_number = ? AND location_id = ?
+             WHERE plate_number = ?
              ORDER BY created_at DESC
              LIMIT 10`,
-            [blacklistEntry[0].plate_number, blacklistEntry[0].location_id]
+            [blacklistEntry[0].plate_number]
         );
 
         const result = {
@@ -261,15 +244,12 @@ const getBlacklistByPlateNumber = async (req, res) => {
     
     try {
         const { plate_number } = req.params;
-        const { location_id, include_inactive } = req.query;
+        const {include_inactive } = req.query;
 
         let whereConditions = ['b.plate_number = ?'];
         let queryParams = [plate_number];
 
-        if (location_id) {
-            whereConditions.push('b.location_id = ?');
-            queryParams.push(location_id);
-        }
+    
 
         if (include_inactive !== 'true') {
             whereConditions.push('b.is_active = 1');
@@ -279,8 +259,6 @@ const getBlacklistByPlateNumber = async (req, res) => {
 
         const [blacklistEntries] = await connection.execute(
             `SELECT b.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
                     v.make, v.model, v.color,
                     u.name as created_by_name,
                     CASE 
@@ -290,7 +268,6 @@ const getBlacklistByPlateNumber = async (req, res) => {
                         ELSE 'active'
                     END as current_status
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              LEFT JOIN vehicles v ON b.vehicle_id = v.id
              LEFT JOIN users u ON b.created_by = u.id
              ${whereClause}
@@ -319,16 +296,11 @@ const getBlacklistStatistics = async (req, res) => {
     const connection = await db.promise();
     
     try {
-        const { location_id, time_period = '30' } = req.query;
+        const {time_period = '30' } = req.query;
 
-        let locationFilter = '';
         let queryParams = [];
 
-        if (location_id) {
-            locationFilter = 'AND b.location_id = ?';
-            queryParams.push(location_id);
-        }
-
+    
         // Get general statistics
         const [generalStats] = await connection.execute(
             `SELECT 
@@ -342,7 +314,7 @@ const getBlacklistStatistics = async (req, res) => {
                 COUNT(CASE WHEN b.valid_from IS NOT NULL AND b.valid_from > CURDATE() THEN 1 END) as future_entries,
                 COUNT(CASE WHEN b.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) THEN 1 END) as recent_additions
              FROM vehicle_blacklist b
-             WHERE 1=1 ${locationFilter}`,
+             WHERE 1=1`,
             [time_period, ...queryParams]
         );
 
@@ -353,7 +325,6 @@ const getBlacklistStatistics = async (req, res) => {
                 COUNT(*) as count,
                 COUNT(CASE WHEN b.is_active = 1 THEN 1 END) as active_count
              FROM vehicle_blacklist b
-             WHERE 1=1 ${locationFilter}
              GROUP BY b.violation_type
              ORDER BY count DESC`,
             queryParams
@@ -366,37 +337,21 @@ const getBlacklistStatistics = async (req, res) => {
                 COUNT(*) as count,
                 COUNT(CASE WHEN b.is_active = 1 THEN 1 END) as active_count
              FROM vehicle_blacklist b
-             WHERE 1=1 ${locationFilter}
              GROUP BY b.severity
              ORDER BY FIELD(b.severity, 'critical', 'high', 'medium', 'low')`,
             queryParams
         );
 
-        // Get statistics by location
-        const [locationStats] = await connection.execute(
-            `SELECT 
-                l.id, l.name as location_name, l.code as location_code,
-                COUNT(b.id) as total_entries,
-                COUNT(CASE WHEN b.is_active = 1 THEN 1 END) as active_entries,
-                COUNT(CASE WHEN b.severity = 'critical' THEN 1 END) as critical_entries
-             FROM locations l
-             LEFT JOIN vehicle_blacklist b ON l.id = b.location_id ${location_id ? 'AND l.id = ?' : ''}
-             WHERE l.is_active = 1
-             GROUP BY l.id, l.name, l.code
-             ORDER BY total_entries DESC`,
-            location_id ? [location_id] : []
-        );
+       
 
         // Get recent activity
         const [recentActivity] = await connection.execute(
             `SELECT 
                 b.plate_number, b.violation_type, b.severity, b.created_at,
-                l.name as location_name,
                 u.name as created_by_name
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              LEFT JOIN users u ON b.created_by = u.id
-             WHERE b.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) ${locationFilter}
+             WHERE b.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
              ORDER BY b.created_at DESC
              LIMIT 20`,
             [time_period, ...queryParams]
@@ -406,19 +361,15 @@ const getBlacklistStatistics = async (req, res) => {
         const [topDetected] = await connection.execute(
             `SELECT 
                 b.plate_number, 
-                l.name as location_name,
                 b.violation_type,
                 b.severity,
                 COUNT(lpd.id) as detection_count,
                 COUNT(CASE WHEN lpd.is_blacklist_match = 1 THEN 1 END) as alert_count,
                 MAX(lpd.detected_at) as last_detection
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              LEFT JOIN license_plate_detections lpd ON b.plate_number = lpd.plate_number 
-                                                      AND b.location_id = lpd.location_id
                                                       AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-             WHERE b.is_active = 1 ${locationFilter}
-             GROUP BY b.plate_number, l.name, b.violation_type, b.severity
+             GROUP BY b.plate_number, b.violation_type, b.severity
              HAVING detection_count > 0
              ORDER BY detection_count DESC
              LIMIT 10`,
@@ -432,7 +383,6 @@ const getBlacklistStatistics = async (req, res) => {
                 general_statistics: generalStats[0],
                 by_violation_type: violationStats,
                 by_severity: severityStats,
-                by_location: locationStats,
                 recent_activity: recentActivity,
                 most_detected_plates: topDetected,
                 time_period: `${time_period} days`
@@ -458,7 +408,6 @@ const searchBlacklist = async (req, res) => {
             plate_number,
             owner_name,
             reason,
-            location_id,
             violation_type,
             severity,
             valid_status,
@@ -477,7 +426,6 @@ const searchBlacklist = async (req, res) => {
                 b.owner_name LIKE ? OR 
                 b.reason LIKE ? OR
                 b.description LIKE ? OR
-                l.name LIKE ?
             )`);
             const searchTerm = `%${q}%`;
             queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
@@ -499,10 +447,7 @@ const searchBlacklist = async (req, res) => {
             queryParams.push(`%${reason}%`);
         }
 
-        if (location_id) {
-            whereConditions.push('b.location_id = ?');
-            queryParams.push(location_id);
-        }
+       
 
         if (violation_type) {
             whereConditions.push('b.violation_type = ?');
@@ -532,7 +477,6 @@ const searchBlacklist = async (req, res) => {
         const [countResult] = await connection.execute(
             `SELECT COUNT(*) as total 
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              ${whereClause}`,
             queryParams
         );
@@ -540,8 +484,6 @@ const searchBlacklist = async (req, res) => {
         // Get search results
         const [results] = await connection.execute(
             `SELECT b.*, 
-                    l.name as location_name, 
-                    l.code as location_code,
                     v.make, v.model, v.color,
                     u.name as created_by_name,
                     CASE 
@@ -551,7 +493,6 @@ const searchBlacklist = async (req, res) => {
                         ELSE 'active'
                     END as current_status
              FROM vehicle_blacklist b
-             LEFT JOIN locations l ON b.location_id = l.id
              LEFT JOIN vehicles v ON b.vehicle_id = v.id
              LEFT JOIN users u ON b.created_by = u.id
              ${whereClause}
