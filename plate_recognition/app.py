@@ -26,18 +26,18 @@ sys.path.insert(0, current_dir)
 # validate_vietnamese_plate_format moved to detector.py to avoid duplication
 # calculate_roi_coordinates moved to detector.py to avoid duplication
 
-# Import detector (simple)
+# Import detector (simple) - optimized for license plate detection
 try:
-    from detector import detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate
-    print("Simple Detector imported successfully")
+    from detector_simple import detect_and_ocr_simple as detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate
+    print("✅ Simplified License Plate Detector imported successfully")
 except ImportError as e:
-    print(f"Error importing simple detector: {e}")
-    # Fallback to fixed detector
+    print(f"Error importing simplified detector: {e}")
+    # Fallback to original detector
     try:
         from detector import detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate
-        print("Fallback to Fixed Detector")
+        print("⚠️ Fallback to Original Detector")
     except ImportError as e2:
-        print(f"Error importing fallback detector: {e2}")
+        print(f"❌ Error importing fallback detector: {e2}")
         sys.exit(1)
 
 # Cáº¥u hÃ¬nh logging
@@ -99,9 +99,15 @@ def server_status():
     try:
         # Check if models are available
         try:
-            from detector import yolo_model, plate_model, ocr_reader
+            from detector_simple import yolo_model, ocr_reader
+            plate_model = None  # Not used in simple detector
         except ImportError:
-            from detector import yolo_model, plate_model, ocr_reader
+            try:
+                from detector import yolo_model, plate_model, ocr_reader
+            except ImportError:
+                yolo_model = None
+                plate_model = None
+                ocr_reader = None
         
         status = {
             'success': True,
@@ -129,37 +135,39 @@ def initialize_models_safely():
     try:
         logger.info("🔄 Initializing models safely...")
         
-        # Import detector functions
+        # Import detector functions - prioritize simple detector for license plate detection
         try:
-            from detector import check_pytorch_compatibility, check_model_availability, initialize_ocr
-            logger.info("✅ Using fixed detector initialization")
-            check_pytorch_compatibility()
-            check_model_availability()
-            initialize_ocr()
+            from detector_simple import initialize_models as init_models
+            logger.info("✅ Using simple license plate detector initialization")
+            init_models()
         except ImportError as e:
-            logger.warning(f"⚠️ Fixed detector failed: {e}, falling back to simple detector")
+            logger.warning(f"⚠️ Simple detector failed: {e}, falling back to full detector")
             try:
-                from detector_simple import initialize_models as init_models
-                logger.info("✅ Using simple detector initialization")
-                init_models()
+                from detector import check_pytorch_compatibility, check_model_availability, initialize_ocr
+                logger.info("✅ Using full detector initialization")
+                check_pytorch_compatibility()
+                check_model_availability()
+                initialize_ocr()
             except ImportError as e2:
-                logger.warning(f"⚠️ Simple detector also failed: {e2}, trying full detector")
+                logger.warning(f"⚠️ Full detector also failed: {e2}, trying load_models")
                 try:
                     from detector import load_models
-                    logger.info("✅ Using full detector initialization")
+                    logger.info("✅ Using load_models initialization")
                     load_models()
                 except ImportError as e3:
                     logger.error(f"❌ All detectors failed: {e3}")
                     return False
         
-        # Check PyTorch compatibility
-        check_pytorch_compatibility()
-        
-        # Check model availability
-        check_model_availability()
-        
-        # Initialize OCR
-        initialize_ocr()
+        # Check PyTorch compatibility and model availability (if available)
+        try:
+            check_pytorch_compatibility()
+            check_model_availability()
+            initialize_ocr()
+        except NameError:
+            # These functions might not exist in detector_simple
+            logger.info("⚠️ Compatibility checks not available in simple detector")
+        except Exception as e:
+            logger.warning(f"⚠️ Compatibility check failed: {e}")
         
         logger.info("✅ Models initialization completed successfully")
         return True
@@ -474,7 +482,7 @@ def recognize_ws(ws):
                             processing_start = time.time()
                             FRAME_TIMEOUT = 3.0  # 3 second timeout per frame
                             
-                            result = detect_and_ocr(frame, video_processing=True)
+                            result = detect_and_ocr(frame)
                             processing_time = time.time() - processing_start
                             
                             if processing_time > FRAME_TIMEOUT:
@@ -1019,11 +1027,14 @@ def get_detected_plates():
         limit = min(100, max(1, limit))  # Giá»›i háº¡n tá»‘i Ä‘a 100 items per page
         offset = (page - 1) * limit
         
-        # Get list from tracked_objects
+        # Get list from tracked_objects (if available)
         try:
             from detector import tracked_objects
         except ImportError:
-            from detector import tracked_objects
+            try:
+                from detector_simple import tracked_objects
+            except ImportError:
+                tracked_objects = {}
         plates_list = []
         for obj_id, obj in tracked_objects.items():
             if 'plate_number' in obj and obj['plate_number'] != 'Äang nháº­n diá»‡n...':
@@ -1196,7 +1207,13 @@ def search_detected_plates():
                 'message': 'Tham sá»‘ tÃ¬m kiáº¿m khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng'
             }), 400
         
-        from detector import tracked_objects
+        try:
+            from detector import tracked_objects
+        except ImportError:
+            try:
+                from detector_simple import tracked_objects
+            except ImportError:
+                tracked_objects = {}
         plates_list = []
         for obj_id, obj in tracked_objects.items():
             if 'plate_number' in obj and obj['plate_number'] != 'Äang nháº­n diá»‡n...':
@@ -1260,15 +1277,13 @@ def search_detected_plates():
 @app.route('/api/detected-plates/delete/<plate_id>', methods=['DELETE'])
 def delete_detected_plate(plate_id):
     try:
-        from detector import tracked_objects
         try:
-            plates_list = list(tracked_objects.keys())
-        except:
+            from detector import tracked_objects
+        except ImportError:
             try:
-                from detector import tracked_objects
-                plates_list = list(tracked_objects.keys())
-            except:
-                plates_list = []
+                from detector_simple import tracked_objects
+            except ImportError:
+                tracked_objects = {}
         
         if plate_id in tracked_objects:
             # XÃ³a biá»ƒn sá»‘ khá»i tracked_objects
@@ -1307,7 +1322,13 @@ def delete_detected_plate(plate_id):
 @app.route('/clear-detected-plates', methods=['POST'])
 def clear_detected_plates():
     try:
-        from detector_enhanced import tracked_objects
+        try:
+            from detector import tracked_objects
+        except ImportError:
+            try:
+                from detector_simple import tracked_objects
+            except ImportError:
+                tracked_objects = {}
         tracked_objects.clear()
         return jsonify({"status": "cleared"})
     except Exception as e:
@@ -1539,7 +1560,6 @@ def video_feed():
         if video_processing:
             logger.info(f"Processing detection for frame {current_frame}")
             try:
-                from detector import detect_and_ocr
                 result = detect_and_ocr(frame)
                 if result and result.get('frame'):
                     logger.info(f"Detection successful for frame {current_frame}")
@@ -1707,9 +1727,8 @@ def video_stream():
             detection_result = None
             if video_processing:
                 try:
-                    from detector import detect_and_ocr
-                    # Pass video_processing flag to detector
-                    detection_result = detect_and_ocr(frame, video_processing=True)
+                    # Use simplified detector
+                    detection_result = detect_and_ocr(frame)
                     if detection_result:
                         logger.info(f"Detection successful for frame {frame_count}")
                         
