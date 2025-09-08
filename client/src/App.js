@@ -19,6 +19,7 @@ import WhiteList from './components/WhiteList';
 import BlackList from './components/BlackList';
 import SamplePage from './pages/ViewCamera/SamplePage';
 import CameraConfigurationPage from './pages/ViewCamera/CameraConfigurationPage';
+import RouteMonitoring from './pages/Journey/RouteMonitoring';
 
 export const MyContext = React.createContext();
 
@@ -77,7 +78,7 @@ function MyContextProvider({ children }) {
 }
 
 function AppContent() {
-  const { user, setUser, token, setToken, loading } = useContext(MyContext);
+  const { user, setUser, setToken, loading } = useContext(MyContext);
   const navigate = useNavigate();
 
   const handleLogin = (userData, userToken) => {
@@ -180,7 +181,8 @@ function AppContent() {
                   <Route path="/blacklist" element={<BlackList />} />
                   <Route path="/roles" element={<Roles />} />
                   <Route path="/search" element={<Search />} />
-                  <Route path="/route-monitoring" element={<SamplePage />} />
+                  <Route path="/detect-license-plate" element={<SamplePage />} />
+                  <Route path="/route-monitoring" element={<RouteMonitoring />} />
                   <Route path="/camera-config/:id" element={<CameraConfigurationPage />} />
                   <Route path="/permissions" element={<Permissions />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

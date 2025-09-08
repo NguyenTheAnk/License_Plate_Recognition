@@ -3,7 +3,6 @@ import {
   Box,
   Avatar,
   Typography,
-  Divider,
   List,
   ListItem,
   ListItemIcon,
@@ -44,8 +43,8 @@ const menuGroups = [
     label: '',
     items: [
       { text: 'Trang chủ', icon: <HomeIcon />, path: '/' },
-      { text: 'Nhận diện biển số xe', icon: <LicensePlateIcon />, path: '/route-monitoring' },
-      { text: 'Giám sát theo lộ trình', icon: <RouteIcon />, path: '/license-plate' },
+      { text: 'Nhận diện biển số xe', icon: <LicensePlateIcon />, path: '/detect-license-plate' },
+      { text: 'Giám sát theo lộ trình', icon: <RouteIcon />, path: '/route-monitoring' },
       { text: 'Tra cứu', icon: <SearchIcon />, path: '/search' },
       { text: 'WhiteList', icon: <WhiteListIcon />, path: '/whitelist' },
       { text: 'BlackList', icon: <BlackListIcon />, path: '/blacklist' },
@@ -146,8 +145,8 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
     if (window.startCameraStream) {
       window.startCameraStream(cameraId);
     }
-    if (currentPath !== "/route-monitoring") {
-      navigate("/route-monitoring");
+    if (currentPath !== "/detect-license-plate") {
+      navigate("/detect-license-plate");
     }
   };
 
@@ -156,8 +155,8 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
     if (window.startVideoStream) {
       window.startVideoStream(videoId); // Cần định nghĩa startVideoStream trong SamplePage.js
     }
-    if (currentPath !== "/route-monitoring") {
-      navigate("/route-monitoring");
+    if (currentPath !== "/detect-license-plate") {
+      navigate("/detect-license-plate");
     }
   };
 

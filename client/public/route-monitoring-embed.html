@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bản đồ 3D - Tìm đường đi giữa các thành phố</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #1a2a6c, #2c3e50);
+            color: #fff;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+        }
+        
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        .info-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 15px;
+            width: 320px;
+            z-index: 100;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .info-panel h2 {
+            color: #4CAF50;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #4CAF50;
+            font-size: 1.5rem;
+        }
+        
+        .input-group {
+            margin-bottom: 15px;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .input-group select {
+            width: 100%;
+            padding: 8px;
+            border-radius: 5px;
+            border: none;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+        
+        .find-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            width: 100%;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
+            margin-bottom: 15px;
+        }
+        
+        .find-button:hover {
+            background: #45a049;
+        }
+        
+        .legend {
+            display: grid;
+            grid-template-columns: 20px auto;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 10px;
+            border-radius: 2px;
+        }
+        
+        .path-info {
+            margin: 15px 0;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
+        }
+        
+        .paths-panel {
+            width: 350px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            overflow-y: auto;
+            z-index: 100;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: -5px 0 15px rgba(0, 0, 0, 0.5);
+        }
+        
+        .paths-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #4CAF50;
+        }
+        
+        .paths-header h3 {
+            color: #4CAF50;
+            font-size: 1.3rem;
+        }
+        
+        .path-count {
+            background: #4CAF50;
+            color: white;
+            border-radius: 20px;
+            padding: 3px 10px;
+            font-weight: bold;
+        }
+        
+        .path-list {
+            max-height: calc(100vh - 150px);
+            overflow-y: auto;
+        }
+        
+        .path-item {
+            background: rgba(50, 50, 50, 0.5);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+            border-left: 4px solid #333;
+            cursor: pointer;
+        }
+        
+        .path-item:hover {
+            background: rgba(70, 70, 70, 0.7);
+            transform: translateY(-2px);
+        }
+        
+        .path-item.selected {
+            background: rgba(76, 175, 80, 0.3);
+            border-left: 4px solid #4CAF50;
+            box-shadow: 0 0 15px rgba(76, 175, 80, 0.5);
+        }
+        
+        .path-item.shortest {
+            border-left: 4px solid #ff0000;
+            background: rgba(100, 20, 20, 0.4);
+        }
+        
+        .path-item .title {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .path-item .title .index {
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .path-item.shortest .title .index {
+            color: #ff5555;
+        }
+        
+        .path-item .title .length {
+            font-weight: bold;
+        }
+        
+        .path-item .cities {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        
+        .path-item .city {
+            background: rgba(76, 175, 80, 0.2);
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            background: rgba(50, 50, 50, 0.5);
+            border-radius: 8px;
+            padding: 10px;
+            margin: 15px 0;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .stat-label {
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+        
+        .reset-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 8px 15px;
+            margin-top: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
+            width: 100%;
+        }
+        
+        .reset-button:hover {
+            background: #45a049;
+        }
+        
+        @media (max-width: 1200px) {
+            body {
+                flex-direction: column;
+            }
+            .paths-panel {
+                width: 100%;
+                height: 40vh;
+                border-left: none;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <div class="info-panel">
+            <h2>Tìm đường đi giữa các thành phố</h2>
+            
+            <div class="input-group">
+                <label for="start-city">Điểm bắt đầu:</label>
+                <select id="start-city">
+                    <option value="Arad">Arad</option>
+                    <option value="Bucharest">Bucharest</option>
+                    <option value="Craiova">Craiova</option>
+                    <option value="Dobreta">Dobreta</option>
+                    <option value="Eforie">Eforie</option>
+                    <option value="Fagaras">Fagaras</option>
+                    <option value="Giurgiu">Giurgiu</option>
+                    <option value="Hirsova">Hirsova</option>
+                    <option value="Iasi">Iasi</option>
+                    <option value="Kyoto">Kyoto</option>
+                    <option value="Lugoj">Lugoj</option>
+                    <option value="Mehadia">Mehadia</option>
+                    <option value="Neamt">Neamt</option>
+                    <option value="Oradea">Oradea</option>
+                    <option value="Pitesti">Pitesti</option>
+                    <option value="Rimnicu_Vilcea">Rimnicu Vilcea</option>
+                    <option value="Sibiu" selected>Sibiu</option>
+                    <option value="Timisoara">Timisoara</option>
+                    <option value="Urziceni">Urziceni</option>
+                    <option value="Vaslui">Vaslui</option>
+                    <option value="Zerind">Zerind</option>
+                </select>
+            </div>
+            
+            <div class="input-group">
+                <label for="end-city">Điểm kết thúc:</label>
+                <select id="end-city">
+                    <option value="Arad">Arad</option>
+                    <option value="Bucharest">Bucharest</option>
+                    <option value="Craiova">Craiova</option>
+                    <option value="Dobreta">Dobreta</option>
+                    <option value="Eforie">Eforie</option>
+                    <option value="Fagaras">Fagaras</option>
+                    <option value="Giurgiu">Giurgiu</option>
+                    <option value="Hirsova">Hirsova</option>
+                    <option value="Iasi">Iasi</option>
+                    <option value="Kyoto">Kyoto</option>
+                    <option value="Lugoj">Lugoj</option>
+                    <option value="Mehadia">Mehadia</option>
+                    <option value="Neamt">Neamt</option>
+                    <option value="Oradea">Oradea</option>
+                    <option value="Pitesti">Pitesti</option>
+                    <option value="Rimnicu_Vilcea">Rimnicu Vilcea</option>
+                    <option value="Sibiu">Sibiu</option>
+                    <option value="Timisoara">Timisoara</option>
+                    <option value="Urziceni">Urziceni</option>
+                    <option value="Vaslui">Vaslui</option>
+                    <option value="Zerind" selected>Zerind</option>
+                </select>
+            </div>
+            
+            <button class="find-button" id="find-button">Tìm đường đi</button>
+            
+            <div class="path-info">
+                <p><strong>Thuật toán:</strong> Tìm kiếm theo chiều sâu (DFS) để tìm tất cả đường đi</p>
+                <p><strong>Đường ngắn nhất:</strong> Luôn hiển thị bằng màu đỏ</p>
+                <p><strong>Tính năng:</strong> Click vào đường đi để chỉ hiển thị đường đó</p>
+            </div>
+            
+            <div class="legend">
+                <div class="legend-color" style="background-color: #ff0000;"></div>
+                <span>Đường ngắn nhất</span>
+                <div class="legend-color" style="background-color: #4CAF50;"></div>
+                <span>Đường được chọn</span>
+                <div class="legend-color" style="background-color: #333333;"></div>
+                <span>Đường chính</span>
+                <div class="legend-color" style="background-color: #A9A9A9;"></div>
+                <span>Tòa nhà</span>
+                <div class="legend-color" style="background-color: #228B22;"></div>
+                <span>Mặt đất</span>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="path-count">0</div>
+                    <div class="stat-label">Tổng đường đi</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="shortest-length">0</div>
+                    <div class="stat-label">Độ dài ngắn nhất</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="longest-length">0</div>
+                    <div class="stat-label">Độ dài dài nhất</div>
+                </div>
+            </div>
+            
+            <button class="reset-button" id="reset-button">Hiển thị tất cả đường</button>
+        </div>
+        
+        <div class="controls">
+            <p>↔ Di chuyển camera: Kéo chuột</p>
+            <p>↻ Xoay camera: Giữ chuột phải + kéo</p>
+            <p>Zoom: Cuộn chuột</p>
+        </div>
+    </div>
+    
+    <div class="paths-panel">
+        <div class="paths-header">
+            <h3>Danh sách các đường đi</h3>
+            <div class="path-count">Tổng: <span id="total-paths">0</span></div>
+        </div>
+        
+        <div class="path-list" id="path-list">
+            <!-- Danh sách đường đi sẽ được thêm ở đây -->
+        </div>
+    </div>
+
+    <script>
+        // Scene, Camera, Renderer
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+        const camera = new THREE.PerspectiveCamera(75, document.getElementById('canvas-container').offsetWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(document.getElementById('canvas-container').offsetWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Ground plane
+        const planeGeometry = new THREE.PlaneGeometry(120, 100, 50, 50);
+        const planeMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x228B22, 
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // Create grass effect
+        const grassGeometry = new THREE.PlaneGeometry(120, 100, 50, 50);
+        const grassMaterial = new THREE.MeshStandardMaterial({
+            color: 0x32CD32,
+            roughness: 0.9,
+            transparent: true,
+            opacity: 0.3
+        });
+        const grass = new THREE.Mesh(grassGeometry, grassMaterial);
+        grass.rotation.x = -Math.PI / 2;
+        grass.position.y = 0.02;
+        scene.add(grass);
+
+        // City locations
+        const cities = {
+            Arad: [-30, -10],
+            Bucharest: [30, 0],
+            Craiova: [0, -40],
+            Dobreta: [-10, -40],
+            Eforie: [50, -20],
+            Fagaras: [20, 20],
+            Giurgiu: [30, -30],
+            Hirsova: [50, 0],
+            Kyoto: [0, -10],
+            Iasi: [40, 30],
+            Lugoj: [-20, -20],
+            Mehadia: [-10, -20],
+            Neamt: [30, 30],
+            Oradea: [-30, 20],
+            Pitesti: [20, 0],
+            Rimnicu_Vilcea: [0, 10],
+            Sibiu: [0, 20],
+            Timisoara: [-30, -40],
+            Urziceni: [40, 0],
+            Vaslui: [40, 20],
+            Zerind: [-30, 10]
+        };
+
+        // Road connections
+        const connections = [
+            ['Arad', 'Timisoara'], ['Arad', 'Zerind'],
+            ['Bucharest', 'Fagaras'], ['Bucharest', 'Giurgiu'], ['Bucharest', 'Pitesti'],
+            ['Bucharest', 'Urziceni'], ['Craiova', 'Dobreta'], ['Craiova', 'Pitesti'],
+            ['Craiova', 'Rimnicu_Vilcea'], ['Dobreta', 'Mehadia'], ['Eforie', 'Hirsova'],
+            ['Fagaras', 'Sibiu'], ['Hirsova', 'Urziceni'], ['Iasi', 'Neamt'],
+            ['Iasi', 'Vaslui'], ['Lugoj', 'Mehadia'], ['Lugoj', 'Timisoara'],
+            ['Oradea', 'Zerind'], ['Oradea', 'Sibiu'], ['Pitesti', 'Rimnicu_Vilcea'],
+            ['Rimnicu_Vilcea', 'Sibiu'], ['Urziceni', 'Vaslui'], 
+            ['Kyoto', 'Arad'], ['Kyoto', 'Sibiu']
+        ];
+
+        // Add intersection nodes and labels
+        const intersectionMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x333333, 
+            roughness: 0.9, 
+            metalness: 0.1 
+        });
+        
+        // Create label materials
+        const labelMaterials = {};
+        
+        Object.keys(cities).forEach(city => {
+            // Create canvas for label
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 128;
+            const context = canvas.getContext('2d');
+            
+            // Draw transparent background
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw label background
+            context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            context.beginPath();
+            context.roundRect(20, 20, canvas.width - 40, canvas.height - 40, 20);
+            context.fill();
+            
+            // Draw text
+            context.fillStyle = '#4CAF50';
+            context.font = 'bold 40px Arial';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(city, canvas.width / 2, canvas.height / 2);
+            
+            // Create texture and material
+            const texture = new THREE.CanvasTexture(canvas);
+            labelMaterials[city] = new THREE.SpriteMaterial({ 
+                map: texture,
+                transparent: true
+            });
+            
+            // Create sprite
+            const sprite = new THREE.Sprite(labelMaterials[city]);
+            sprite.position.set(cities[city][0], 4.5, cities[city][1]);
+            sprite.scale.set(12, 6, 1);
+            sprite.center.set(0.5, 0);
+            scene.add(sprite);
+        });
+
+        // Add original roads
+        const roadMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x333333, 
+            roughness: 0.9, 
+            metalness: 0.1 
+        });
+        
+        const houseMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xA9A9A9, 
+            roughness: 0.7, 
+            metalness: 0.2 
+        });
+        
+        connections.forEach(([start, end]) => {
+            if (cities[start] && cities[end]) {
+                const startPos = new THREE.Vector3(cities[start][0], 0.05, cities[start][1]);
+                const endPos = new THREE.Vector3(cities[end][0], 0.05, cities[end][1]);
+
+                // Create wide road using BoxGeometry
+                const distance = startPos.distanceTo(endPos);
+                const roadGeometry = new THREE.BoxGeometry(0.8, 0.1, distance);
+                const road = new THREE.Mesh(roadGeometry, roadMaterial);
+                road.castShadow = true;
+                road.receiveShadow = true;
+
+                const midpoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
+                road.position.copy(midpoint);
+
+                // Align road with direction
+                const roadDirection = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+                const angle = Math.atan2(roadDirection.x, roadDirection.z);
+                road.rotation.y = angle;
+
+                scene.add(road);
+
+                // Add house polygons along the road
+                const perpendicular = new THREE.Vector3(-roadDirection.z, 0, roadDirection.x);
+                const houseCount = Math.floor(distance / 8);
+                
+                for (let i = 0; i < houseCount; i++) {
+                    const t = (i + 0.5 + Math.random() * 0.3) / houseCount;
+                    const basePos = startPos.clone().lerp(endPos, t);
+
+                    // Left side
+                    const leftPos = basePos.clone().add(perpendicular.clone().multiplyScalar(1.5 + Math.random() * 0.5));
+                    const leftHouseHeight = 1.5 + Math.random() * 1.5;
+                    const leftHouseGeometry = new THREE.BoxGeometry(1.2, leftHouseHeight, 1.2);
+                    const leftHouse = new THREE.Mesh(leftHouseGeometry, houseMaterial);
+                    leftHouse.castShadow = true;
+                    leftHouse.receiveShadow = true;
+                    leftHouse.position.set(leftPos.x, leftHouseHeight/2, leftPos.z);
+                    leftHouse.rotation.y = Math.random() * Math.PI;
+                    scene.add(leftHouse);
+
+                    // Right side
+                    const rightPos = basePos.clone().add(perpendicular.clone().multiplyScalar(-1.5 - Math.random() * 0.5));
+                    const rightHouseHeight = 1.5 + Math.random() * 1.5;
+                    const rightHouseGeometry = new THREE.BoxGeometry(1.2, rightHouseHeight, 1.2);
+                    const rightHouse = new THREE.Mesh(rightHouseGeometry, houseMaterial);
+                    rightHouse.castShadow = true;
+                    rightHouse.receiveShadow = true;
+                    rightHouse.position.set(rightPos.x, rightHouseHeight/2, rightPos.z);
+                    rightHouse.rotation.y = Math.random() * Math.PI;
+                    scene.add(rightHouse);
+                }
+            } else {
+                console.warn(`Connection between ${start} and ${end} skipped due to missing city.`);
+            }
+        });
+
+        // Build adjacency list for pathfinding
+        const graph = {};
+        Object.keys(cities).forEach(city => {
+            graph[city] = [];
+        });
+        connections.forEach(([start, end]) => {
+            graph[start].push(end);
+            graph[end].push(start);
+        });
+
+        // DFS algorithm to find all paths
+        function findAllPaths(start, end, visited = new Set(), path = [start], allPaths = []) {
+            if (start === end) {
+                allPaths.push([...path]);
+                return allPaths;
+            }
+            visited.add(start);
+            for (const neighbor of graph[start]) {
+                if (!visited.has(neighbor)) {
+                    path.push(neighbor);
+                    findAllPaths(neighbor, end, visited, path, allPaths);
+                    path.pop();
+                }
+            }
+            visited.delete(start);
+            return allPaths;
+        }
+
+        // Calculate Euclidean distance between cities
+        function calculateDistance(city1, city2) {
+            const [x1, z1] = cities[city1];
+            const [x2, z2] = cities[city2];
+            return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
+        }
+
+        // Calculate path length
+        function calculatePathLength(path) {
+            let length = 0;
+            for (let i = 0; i < path.length - 1; i++) {
+                length += calculateDistance(path[i], path[i+1]);
+            }
+            return length;
+        }
+
+        // Store all path meshes for visibility control
+        let pathMeshes = [];
+        let selectedPathIndex = -1;
+        let allPaths = [];
+        let pathLengths = [];
+        
+        // Colors for paths
+        const pathColors = [
+            0x0000ff, // Blue
+            0x800080, // Purple
+            0xffa500, // Orange
+            0x00ffff, // Cyan
+            0xff00ff, // Magenta
+            0x008000, // Green
+            0xffc0cb  // Pink
+        ];
+        
+        // Function to visualize paths in 3D
+        function visualizePaths(paths) {
+            // Remove existing path meshes
+            pathMeshes.forEach(segments => {
+                segments.forEach(segment => {
+                    scene.remove(segment);
+                });
+            });
+            pathMeshes = [];
+            
+            if (paths.length === 0) return;
+            
+            // Calculate path lengths and find shortest path
+            pathLengths = paths.map(path => calculatePathLength(path));
+            const minLength = Math.min(...pathLengths);
+            const maxLength = Math.max(...pathLengths);
+            const shortestPathIndex = pathLengths.indexOf(minLength);
+            
+            // Update statistics
+            document.getElementById('path-count').textContent = paths.length;
+            document.getElementById('total-paths').textContent = paths.length;
+            document.getElementById('shortest-length').textContent = minLength.toFixed(2);
+            document.getElementById('longest-length').textContent = maxLength.toFixed(2);
+            
+            // Visualize paths in 3D
+            let colorIndex = 0;
+            
+            paths.forEach((path, index) => {
+                const length = pathLengths[index];
+                const color = (index === shortestPathIndex) ? 0xff0000 : pathColors[colorIndex++ % pathColors.length];
+                const yOffset = 0.15 + index * 0.1;
+                
+                const pathSegments = [];
+                
+                for (let i = 0; i < path.length - 1; i++) {
+                    const start = path[i];
+                    const end = path[i + 1];
+                    
+                    if (cities[start] && cities[end]) {
+                        const startPos = new THREE.Vector3(cities[start][0], yOffset, cities[start][1]);
+                        const endPos = new THREE.Vector3(cities[end][0], yOffset, cities[end][1]);
+
+                        const distance = startPos.distanceTo(endPos);
+                        const pathGeometry = new THREE.BoxGeometry(0.4, 0.1, distance);
+                        const pathMaterial = new THREE.MeshStandardMaterial({ 
+                            color, 
+                            roughness: 0.9, 
+                            metalness: 0.1,
+                            emissive: (index === shortestPathIndex) ? 0x440000 : 0x000000
+                        });
+                        
+                        const pathRoad = new THREE.Mesh(pathGeometry, pathMaterial);
+                        pathRoad.castShadow = true;
+                        pathRoad.receiveShadow = true;
+                        pathRoad.visible = true; // Initially visible
+
+                        const midpoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
+                        pathRoad.position.copy(midpoint);
+
+                        const pathDirection = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+                        const angle = Math.atan2(pathDirection.x, pathDirection.z);
+                        pathRoad.rotation.y = angle;
+
+                        scene.add(pathRoad);
+                        pathSegments.push(pathRoad);
+                    }
+                }
+                
+                pathMeshes.push(pathSegments);
+            });
+
+            // Render paths list
+            const pathList = document.getElementById('path-list');
+            pathList.innerHTML = '';
+            
+            paths.forEach((path, index) => {
+                const length = pathLengths[index];
+                const isShortest = (index === shortestPathIndex);
+                
+                const pathItem = document.createElement('div');
+                pathItem.className = `path-item ${isShortest ? 'shortest' : ''}`;
+                pathItem.dataset.index = index;
+                
+                pathItem.innerHTML = `
+                    <div class="title">
+                        <div class="index">Đường ${index+1} ${isShortest ? '<span style="color:#ff5555">(Ngắn nhất)</span>' : ''}</div>
+                        <div class="length">${length.toFixed(2)}</div>
+                    </div>
+                    <div class="cities">
+                        ${path.map(city => `<div class="city">${city}</div>`).join('')}
+                    </div>
+                `;
+                
+                // Add click event to select path
+                pathItem.addEventListener('click', () => {
+                    // Remove selection from all paths
+                    document.querySelectorAll('.path-item').forEach(item => {
+                        item.classList.remove('selected');
+                    });
+                    
+                    // Add selection to clicked path
+                    pathItem.classList.add('selected');
+                    
+                    // Hide all other paths and show only the selected one
+                    selectPath(index);
+                    
+                    // Fly camera to path
+                    flyCameraToPath(path);
+                });
+                
+                pathList.appendChild(pathItem);
+            });
+        }
+        
+        // Function to select a path and hide others
+        function selectPath(index) {
+            selectedPathIndex = index;
+            
+            // Hide all paths
+            pathMeshes.forEach((segments, i) => {
+                segments.forEach(segment => {
+                    segment.visible = (i === index);
+                });
+            });
+        }
+        
+        // Function to reset and show all paths
+        function resetPaths() {
+            selectedPathIndex = -1;
+            
+            // Show all paths
+            pathMeshes.forEach(segments => {
+                segments.forEach(segment => {
+                    segment.visible = true;
+                });
+            });
+            
+            // Remove selection from all paths
+            document.querySelectorAll('.path-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+        }
+        
+        // Function to fly camera to a path
+        function flyCameraToPath(path) {
+            // Calculate center of the path
+            let minX = Infinity, maxX = -Infinity;
+            let minZ = Infinity, maxZ = -Infinity;
+            
+            path.forEach(city => {
+                const [x, z] = cities[city];
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (z < minZ) minZ = z;
+                if (z > maxZ) maxZ = z;
+            });
+            
+            const centerX = (minX + maxX) / 2;
+            const centerZ = (minZ + maxZ) / 2;
+            
+            // Calculate distance to cover the path
+            const width = maxX - minX;
+            const height = maxZ - minZ;
+            const size = Math.max(width, height) * 1.5;
+            
+            // Set new camera position
+            const newPosition = new THREE.Vector3(
+                centerX, 
+                Math.max(30, size), 
+                centerZ + size / 2
+            );
+            
+            // Smooth transition to new position
+            animateCamera(newPosition, new THREE.Vector3(centerX, 0, centerZ));
+        }
+        
+        // Function to animate camera movement
+        function animateCamera(targetPosition, targetLookAt) {
+            const startPosition = camera.position.clone();
+            const startLookAt = controls.target.clone();
+            
+            const duration = 1000; // ms
+            const startTime = Date.now();
+            
+            function updateCamera() {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                // Ease in-out function
+                const ease = progress < 0.5 
+                    ? 4 * progress * progress * progress 
+                    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+                
+                // Interpolate position
+                camera.position.lerpVectors(startPosition, targetPosition, ease);
+                
+                // Interpolate look-at target
+                const currentLookAt = new THREE.Vector3();
+                currentLookAt.lerpVectors(startLookAt, targetLookAt, ease);
+                controls.target.copy(currentLookAt);
+                controls.update();
+                
+                if (progress < 1) {
+                    requestAnimationFrame(updateCamera);
+                }
+            }
+            
+            updateCamera();
+        }
+
+        // Find paths when button is clicked
+        document.getElementById('find-button').addEventListener('click', () => {
+            const startCity = document.getElementById('start-city').value;
+            const endCity = document.getElementById('end-city').value;
+            
+            if (startCity === endCity) {
+                alert('Điểm bắt đầu và điểm kết thúc không thể giống nhau!');
+                return;
+            }
+            
+            // Find all paths between selected cities
+            allPaths = findAllPaths(startCity, endCity);
+            
+            if (allPaths.length === 0) {
+                alert(`Không tìm thấy đường đi nào từ ${startCity} đến ${endCity}!`);
+                return;
+            }
+            
+            // Update title
+            document.querySelector('.info-panel h2').textContent = `Đường đi từ ${startCity} đến ${endCity}`;
+            
+            // Visualize the paths
+            visualizePaths(allPaths);
+        });
+
+        // Add reset button functionality
+        document.getElementById('reset-button').addEventListener('click', resetPaths);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        directionalLight.position.set(20, 40, 20);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+        
+        const pointLight = new THREE.PointLight(0xffaa00, 0.5, 100);
+        pointLight.position.set(0, 20, 0);
+        scene.add(pointLight);
+
+        // Camera position
+        camera.position.set(50, 50, 50);
+        camera.lookAt(0, 0, 0);
+
+        // Orbit controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = false;
+        controls.minDistance = 30;
+        controls.maxDistance = 150;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1;
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = document.getElementById('canvas-container').offsetWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(document.getElementById('canvas-container').offsetWidth, window.innerHeight);
+        });
+
+        // Initialize with default paths (Arad to Sibiu)
+        document.addEventListener('DOMContentLoaded', () => {
+            const startCity = document.getElementById('start-city').value;
+            const endCity = document.getElementById('end-city').value;
+            allPaths = findAllPaths(startCity, endCity);
+            visualizePaths(allPaths);
+        });
+    </script>
+</body>
+</html>
