@@ -653,9 +653,24 @@ def save_detection_safely(obj, track_id):
         plate_number = obj.get('plate_number', '')
         confidence = obj.get('confidence', 0.0)
         bbox = obj.get('bbox', [0, 0, 0, 0])
+        crop_filename = obj.get('crop_filename', '')
+        vehicle_type = obj.get('vehicle_type', 'unknown')
+        is_valid = obj.get('is_valid', False)
+        validation_confidence = obj.get('validation_confidence', 0.0)
+        
+        # Only save to database if plate is valid Vietnamese format
+        if not is_valid or validation_confidence < 0.5:
+            logger.debug(f"Skipping invalid plate for track {track_id}: '{plate_number}' (valid: {is_valid}, conf: {validation_confidence:.3f})")
+            return False
         
         if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
             bbox = [0, 0, 0, 0]
+        
+        # Check whitelist/blacklist
+        whitelist_blacklist_result = check_whitelist_blacklist(plate_number)
+        
+        # Get OCR confidence separately
+        ocr_confidence = obj.get('ocr_confidence', confidence)
         
         db_detection = {
             'plate_number': str(plate_number)[:50],
@@ -664,27 +679,35 @@ def save_detection_safely(obj, track_id):
             'location_id': 1,
             'detected_at': float(time.time()),
             'direction': 'unknown',
-            'confidence_score': max(0.0, min(1.0, float(confidence))),
-            'ocr_confidence': max(0.0, min(1.0, float(confidence))),
-            'detection_confidence': max(0.0, min(1.0, float(confidence))),
-            'cropped_plate_image_path': '',
-            'detected_vehicle_type': obj.get('vehicle_type', 'unknown'),
+            'confidence_score': max(0.0, min(1.0, float(confidence))),  # YOLO confidence
+            'ocr_confidence': max(0.0, min(1.0, float(ocr_confidence))),  # OCR confidence
+            'detection_confidence': max(0.0, min(1.0, float(confidence))),  # YOLO confidence
+            'cropped_plate_image_path': str(crop_filename)[:255],
+            'detected_vehicle_type': str(vehicle_type)[:50],
             'bbox_x1': int(bbox[0]),
             'bbox_y1': int(bbox[1]),
             'bbox_x2': int(bbox[2]),
             'bbox_y2': int(bbox[3]),
             'processing_time_ms': 0,
-            'ai_model_version': 'yolov8n-deepsort-v1.0',
-            'raw_detection_data': '{}',
+            'ai_model_version': 'yolov9s-vietnamese-v1.0',
+            'raw_detection_data': json.dumps({
+                'track_id': track_id,
+                'vehicle_type': vehicle_type,
+                'validation_confidence': validation_confidence,
+                'yolo_confidence': confidence,
+                'ocr_confidence': ocr_confidence,
+                'first_seen': obj.get('first_seen', time.time()),
+                'last_seen': obj.get('last_seen', time.time())
+            })[:1000],
             'is_verified': False,
-            'is_whitelist_match': False,
-            'is_blacklist_match': False,
-            'alert_triggered': False
+            'is_whitelist_match': whitelist_blacklist_result.get('is_whitelist', False),
+            'is_blacklist_match': whitelist_blacklist_result.get('is_blacklist', False),
+            'alert_triggered': whitelist_blacklist_result.get('is_blacklist', False)
         }
         
         result_id = save_detection_to_db(db_detection)
         if result_id:
-            logger.debug(f"Saved detection for track {track_id}: '{plate_number}' (DB ID: {result_id})")
+            logger.info(f"✅ Saved valid Vietnamese plate to database: '{plate_number}' (DB ID: {result_id}, type: {vehicle_type})")
             return True
         return False
         
