@@ -61,7 +61,7 @@ def get_db_connection():
         return None
 
 def save_detection_to_db(detection_data):
-    """Simplified database save function"""
+    """Enhanced database save function with crop image support"""
     try:
         connection = get_db_connection()
         if not connection:
@@ -73,18 +73,23 @@ def save_detection_to_db(detection_data):
         INSERT INTO license_plate_detections (
             detection_uuid, plate_number, raw_plate_text, camera_id, location_id,
             detected_at, confidence_score, ocr_confidence, detected_vehicle_type,
-            bbox_x1, bbox_y1, bbox_x2, bbox_y2, ai_model_version,
+            bbox_x1, bbox_y1, bbox_x2, bbox_y2, cropped_plate_image_path, ai_model_version,
             is_verified, is_whitelist_match, is_blacklist_match, alert_triggered
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         """
         
-        # Simplified data validation
+        # Enhanced data validation
         detection_uuid = str(uuid.uuid4())
         plate_number = str(detection_data.get('plate_number', ''))[:50]
         confidence = max(0.0, min(1.0, float(detection_data.get('confidence', 0.0))))
+        ocr_confidence = max(0.0, min(1.0, float(detection_data.get('ocr_confidence', confidence))))
         bbox = detection_data.get('bbox', [0, 0, 0, 0])
+        crop_filename = detection_data.get('crop_filename', '')
+        
+        # Create full path for crop image
+        crop_image_path = f"/static/crops/{crop_filename}" if crop_filename else None
         
         values = (
             detection_uuid,
@@ -94,13 +99,14 @@ def save_detection_to_db(detection_data):
             1,  # location_id
             datetime.now(),
             confidence,
-            confidence,  # ocr_confidence same as confidence
-            'other',  # detected_vehicle_type
+            ocr_confidence,  # Use actual OCR confidence
+            'car',  # detected_vehicle_type
             int(bbox[0]) if len(bbox) > 0 else 0,
             int(bbox[1]) if len(bbox) > 1 else 0,
             int(bbox[2]) if len(bbox) > 2 else 0,
             int(bbox[3]) if len(bbox) > 3 else 0,
-            'yolov9s-optimized-v1.0',
+            crop_image_path,  # cropped_plate_image_path
+            'yolov9s-optimized-v2.0',
             False,  # is_verified
             False,  # is_whitelist_match
             False,  # is_blacklist_match
@@ -114,7 +120,7 @@ def save_detection_to_db(detection_data):
         cursor.close()
         connection.close()
         
-        logger.info(f"Saved detection to database: {plate_number} (ID: {detection_id})")
+        logger.info(f"Saved detection to database: {plate_number} (ID: {detection_id}, Crop: {crop_filename})")
         return detection_id
         
     except Exception as e:
@@ -189,9 +195,10 @@ def recognize_ws(ws):
                     for track_id, obj in tracked_objects.items():
                         plate_number = obj.get('plate_number', '')
                         confidence = obj.get('confidence', 0.0)
+                        crop_filename = obj.get('crop_filename', '')
                         
-                        # Only save high confidence valid plates
-                        if plate_number and confidence > 0.7 and len(plate_number) >= 4:
+                        # Only save high confidence valid plates with crop images
+                        if plate_number and confidence > 0.6 and len(plate_number) >= 4 and crop_filename:
                             save_detection_to_db(obj)
                             last_save_time = current_time
                             break  # Save only one per interval
@@ -237,6 +244,16 @@ def home():
         "status": "running"
     })
 
+# Serve static crop images
+@app.route('/static/crops/<filename>')
+def serve_crop_image(filename):
+    """Serve cropped license plate images"""
+    try:
+        return send_from_directory('static/crops', filename)
+    except Exception as e:
+        logger.error(f"Error serving crop image {filename}: {e}")
+        return "Image not found", 404
+
 @app.route('/api/detected-plates', methods=['GET'])
 def get_detected_plates():
     """Get detected plates from database"""
@@ -247,10 +264,10 @@ def get_detected_plates():
         
         cursor = connection.cursor(dictionary=True)
         
-        # Get recent detections
+        # Get recent detections with crop image paths
         query = """
-        SELECT id, plate_number, confidence_score, detected_at, 
-               bbox_x1, bbox_y1, bbox_x2, bbox_y2
+        SELECT id, plate_number, confidence_score, ocr_confidence, detected_at, 
+               bbox_x1, bbox_y1, bbox_x2, bbox_y2, cropped_plate_image_path
         FROM license_plate_detections 
         ORDER BY detected_at DESC 
         LIMIT 50
@@ -277,76 +294,7 @@ def get_detected_plates():
         logger.error(f"Error getting detected plates: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
-# Statistics endpoint
-@app.route('/api/detection-stats', methods=['GET'])
-def get_detection_stats():
-    """Get detection statistics with Vietnamese plate validation info"""
-    try:
-        connection = get_db_connection()
-        if not connection:
-            return jsonify({'success': False, 'message': 'Database connection failed'}), 500
-        
-        cursor = connection.cursor(dictionary=True)
-        
-        # Get statistics
-        stats_query = """
-        SELECT 
-            COUNT(*) as total_detections,
-            COUNT(CASE WHEN cropped_plate_image_path != '' THEN 1 END) as with_crop_images,
-            AVG(confidence_score) as avg_confidence,
-            COUNT(CASE WHEN detected_at >= CURDATE() THEN 1 END) as today_count,
-            COUNT(CASE WHEN detected_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN 1 END) as week_count,
-            MIN(detected_at) as first_detection,
-            MAX(detected_at) as last_detection
-        FROM license_plate_detections
-        """
-        
-        cursor.execute(stats_query)
-        stats = cursor.fetchone()
-        
-        # Convert datetime to string
-        if stats['first_detection']:
-            stats['first_detection'] = stats['first_detection'].isoformat()
-        if stats['last_detection']:
-            stats['last_detection'] = stats['last_detection'].isoformat()
-        
-        cursor.close()
-        connection.close()
-        
-        return jsonify({
-            'success': True,
-            'data': stats,
-            'message': 'Detection statistics retrieved successfully'
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting detection stats: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-# Test Vietnamese plate validation endpoint
-@app.route('/api/validate-plate', methods=['POST'])
-def validate_plate_endpoint():
-    """Test endpoint for Vietnamese plate validation"""
-    try:
-        data = request.get_json()
-        plate_text = data.get('plate_text', '')
-        
-        if not plate_text:
-            return jsonify({'success': False, 'message': 'No plate text provided'}), 400
-        
-        is_valid, confidence = validate_vietnamese_plate(plate_text)
-        
-        return jsonify({
-            'success': True,
-            'plate_text': plate_text,
-            'is_valid': is_valid,
-            'validation_confidence': confidence,
-            'message': f"Vietnamese plate validation: {'VALID' if is_valid else 'INVALID'}"
-        })
-        
-    except Exception as e:
-        logger.error(f"Error validating plate: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+@app.route('/clear-detected-plates', methods=['POST'])
 def clear_detected_plates():
     """Clear detected plates from memory"""
     try:

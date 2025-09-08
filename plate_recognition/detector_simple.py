@@ -62,7 +62,7 @@ def is_bbox_in_roi(bbox, width, height):
     return (x1 < roi_xmax and x2 > roi_xmin and y1 < roi_ymax and y2 > roi_ymin)
 
 def simple_ocr(plate_crop):
-    """Simplified OCR with minimal preprocessing"""
+    """Enhanced OCR with better preprocessing for Vietnamese license plates"""
     try:
         if ocr_reader is None or plate_crop is None:
             return None, 0.0
@@ -71,56 +71,122 @@ def simple_ocr(plate_crop):
         if width < 20 or height < 8:
             return None, 0.0
         
-        # Single enhancement method only
+        # Convert to grayscale
         if len(plate_crop.shape) == 3:
             gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
         else:
             gray = plate_crop.copy()
         
-        # Simple resize if too small
-        if width < 100:
-            scale = 100 / width
+        # Enhanced preprocessing for better OCR
+        # Resize if too small
+        if width < 150:
+            scale = 150 / width
             new_width = int(width * scale)
             new_height = int(height * scale)
-            gray = cv2.resize(gray, (new_width, new_height))
+            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
         
-        # Single OCR attempt with timeout
-        result = ocr_reader.ocr(gray, det=True, rec=True, cls=False)
+        # Apply multiple enhancement techniques
+        enhanced_images = []
         
-        if result and result[0]:
-            best_text = ""
-            best_conf = 0.0
-            
-            for line in result[0]:
-                if len(line) >= 2:
-                    text = line[1][0].strip()
-                    conf = line[1][1]
-                    
-                    # Basic cleaning
-                    cleaned = re.sub(r'[^\w\-.]', '', text.upper())
-                    
-                    if len(cleaned) >= 3 and conf > best_conf:
-                        best_text = cleaned
-                        best_conf = conf
-            
-            return best_text, best_conf
+        # 1. Original
+        enhanced_images.append(gray)
         
-        return None, 0.0
+        # 2. Contrast enhancement
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
+        enhanced_images.append(enhanced)
+        
+        # 3. Gaussian blur + sharpening
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        sharpened = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
+        enhanced_images.append(sharpened)
+        
+        # 4. Morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        morph = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+        enhanced_images.append(morph)
+        
+        best_text = ""
+        best_conf = 0.0
+        
+        # Try OCR on all enhanced versions
+        for enhanced_img in enhanced_images:
+            try:
+                result = ocr_reader.ocr(enhanced_img, det=True, rec=True, cls=False)
+                
+                if result and result[0]:
+                    for line in result[0]:
+                        if len(line) >= 2:
+                            text = line[1][0].strip()
+                            conf = line[1][1]
+                            
+                            # Enhanced cleaning for Vietnamese plates
+                            cleaned = re.sub(r'[^\w\-.]', '', text.upper())
+                            
+                            # Better validation for Vietnamese license plates
+                            if (len(cleaned) >= 4 and conf > best_conf and 
+                                (cleaned.count('-') <= 2 and cleaned.count('.') <= 2)):
+                                best_text = cleaned
+                                best_conf = conf
+            except:
+                continue
+        
+        return best_text if best_text else None, best_conf
         
     except Exception as e:
         logger.debug(f"OCR failed: {e}")
         return None, 0.0
 
 def is_valid_license_plate(text):
-    """Simplified validation"""
+    """Enhanced validation for Vietnamese license plates"""
     if not text or len(text) < 4:
         return False, 0.0
     
-    # Basic validation - at least 4 characters
+    # Enhanced validation for Vietnamese license plates
+    # Common patterns: 30A-12345, 29A-123.45, 43A123456, etc.
     if len(text) >= 4:
-        return True, 0.7
+        # Check for reasonable character distribution
+        alpha_count = sum(1 for c in text if c.isalpha())
+        digit_count = sum(1 for c in text if c.isdigit())
+        
+        # Should have at least some letters and numbers
+        if alpha_count >= 1 and digit_count >= 2:
+            return True, 0.8
     
     return False, 0.0
+
+def save_plate_crop(plate_crop, plate_text, frame_count):
+    """Save plate crop image to static/crops directory"""
+    try:
+        if plate_crop is None or plate_crop.size == 0:
+            return ""
+        
+        # Create crops directory if it doesn't exist
+        crops_dir = "static/crops"
+        os.makedirs(crops_dir, exist_ok=True)
+        
+        # Generate filename with timestamp and plate number
+        timestamp = int(time.time() * 1000)
+        clean_plate = re.sub(r'[^\w\-.]', '', plate_text.upper()) if plate_text else "unknown"
+        if not clean_plate:
+            clean_plate = "unknown"
+        
+        # Create unique filename
+        filename = f"plate_{timestamp}_{clean_plate}_{frame_count}.jpg"
+        filepath = os.path.join(crops_dir, filename)
+        
+        # Save the image with high quality
+        success = cv2.imwrite(filepath, plate_crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if success:
+            logger.info(f"✅ Saved plate crop: {filename}")
+            return filename
+        else:
+            logger.error(f"Failed to save plate crop: {filename}")
+            return ""
+            
+    except Exception as e:
+        logger.error(f"Error saving plate crop: {e}")
+        return ""
 
 def detect_and_ocr_simple(frame):
     """Optimized detection function with better performance"""
@@ -235,15 +301,18 @@ def detect_and_ocr_simple(frame):
                                     labels.append(plate_text)
                                     ocr_results.append([plate_text, float(ocr_conf)])
                                     
-                                    # Only save high confidence detections
-                                    if is_valid and conf > 0.7:
+                                    # Save high confidence detections with crop images
+                                    if is_valid and conf > 0.6:  # Lowered threshold for better detection
+                                        # Save the crop image
+                                        crop_filename = save_plate_crop(plate_crop, plate_text, frame_count)
+                                        
                                         track_id = f"plate_{frame_count}_{plate_count}"
                                         tracked_objects[track_id] = {
                                             'plate_number': plate_text,
                                             'confidence': float(conf),
                                             'ocr_confidence': float(ocr_conf),
                                             'bbox': [x1, y1, x2, y2],
-                                            'crop_filename': '',  # Don't save crops for performance
+                                            'crop_filename': crop_filename,
                                             'first_seen': current_time,
                                             'last_seen': current_time,
                                             'is_valid': True,
