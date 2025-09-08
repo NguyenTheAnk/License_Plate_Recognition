@@ -41,10 +41,6 @@ except ImportError as e:
             raise ImportError("PaddleOCR not available")
         def ocr(self, *args, **kwargs):
             return None
-        
-EASYOCR_AVAILABLE = False
-_easyocr = None
-easyocr_reader = None
 # Fix PyTorch version compatibility for weights_only issue
 import torch
 TORCH_VERSION = torch.__version__
@@ -1064,10 +1060,11 @@ def _log_gpu_env_once():
 _log_gpu_env_once()
 
 # Configuration - OPTIMIZED FOR VEHICLE AND LICENSE PLATE DETECTION
-ROI_PERCENT_XMIN = 0.05  # Keep current ROI settings
-ROI_PERCENT_YMIN = 0.10  
-ROI_PERCENT_XMAX = 0.95  
-ROI_PERCENT_YMAX = 0.95  
+# ROI chiếm toàn bộ chiều rộng khung hình, chiều cao giữ nguyên
+ROI_PERCENT_XMIN = 0.0   # 0% từ trái (toàn bộ chiều rộng)
+ROI_PERCENT_YMIN = 0.25  # 25% từ trên  
+ROI_PERCENT_XMAX = 1.0   # 100% từ trái (toàn bộ chiều rộng)
+ROI_PERCENT_YMAX = 0.75  # 75% từ trên (chiều cao = 50%)  
 MAX_DISAPPEARED = 30      # Reduced for better tracking stability
 MIN_CONFIDENCE = 0.1      # Lower threshold for better detection
 DETECTION_DOWNSCALE_FACTOR = 1.0
@@ -1388,32 +1385,7 @@ def safe_frame_encoding(frame):
         logger.error(f"Critical error in frame encoding: {e}")
         return None
 
-def validate_ocr_result_strictly(plate_text, confidence, track_id):
-    """EXTREMELY lenient validation for testing"""
-    if not plate_text or not isinstance(plate_text, str):
-        return False, "No text"
-    
-    clean_text = plate_text.upper().strip()
-    logger.info(f"🔍 Validating: '{clean_text}' (conf: {confidence:.3f})")
-    
-    # EXTREMELY relaxed checks
-    if len(clean_text) < 1:  # Accept even single character
-        return False, f"Empty text"
-    
-    if len(clean_text) > 25:  # Very generous length limit
-        return False, f"Too long: {len(clean_text)}"
-    
-    # VERY LOW confidence threshold for testing
-    if confidence < 0.001:  # Almost any confidence
-        return False, f"Confidence too low: {confidence:.3f}"
-    
-    # Accept anything with letters or numbers
-    has_alnum = any(c.isalnum() for c in clean_text)
-    if not has_alnum:
-        return False, "Must contain alphanumeric characters"
-    
-    logger.info(f"✅ VALIDATION PASSED: '{clean_text}' (conf: {confidence:.3f})")
-    return True, "Validation passed"
+# validate_ocr_result_strictly removed - using is_valid_vietnamese_plate instead
 def process_two_row_plate_ocr(plate_crop):
     """Xử lý OCR cho biển số 2 hàng với tách hàng thông minh (projection) và ghép kết quả"""
     try:
@@ -1760,43 +1732,7 @@ def _is_valid_vn_plate_format(plate_text):
     
     return False
 
-def _is_valid_vn_plate_format_relaxed(plate_text):
-    """Relaxed validation for Vietnamese license plate format"""
-    if not plate_text or not isinstance(plate_text, str):
-        return False
-    
-    # Clean the text
-    clean_text = re.sub(r'[^A-Z0-9\-\.]', '', plate_text.upper().strip())
-    
-    if len(clean_text) < 4:
-        return False
-    
-    # More relaxed Vietnamese license plate patterns
-    patterns = [
-        # Strict patterns from above
-        r'^\d{2}[A-Z]-\d{2}\.\d{2}$',          # 30A-12.34
-        r'^\d{2}[A-Z]-\d{3}\.\d{2}$',          # 30A-123.45
-        r'^\d{2}[A-Z]-\d{4}\.\d{2}$',          # 30A-1234.56
-        r'^\d{2}[A-Z]-\d{5}$',                  # 30A-12345 (no dot)
-        r'^\d{2}[A-Z]\d-\d{4}$',                # 30A1-2345 (motorcycle old)
-        r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',        # 30A1-234.56 (motorcycle new)
-        r'^\d{2}[A-Z][A-Z0-9]?\d{4,5}$',       # 30A1234 / 30AB12345
-        r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',       # 30AB-12.34
-        r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',       # 30AB-123.45
-        
-        # Relaxed patterns - accept more variations
-        r'^\d{1,3}[A-Z]{1,3}\d{3,6}$',         # General pattern: digits + letters + digits
-        r'^\d{2}[A-Z]{1,2}[\-\.]?\d{3,6}$',    # With optional separator
-        r'^[A-Z]{1,2}\d{2,3}[\-\.]?\d{3,6}$',  # Letter prefix variants
-        r'^\d{2}[A-Z]\d{3,6}$',                 # Simple format
-        r'^\d{2}[A-Z]{2}\d{3,6}$',             # Double letter format
-    ]
-    
-    for pattern in patterns:
-        if re.match(pattern, clean_text):
-            return True
-    
-    return False
+# _is_valid_vn_plate_format_relaxed removed - using is_valid_vietnamese_plate instead
 
 def _is_basic_alphanumeric_plate(plate_text):
     """REALISTIC check for alphanumeric plate format - accept partial plates"""
@@ -4381,45 +4317,7 @@ def detect_license_plate_simple(vehicle_crop):
         logger.error(f"Simple plate detection failed: {e}")
         return None
 
-def run_ocr_simple(plate_crop):
-    """Simple and fast OCR"""
-    try:
-        if plate_crop is None or plate_crop.size == 0:
-            return "", 0.0
-        
-        # Simple preprocessing
-        if len(plate_crop.shape) == 3:
-            gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = plate_crop
-        
-        # Resize if too small
-        height, width = gray.shape[:2]
-        if width < 100 or height < 30:
-            scale = max(100/width, 30/height)
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-        
-        # Simple enhancement
-        gray = cv2.equalizeHist(gray)
-        
-        # Run OCR
-        if ocr_reader is not None:
-            result = ocr_reader.ocr(gray, det=False, rec=True, cls=False)
-            if result and result[0]:
-                text = result[0][0][0] if len(result[0][0]) > 0 else ""
-                conf = result[0][0][1] if len(result[0][0]) > 1 else 0.0
-                
-                # Clean text
-                cleaned_text = clean_and_validate_plate_text(text)
-                return cleaned_text, float(conf)
-        
-        return "", 0.0
-        
-    except Exception as e:
-        logger.error(f"Simple OCR failed: {e}")
-        return "", 0.0
+# run_ocr_simple removed - using run_ocr_on_plate instead
 
 def detect_license_plate_in_vehicle_optimized(vehicle_crop):
     """Optimized license plate detection within vehicle crop"""
@@ -4588,7 +4486,7 @@ def save_plate_crop(plate_crop, plate_text, frame_count):
         return ""
 
 def detect_and_ocr(frame, video_processing=True):
-    """Simplified and optimized plate detection and OCR"""
+    """Simplified plate detection and OCR with YOLOv9s and PaddleOCR"""
     global yolo_model, ocr_reader, frame_count, tracked_objects
     
     try:
@@ -4609,26 +4507,12 @@ def detect_and_ocr(frame, video_processing=True):
         original_height, original_width = frame.shape[:2]
         display_frame = frame.copy()
         frame_count += 1
-
-        # Draw ROI
-        try:
-            roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
-            cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
-            
-            # Draw ROI text
-            text = "PLATE DETECTION ZONE"
-            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-            text_x = roi_xmin + 10
-            text_y = roi_ymin - 15
-            
-            cv2.rectangle(display_frame, 
-                        (text_x - 5, text_y - text_size[1] - 5), 
-                        (text_x + text_size[0] + 5, text_y + 5), 
-                        (0, 0, 0), -1)
-            cv2.putText(display_frame, text, (text_x, text_y), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        except Exception as e:
-            logger.error(f"ROI drawing failed: {e}")
+        
+        # Draw ROI zone
+        roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
+        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
+        cv2.putText(display_frame, "PLATE DETECTION ZONE", (roi_xmin + 10, roi_ymin - 15), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
         # Initialize response arrays
         boxes = []
@@ -4636,11 +4520,11 @@ def detect_and_ocr(frame, video_processing=True):
         ocr_results = []
         tracked_objects = {}
         
-        # Simple plate detection for all vehicle types
+        # Simple plate detection with YOLOv9s
         if yolo_model is not None:
             try:
-                # Run YOLO detection for all vehicle classes (car=2, motorbike=3, bus=5, truck=7)
-                results = yolo_model(frame, conf=0.2, verbose=False, classes=VEHICLE_CLASSES)
+                # Run YOLO detection for vehicles
+                results = yolo_model(frame, conf=0.3, verbose=False, classes=VEHICLE_CLASSES)
                 
                 for result in results:
                     if result.boxes is not None:
@@ -4650,11 +4534,18 @@ def detect_and_ocr(frame, video_processing=True):
                             class_id = int(box.cls[0].cpu().numpy())
                             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                             
-                            # Get vehicle type from class ID
-                            vehicle_type = get_vehicle_type_from_class(class_id)
-                            
                             # Check if vehicle is in ROI
                             if is_bbox_in_roi([x1, y1, x2, y2], original_width, original_height):
+                                # Draw vehicle bounding box first
+                                vehicle_color = (0, 255, 255)  # Cyan for vehicle
+                                cv2.rectangle(display_frame, (x1, y1), (x2, y2), vehicle_color, 2)
+                                
+                                # Add vehicle label
+                                vehicle_type = get_vehicle_type_from_class(class_id)
+                                vehicle_text = f"Vehicle: {vehicle_type} ({conf:.2f})"
+                                cv2.putText(display_frame, vehicle_text, (x1, max(25, y1 - 10)),
+                                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                                
                                 # Crop vehicle region
                                 vehicle_crop = frame[y1:y2, x1:x2]
                                 
@@ -4673,85 +4564,115 @@ def detect_and_ocr(frame, video_processing=True):
                                         plate_crop = frame[frame_py1:frame_py2, frame_px1:frame_px2]
                                         
                                         if plate_crop.size > 0:
-                                            # Simple OCR
-                                            plate_text, ocr_conf = run_ocr_simple(plate_crop)
-                                            
-                                            if plate_text and is_valid_vietnamese_plate(plate_text):
-                                                # Check lists
-                                                is_blacklist, is_whitelist = check_plate_lists(plate_text)
+                                            plate_height, plate_width = plate_crop.shape[:2]
+                                            if plate_width > 50 and plate_height > 15:
+                                                # Run OCR on plate
+                                                plate_text, ocr_conf = run_ocr_on_plate(plate_crop)
                                                 
-                                                # Determine colors
-                                                if is_blacklist:
-                                                    box_color = (0, 0, 255)
-                                                    text_color = (255, 255, 255)
-                                                    status = "BLACKLIST"
-                                                elif is_whitelist:
-                                                    box_color = (0, 255, 0)
-                                                    text_color = (0, 0, 0)
-                                                    status = "WHITELIST"
+                                                if plate_text and is_valid_vietnamese_plate(plate_text):
+                                                    # Check whitelist/blacklist
+                                                    is_blacklist, is_whitelist = check_plate_lists(plate_text)
+                                                    
+                                                    # Determine colors and status
+                                                    if is_blacklist:
+                                                        box_color = (0, 0, 255)  # Red
+                                                        status = "BLACKLIST"
+                                                    elif is_whitelist:
+                                                        box_color = (0, 255, 0)  # Green
+                                                        status = "WHITELIST"
+                                                    else:
+                                                        box_color = (255, 255, 0)  # Yellow
+                                                        status = "NORMAL"
+                                                    
+                                                    # Draw plate bounding box with thicker line
+                                                    cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), box_color, 4)
+                                                    
+                                                    # Draw background rectangle for text with better positioning
+                                                    text = f"{plate_text} ({status})"
+                                                    text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+                                                    
+                                                    # Position text above the plate bounding box
+                                                    text_x = frame_px1
+                                                    text_y = max(30, frame_py1 - 15)
+                                                    
+                                                    # Ensure text doesn't go off screen
+                                                    if text_x + text_size[0] > original_width:
+                                                        text_x = original_width - text_size[0] - 10
+                                                    if text_y - text_size[1] < 0:
+                                                        text_y = frame_py2 + text_size[1] + 15
+                                                    
+                                                    # Draw background rectangle with border
+                                                    cv2.rectangle(display_frame, 
+                                                                (text_x - 8, text_y - text_size[1] - 8),
+                                                                (text_x + text_size[0] + 8, text_y + 8),
+                                                                (0, 0, 0), -1)  # Black background
+                                                    cv2.rectangle(display_frame, 
+                                                                (text_x - 8, text_y - text_size[1] - 8),
+                                                                (text_x + text_size[0] + 8, text_y + 8),
+                                                                box_color, 2)  # Colored border
+                                                    
+                                                    # Draw plate text with better visibility
+                                                    cv2.putText(display_frame, text, (text_x, text_y),
+                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                                                    
+                                                    # Add confidence score below the plate
+                                                    conf_text = f"Conf: {ocr_conf:.2f}"
+                                                    conf_size = cv2.getTextSize(conf_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+                                                    conf_x = frame_px1
+                                                    conf_y = frame_py2 + 20
+                                                    
+                                                    # Draw confidence background
+                                                    cv2.rectangle(display_frame, 
+                                                                (conf_x - 5, conf_y - conf_size[1] - 5),
+                                                                (conf_x + conf_size[0] + 5, conf_y + 5),
+                                                                (0, 0, 0), -1)
+                                                    
+                                                    # Draw confidence text
+                                                    cv2.putText(display_frame, conf_text, (conf_x, conf_y),
+                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                                                    
+                                                    # Add to results
+                                                    boxes.append([frame_px1, frame_py1, frame_px2, frame_py2])
+                                                    labels.append(plate_text)
+                                                    ocr_results.append([plate_text, float(ocr_conf)])
+                                                    
+                                                    # Create detection object
+                                                    detection_id = f"plate_{frame_count}_{len(boxes)}"
+                                                    tracked_objects[detection_id] = {
+                                                        'plate_number': plate_text,
+                                                        'confidence': float(conf),
+                                                        'bbox': [frame_px1, frame_py1, frame_px2, frame_py2],
+                                                        'first_seen': time.time(),
+                                                        'last_seen': time.time(),
+                                                        'ocr_confidence': float(ocr_conf),
+                                                        'is_blacklist': is_blacklist,
+                                                        'is_whitelist': is_whitelist,
+                                                        'status': status,
+                                                        'vehicle_type': get_vehicle_type_from_class(class_id)
+                                                    }
+                                                    
+                                                    logger.info(f"✅ Plate detected: {plate_text} ({status})")
                                                 else:
-                                                    box_color = (255, 255, 0)
-                                                    text_color = (0, 0, 0)
-                                                    status = "NORMAL"
-                                                
-                                                # Save crop image
-                                                crop_filename = save_plate_crop(plate_crop, plate_text, frame_count)
-                                                
-                                                # Draw plate box
-                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), box_color, 4)
-                                                
-                                                # Draw text
-                                                text = f"{plate_text} ({status})"
-                                                text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-                                                text_x = frame_px1
-                                                text_y = max(25, frame_py1 - 10)
-                                                
-                                                cv2.rectangle(display_frame, 
-                                                            (text_x - 5, text_y - text_size[1] - 5), 
-                                                            (text_x + text_size[0] + 5, text_y + 5), 
-                                                            box_color, -1)
-                                                cv2.putText(display_frame, text, (text_x, text_y),
-                                                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
-                                                
-                                                # Add to results
-                                                boxes.append([frame_px1, frame_py1, frame_px2, frame_py2])
-                                                labels.append(plate_text)
-                                                ocr_results.append([plate_text, float(ocr_conf)])
-                                                
-                                                # Create detection object
-                                                detection_id = f"plate_{frame_count}_{len(boxes)}"
-                                                tracked_objects[detection_id] = {
-                                                    'plate_number': plate_text,
-                                                    'confidence': float(conf),
-                                                    'bbox': [frame_px1, frame_py1, frame_px2, frame_py2],
-                                                    'first_seen': time.time(),
-                                                    'last_seen': time.time(),
-                                                    'crop_filename': crop_filename,
-                                                    'ocr_confidence': float(ocr_conf),
-                                                    'is_blacklist': is_blacklist,
-                                                    'is_whitelist': is_whitelist,
-                                                    'status': status,
-                                                    'validated': True,
-                                                    'vehicle_type': vehicle_type,
-                                                    'class_id': class_id
-                                                }
-                                                
-                                                logger.info(f"✅ Plate detected: {plate_text} ({status})")
-                                            else:
-                                                # Invalid format
-                                                cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), (0, 0, 255), 3)
-                                                cv2.putText(display_frame, "INVALID FORMAT", (frame_px1, max(25, frame_py1 - 10)),
-                                                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                                    else:
-                                        # No plate detected - show vehicle type
-                                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                                        cv2.putText(display_frame, f"{vehicle_type.upper()} ({conf:.2f})", (x1, max(10, y1-8)),
-                                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                                                    # No valid plate detected, show vehicle only
+                                                    no_plate_text = "No Plate Detected"
+                                                    no_plate_size = cv2.getTextSize(no_plate_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                                                    no_plate_x = frame_px1
+                                                    no_plate_y = max(30, frame_py1 - 10)
+                                                    
+                                                    # Draw background for "No Plate" text
+                                                    cv2.rectangle(display_frame, 
+                                                                (no_plate_x - 5, no_plate_y - no_plate_size[1] - 5),
+                                                                (no_plate_x + no_plate_size[0] + 5, no_plate_y + 5),
+                                                                (128, 128, 128), -1)  # Gray background
+                                                    
+                                                    # Draw "No Plate" text
+                                                    cv2.putText(display_frame, no_plate_text, (no_plate_x, no_plate_y),
+                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                                         
             except Exception as e:
                 logger.error(f"Detection failed: {e}")
 
-        # Encode frame
+        # Encode frame and return results
         try:
             _, buffer = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             frame_bytes = buffer.tobytes()
@@ -5054,243 +4975,9 @@ if __name__ == "__main__":
         logger.error(f"Traceback: {traceback.format_exc()}")
 # Thêm function debug này vào cuối file detector_fixed.py:
 
-def detect_and_ocr_debug_mode(frame, video_processing=True):
-    """Debug version with forced visualization for testing"""
-    global frame_count
-    frame_count += 1
-    
-    try:
-        h, w = frame.shape[:2]
-        display_frame = frame.copy()
-        
-        logger.info(f"DEBUG MODE: Frame {frame_count}, size: {w}x{h}")
-        
-        # Step 1: ALWAYS draw ROI
-        try:
-            roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(w, h)
-            cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
-            cv2.putText(display_frame, "DETECTION ZONE", (roi_xmin + 10, roi_ymin - 15), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            logger.info(f"ROI drawn: [{roi_xmin}, {roi_ymin}, {roi_xmax}, {roi_ymax}]")
-        except Exception as roi_error:
-            logger.error(f"ROI error: {roi_error}")
-            # Fallback ROI
-            margin = 80
-            cv2.rectangle(display_frame, (margin, margin), (w-margin, h-margin), (0, 255, 255), 4)
-        
-        # Step 2: Try real detection first
-        detections = []
-        tracks = []
-        boxes = []
-        labels = []
-        ocr_results = []
-        
-        if yolo_model:
-            try:
-                logger.info("Running real YOLO detection...")
-                detections = safe_yolo_detection(yolo_model, frame)
-                logger.info(f"Real detections: {len(detections)}")
-                
-                if detections and tracker:
-                    tracks = safe_deepsort_update(tracker, detections, frame)
-                    logger.info(f"Real tracks: {len(tracks)}")
-                    
-            except Exception as detection_error:
-                logger.error(f"Real detection failed: {detection_error}")
-        
-        # Step 3: If no real detections, show fake ones for testing
-        if len(detections) == 0:
-            logger.info("No real detections, showing fake detections for testing...")
-            
-            fake_detections = [
-                [150, 100, 200, 120, 0.85, 2],  # Car 1
-                [400, 200, 180, 100, 0.75, 2],  # Car 2  
-                [200, 350, 150, 80, 0.65, 3],   # Motorcycle
-            ]
-            
-            for i, fake_det in enumerate(fake_detections):
-                x, y, w, h, conf, class_id = fake_det
-                x1, y1, x2, y2 = x, y, x + w, y + h
-                
-                # Draw fake vehicle (BLUE)
-                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 4)
-                cv2.putText(display_frame, f"FAKE_VEHICLE_{i}", (x1, y1-10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                
-                # Draw fake plate area (WHITE)
-                plate_y1 = y2 - int(h * 0.3)
-                plate_y2 = y2 - int(h * 0.1)
-                plate_x1 = x1 + int(w * 0.2)
-                plate_x2 = x2 - int(w * 0.2)
-                
-                if plate_y1 < plate_y2 and plate_x1 < plate_x2:
-                    cv2.rectangle(display_frame, (plate_x1, plate_y1), (plate_x2, plate_y2), (255, 255, 255), 3)
-                    fake_plate = f"FAKE{i:02d}A123"
-                    cv2.putText(display_frame, fake_plate, (plate_x1, plate_y1-5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                    
-                    labels.append(fake_plate)
-                    ocr_results.append([fake_plate, 0.9])
-                
-                boxes.append([x1, y1, x2, y2])
-                
-            logger.info(f"Drew {len(fake_detections)} fake detections")
-        
-        # Step 4: Draw real detections if available
-        else:
-            logger.info(f"Drawing {len(detections)} real detections...")
-            
-            # Draw detections (BLUE)
-            for i, det in enumerate(detections):
-                try:
-                    if len(det) >= 6:
-                        x, y, w, h, conf, class_id = det[:6]
-                        x1, y1, x2, y2 = int(x), int(y), int(x + w), int(y + h)
-                        
-                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 4)
-                        det_label = f"DET{i}:C{class_id} {conf:.2f}"
-                        cv2.putText(display_frame, det_label, (x1, y1-10), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                        boxes.append([x1, y1, x2, y2])
-                except Exception as e:
-                    logger.debug(f"Error drawing detection {i}: {e}")
-            
-            # Draw tracks (GREEN/ORANGE)
-            for i, track in enumerate(tracks):
-                try:
-                    if hasattr(track, 'track_id') and hasattr(track, 'to_ltrb'):
-                        track_id = track.track_id
-                        ltrb = track.to_ltrb()
-                        
-                        if isinstance(ltrb, np.ndarray):
-                            ltrb = ltrb.flatten()
-                        
-                        x1, y1, x2, y2 = map(int, ltrb[:4])
-                        
-                        # Draw track (GREEN)
-                        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 4)
-                        
-                        # Track label
-                        track_label = f"TRACK_{track_id}"
-                        cv2.putText(display_frame, track_label, (x1, y1-30), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                        
-                        # Try plate detection on this track
-                        try:
-                            vehicle_crop = frame[y1:y2, x1:x2]
-                            if vehicle_crop.size > 0:
-                                plate_crop, plate_conf, plate_bbox = detect_license_plate_in_vehicle(vehicle_crop, plate_model)
-                                
-                                if plate_crop is not None and plate_bbox:
-                                    # Draw plate bbox (WHITE)
-                                    px1, py1, px2, py2 = plate_bbox
-                                    frame_px1 = x1 + px1
-                                    frame_py1 = y1 + py1
-                                    frame_px2 = x1 + px2
-                                    frame_py2 = y1 + py2
-                                    
-                                    cv2.rectangle(display_frame, (frame_px1, frame_py1), 
-                                                 (frame_px2, frame_py2), (255, 255, 255), 3)
-                                    
-                                    # Try OCR
-                                    plate_text = None
-                                    if ocr_reader:
-                                        try:
-                                            ocr_result = ocr_reader.ocr(plate_crop, det=True, rec=True, cls=False)
-                                            if ocr_result:
-                                                plate_text, ocr_conf = safe_extract_ocr_text(ocr_result)
-                                                if plate_text:
-                                                    cv2.putText(display_frame, f"{plate_text} ({ocr_conf:.2f})", 
-                                                               (frame_px1, frame_py1-10), 
-                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                                                    labels.append(plate_text)
-                                                    ocr_results.append([plate_text, ocr_conf])
-                                        except Exception as ocr_error:
-                                            logger.debug(f"OCR failed: {ocr_error}")
-                        
-                        except Exception as plate_error:
-                            logger.debug(f"Plate detection failed: {plate_error}")
-                        
-                except Exception as track_error:
-                    logger.debug(f"Track processing failed: {track_error}")
-        
-        # Step 5: Status information
-        try:
-            # Top status
-            status_text = f"DEBUG MODE - Frame {frame_count}"
-            cv2.putText(display_frame, status_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            
-            # Detection counts
-            counts_text = f"Det: {len(detections)} | Tracks: {len(tracks)} | Boxes: {len(boxes)}"
-            cv2.putText(display_frame, counts_text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            # Model status
-            model_status = f"YOLO: {'OK' if yolo_model else 'MISSING'} | OCR: {'OK' if ocr_reader else 'MISSING'}"
-            cv2.putText(display_frame, model_status, (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            # Legend
-            legend_y = h - 100
-            cv2.putText(display_frame, "BLUE: Vehicle Detection", (10, legend_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-            cv2.putText(display_frame, "GREEN: Vehicle Track", (10, legend_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            cv2.putText(display_frame, "WHITE: License Plate", (10, legend_y + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            cv2.putText(display_frame, "YELLOW: ROI Zone", (10, legend_y + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-            
-        except Exception as status_error:
-            logger.debug(f"Status drawing error: {status_error}")
-        
-        # Encode frame
-        frame_bytes = safe_frame_encoding(display_frame)
-        if frame_bytes is None:
-            frame_bytes = b''
-        
-        result = {
-            'frame': frame_bytes,
-            'boxes': boxes,
-            'labels': labels,
-            'ocr_results': ocr_results,
-            'tracked_objects': tracked_objects.copy(),
-            'ids': list(range(len(tracks)))
-        }
-        
-        logger.info(f"DEBUG MODE: Frame {frame_count} completed - {len(boxes)} boxes, {len(labels)} labels")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Debug mode error: {e}")
-        
-        # Error frame
-        error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(error_frame, "DEBUG MODE ERROR", (150, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        cv2.putText(error_frame, str(e)[:50], (50, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        
-        frame_bytes = safe_frame_encoding(error_frame)
-        if frame_bytes is None:
-            frame_bytes = b''
-            
-        return {
-            'frame': frame_bytes,
-            'boxes': [], 'labels': [], 'ocr_results': [], 'tracked_objects': {}, 'ids': []
-        }
+# detect_and_ocr_debug_mode removed - using detect_and_ocr instead
 
-# Wrapper function to enable debug mode
-def detect_and_ocr_with_debug_toggle(frame, enable_debug=True, video_processing=True):
-    """Wrapper to toggle between debug and normal mode"""
-    if enable_debug:
-        logger.info("Using DEBUG MODE")
-        return detect_and_ocr_debug_mode(frame, video_processing)
-    else:
-        logger.info("Using NORMAL MODE")
-        return detect_and_ocr(frame, video_processing)
-
-# Wrapper function to enable debug mode
-def detectand_ocr_with_debug_toggle(frame, enable_debug=True, video_processing=True):
-    """Wrapper to toggle between debug and normal mode"""
-    if enable_debug:
-        logger.info("Using DEBUG MODE")
-        return detect_and_ocr_debug_mode(frame, video_processing)
-    else:
-        logger.info("Using NORMAL MODE")
-        return detect_and_ocr(frame, video_processing)
+# Debug wrapper functions removed - using detect_and_ocr directly
 
 def force_enable_detection():
     """Force enable detection by resetting settings"""

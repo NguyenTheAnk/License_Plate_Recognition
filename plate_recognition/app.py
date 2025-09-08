@@ -14,51 +14,27 @@ from datetime import datetime
 import uuid
 import re
 
-ROI_PERCENT_XMIN = 0.05  
-ROI_PERCENT_YMIN = 0.10  
-ROI_PERCENT_XMAX = 0.95  
-ROI_PERCENT_YMAX = 0.95  
+# ROI chiếm toàn bộ chiều rộng khung hình, chiều cao giữ nguyên
+ROI_PERCENT_XMIN = 0.0   # 0% từ trái (toàn bộ chiều rộng)
+ROI_PERCENT_YMIN = 0.25  # 25% từ trên  
+ROI_PERCENT_XMAX = 1.0   # 100% từ trái (toàn bộ chiều rộng)
+ROI_PERCENT_YMAX = 0.75  # 75% từ trên (chiều cao = 50%)  
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-def validate_vietnamese_plate_format(plate_text):
-    """Kiểm tra format biển số Việt Nam"""
-    if not plate_text or not isinstance(plate_text, str):
-        return False
-    
-    clean_text = re.sub(r'[^A-Z0-9\-\.]', '', plate_text.upper().strip())
-    
-    if len(clean_text) < 7 or len(clean_text) > 12:
-        return False
-    
-    patterns = [
-        r'^\d{2}[A-Z]-\d{3}\.\d{2}$',
-        r'^\d{2}[A-Z]-\d{4}\.\d{2}$',  
-        r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',
-        r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',
-        r'^\d{2}[A-Z]-\d{4,5}$',
-        r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',
-        r'^\d{2}[A-Z]\d-\d{4}$',
-    ]
-    
-    return any(re.match(pattern, clean_text) for pattern in patterns)
-def calculate_roi_coordinates(width, height):
-    roi_xmin = int(width * ROI_PERCENT_XMIN)
-    roi_ymin = int(height * ROI_PERCENT_YMIN)
-    roi_xmax = int(width * ROI_PERCENT_XMAX)
-    roi_ymax = int(height * ROI_PERCENT_YMAX)
-    return roi_xmin, roi_ymin, roi_xmax, roi_ymax
+# validate_vietnamese_plate_format moved to detector.py to avoid duplication
+# calculate_roi_coordinates moved to detector.py to avoid duplication
 
 # Import detector (simple)
 try:
-    from detector import detect_and_ocr
+    from detector import detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate
     print("Simple Detector imported successfully")
 except ImportError as e:
     print(f"Error importing simple detector: {e}")
     # Fallback to fixed detector
     try:
-        from detector import detect_and_ocr
+        from detector import detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate
         print("Fallback to Fixed Detector")
     except ImportError as e2:
         print(f"Error importing fallback detector: {e2}")
@@ -401,12 +377,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Giáº£m log level cho má»™t sá»‘ module Ä‘á»ƒ trÃ¡nh spam
+# Giáº£m log level cho má»™t sá»' module Ä'á»ƒ trÃ¡nh spam
 logging.getLogger('detector').setLevel(logging.WARNING)
 logging.getLogger('ultralytics').setLevel(logging.WARNING)
 logging.getLogger('paddleocr').setLevel(logging.WARNING)
-
-app = Flask(__name__)
 
 # CORS configuration - cho phÃ©p táº¥t cáº£ origins
 CORS(app, 
@@ -765,11 +739,8 @@ def send_frame_metadata(ws, result, width, height, frame_count):
         
     except Exception as e:
         logger.debug(f"Could not send metadata: {e}")
-# Enhanced save_detection_to_db function with better error handling
-def save_detection_to_db(detection_data):
-    """LÆ°u káº¿t quáº£ detection vÃ o database vá»›i schema thá»±c táº¿ vÃ  tracking ID"""
-    try:
-        connection = get_db_connection()
+
+# Removed duplicate health function - keeping only the correct one below
         if not connection:
             logger.error("âŒ Database connection failed")
             return False
@@ -886,15 +857,7 @@ def save_detection_to_db(detection_data):
             except:
                 pass
         return False
-# Health check endpoint
-@app.route('/health')
-def health():
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': time.time(),
-        'message': 'License plate detection server is running',
-        'models_loaded': True
-    })
+# Health function already defined above as health_check()
 
 @app.route('/')
 def home():
@@ -1890,71 +1853,51 @@ def video_stream():
 
 
 
-def start_server_safely():
-    """Start server with multiple fallback options"""
-    logger.info("🚀 Starting server with safe startup...")
+# Removed start_server_safely function - using simple app.run() instead
+
+if __name__ == '__main__':
+    logger.info("Starting optimized WebSocket server on http://127.0.0.1:5002 ...")
     
-    # Clear all problematic environment variables
+    # Clean environment variables to avoid Werkzeug issues
     import os
-    problematic_vars = ['WERKZEUG_SERVER_FD', 'WERKZEUG_RUN_MAIN', 'FLASK_ENV']
-    for var in problematic_vars:
+    import sys
+    
+    # Remove all Werkzeug-related environment variables that can cause issues
+    werkzeug_vars = [
+        'WERKZEUG_SERVER_FD',
+        'WERKZEUG_RUN_MAIN', 
+        'WERKZEUG_DEBUG_PIN',
+        'WERKZEUG_DEBUG_PIN_OVERRIDE'
+    ]
+    
+    for var in werkzeug_vars:
         if var in os.environ:
             del os.environ[var]
     
-    # Method 1: Simple Flask development server
-    try:
-        logger.info("🔄 Method 1: Simple Flask development server...")
-        app.run(debug=False, host='127.0.0.1', port=5002)
-        return True
-    except Exception as e:
-        logger.error(f"Method 1 failed: {e}")
-    
-    # Method 2: Different port
-    try:
-        logger.info("🔄 Method 2: Different port (5003)...")
-        app.run(debug=False, host='127.0.0.1', port=5003)
-        return True
-    except Exception as e:
-        logger.error(f"Method 2 failed: {e}")
-    
-    # Method 3: Localhost with threading
-    try:
-        logger.info("🔄 Method 3: Localhost with threading...")
-        app.run(debug=False, host='localhost', port=5002, threaded=True)
-        return True
-    except Exception as e:
-        logger.error(f"Method 3 failed: {e}")
-    
-    # Method 4: Minimal configuration
-    try:
-        logger.info("🔄 Method 4: Minimal configuration...")
-        app.run(debug=False, host='0.0.0.0', port=5002)
-        return True
-    except Exception as e:
-        logger.error(f"Method 4 failed: {e}")
-    
-    logger.error("❌ All server startup methods failed")
-    return False
-
-if __name__ == '__main__':
-    logger.info("Khởi động WebSocket server trên http://127.0.0.1:5002 ...")
-    
-    # Set environment variables to avoid threading issues
-    import os
-    os.environ['WERKZEUG_RUN_MAIN'] = 'true'
+    # Set production environment
     os.environ['FLASK_ENV'] = 'production'
-    # Clear problematic environment variables
-    if 'WERKZEUG_SERVER_FD' in os.environ:
-        del os.environ['WERKZEUG_SERVER_FD']
     
     try:
-        if not start_server_safely():
-            logger.error("❌ Server startup failed completely")
-            sys.exit(1)
+        # Try using waitress production server first
+        try:
+            from waitress import serve
+            logger.info("Using Waitress production server...")
+            serve(app, host='127.0.0.1', port=5002, threads=4)
+        except ImportError:
+            logger.warning("Waitress not available, falling back to Flask development server...")
+            # Fallback to Flask development server with safer configuration
+            app.run(
+                debug=False, 
+                host='127.0.0.1', 
+                port=5002, 
+                use_reloader=False,
+                threaded=True,
+                processes=1
+            )
     except KeyboardInterrupt:
-        logger.info("🛑 Server stopped by user")
+        logger.info("Server stopped by user")
     except Exception as e:
-        logger.error(f"❌ Critical server error: {e}")
+        logger.error(f"Critical server error: {e}")
         import traceback
         logger.error(f"Critical error traceback: {traceback.format_exc()}")
         sys.exit(1)
