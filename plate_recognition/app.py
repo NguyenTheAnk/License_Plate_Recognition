@@ -28,13 +28,13 @@ sys.path.insert(0, current_dir)
 
 # Import detector (simple) - optimized for license plate detection
 try:
-    from detector_simple import detect_and_ocr_simple as detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate
+    from detector_simple import detect_and_ocr_simple as detect_and_ocr, calculate_roi_coordinates, is_valid_license_plate
     print("✅ Simplified License Plate Detector imported successfully")
 except ImportError as e:
     print(f"Error importing simplified detector: {e}")
     # Fallback to original detector
     try:
-        from detector import detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate
+        from detector import detect_and_ocr, calculate_roi_coordinates, is_valid_vietnamese_plate as is_valid_license_plate
         print("⚠️ Fallback to Original Detector")
     except ImportError as e2:
         print(f"❌ Error importing fallback detector: {e2}")
@@ -654,11 +654,22 @@ def save_detection_safely(obj, track_id):
         confidence = obj.get('confidence', 0.0)
         bbox = obj.get('bbox', [0, 0, 0, 0])
         crop_filename = obj.get('crop_filename', '')
-        vehicle_type = obj.get('vehicle_type', 'unknown')
+        # Map to valid ENUM values for detected_vehicle_type
+        vehicle_type_mapping = {
+            'license_plate': 'other',
+            'car': 'car',
+            'motorcycle_old': 'motorcycle',
+            'motorcycle_new': 'motorcycle',
+            'taxi': 'car',
+            'diplomatic': 'other',
+            'unknown': 'other'
+        }
+        raw_vehicle_type = obj.get('vehicle_type', 'license_plate')
+        vehicle_type = vehicle_type_mapping.get(raw_vehicle_type, 'other')
         is_valid = obj.get('is_valid', False)
         validation_confidence = obj.get('validation_confidence', 0.0)
         
-        # Only save to database if plate is valid Vietnamese format
+        # Only save to database if plate is valid
         if not is_valid or validation_confidence < 0.5:
             logger.debug(f"Skipping invalid plate for track {track_id}: '{plate_number}' (valid: {is_valid}, conf: {validation_confidence:.3f})")
             return False
@@ -683,7 +694,7 @@ def save_detection_safely(obj, track_id):
             'ocr_confidence': max(0.0, min(1.0, float(ocr_confidence))),  # OCR confidence
             'detection_confidence': max(0.0, min(1.0, float(confidence))),  # YOLO confidence
             'cropped_plate_image_path': str(crop_filename)[:255],
-            'detected_vehicle_type': str(vehicle_type)[:50],
+            'detected_vehicle_type': vehicle_type,  # Use ENUM value directly
             'bbox_x1': int(bbox[0]),
             'bbox_y1': int(bbox[1]),
             'bbox_x2': int(bbox[2]),
