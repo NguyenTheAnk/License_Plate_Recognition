@@ -1132,6 +1132,18 @@ MIN_ACCEPTABLE_CONFIDENCE = 0.2  # Increased for better quality results
 # Vehicle classes to track (COCO: car=2, motorbike=3, bus=5, truck=7)
 VEHICLE_CLASSES = [2, 3, 5, 7]  # Only track road vehicles
 
+# Vehicle type mapping
+VEHICLE_TYPE_MAPPING = {
+    2: 'car',        # car
+    3: 'motorbike',  # motorbike
+    5: 'bus',        # bus
+    7: 'truck'       # truck
+}
+
+def get_vehicle_type_from_class(class_id):
+    """Get vehicle type string from COCO class ID"""
+    return VEHICLE_TYPE_MAPPING.get(class_id, 'unknown')
+
 # Paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
 CROPS_FOLDER = os.path.join(current_dir, 'static', 'crops')
@@ -3412,6 +3424,7 @@ def safe_yolo_detection(model, frame):
                           iou=0.45, 
                           verbose=False, 
                           imgsz=640,  # Standard size for better accuracy
+                          classes=VEHICLE_CLASSES,  # Only detect vehicles
                           device='cpu' if not torch.cuda.is_available() else 'cuda')
             
             logger.info(f"YOLO inference completed: {len(results) if results else 0} results")
@@ -3425,7 +3438,7 @@ def safe_yolo_detection(model, frame):
             logger.error(f"YOLO inference failed: {e}")
             try:
                 logger.info("🔄 Trying CPU fallback...")
-                results = model(frame, conf=MIN_CONFIDENCE, iou=0.45, verbose=False, imgsz=640, device='cpu')
+                results = model(frame, conf=MIN_CONFIDENCE, iou=0.45, verbose=False, imgsz=640, classes=VEHICLE_CLASSES, device='cpu')
                 logger.info("✅ CPU fallback successful")
             except Exception as cpu_error:
                 logger.error(f"CPU fallback also failed: {cpu_error}")
@@ -4623,18 +4636,22 @@ def detect_and_ocr(frame, video_processing=True):
         ocr_results = []
         tracked_objects = {}
         
-        # Simple plate detection
+        # Simple plate detection for all vehicle types
         if yolo_model is not None:
             try:
-                # Run YOLO detection
-                results = yolo_model(frame, conf=0.2, verbose=False, classes=[2])
+                # Run YOLO detection for all vehicle classes (car=2, motorbike=3, bus=5, truck=7)
+                results = yolo_model(frame, conf=0.2, verbose=False, classes=VEHICLE_CLASSES)
                 
                 for result in results:
                     if result.boxes is not None:
                         for box in result.boxes:
                             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                             conf = box.conf[0].cpu().numpy()
+                            class_id = int(box.cls[0].cpu().numpy())
                             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                            
+                            # Get vehicle type from class ID
+                            vehicle_type = get_vehicle_type_from_class(class_id)
                             
                             # Check if vehicle is in ROI
                             if is_bbox_in_roi([x1, y1, x2, y2], original_width, original_height):
@@ -4714,7 +4731,9 @@ def detect_and_ocr(frame, video_processing=True):
                                                     'is_blacklist': is_blacklist,
                                                     'is_whitelist': is_whitelist,
                                                     'status': status,
-                                                    'validated': True
+                                                    'validated': True,
+                                                    'vehicle_type': vehicle_type,
+                                                    'class_id': class_id
                                                 }
                                                 
                                                 logger.info(f"✅ Plate detected: {plate_text} ({status})")
@@ -4724,9 +4743,9 @@ def detect_and_ocr(frame, video_processing=True):
                                                 cv2.putText(display_frame, "INVALID FORMAT", (frame_px1, max(25, frame_py1 - 10)),
                                                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                                     else:
-                                        # No plate detected
+                                        # No plate detected - show vehicle type
                                         cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                                        cv2.putText(display_frame, f"VEHICLE ({conf:.2f})", (x1, max(10, y1-8)),
+                                        cv2.putText(display_frame, f"{vehicle_type.upper()} ({conf:.2f})", (x1, max(10, y1-8)),
                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
                                         
             except Exception as e:
