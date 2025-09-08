@@ -22,7 +22,9 @@ yolo_model = None
 ocr_reader = None
 frame_count = 0
 last_detection_time = 0
-detection_interval = 0.5  # Only detect every 0.5 seconds
+detection_interval = 0.1  # Detect every 0.1 seconds for better FPS
+last_ocr_time = 0
+ocr_interval = 0.2  # OCR every 0.2 seconds
 
 # ROI Configuration
 ROI_PERCENT_XMIN = 0.0
@@ -62,7 +64,7 @@ def is_bbox_in_roi(bbox, width, height):
     return (x1 < roi_xmax and x2 > roi_xmin and y1 < roi_ymax and y2 > roi_ymin)
 
 def simple_ocr(plate_crop):
-    """Enhanced OCR with better preprocessing for Vietnamese license plates"""
+    """Optimized OCR for high FPS with good accuracy"""
     try:
         if ocr_reader is None or plate_crop is None:
             return None, 0.0
@@ -77,59 +79,39 @@ def simple_ocr(plate_crop):
         else:
             gray = plate_crop.copy()
         
-        # Enhanced preprocessing for better OCR
-        # Resize if too small
-        if width < 150:
-            scale = 150 / width
+        # Optimized preprocessing - only essential steps
+        # Resize if too small (faster interpolation)
+        if width < 120:
+            scale = 120 / width
             new_width = int(width * scale)
             new_height = int(height * scale)
-            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+            gray = cv2.resize(gray, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
         
-        # Apply multiple enhancement techniques
-        enhanced_images = []
-        
-        # 1. Original
-        enhanced_images.append(gray)
-        
-        # 2. Contrast enhancement
+        # Single enhancement method for speed
+        # Apply CLAHE for better contrast
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         enhanced = clahe.apply(gray)
-        enhanced_images.append(enhanced)
         
-        # 3. Gaussian blur + sharpening
-        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-        sharpened = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
-        enhanced_images.append(sharpened)
+        # Single OCR attempt with optimized settings
+        result = ocr_reader.ocr(enhanced, det=True, rec=True, cls=False)
         
-        # 4. Morphological operations
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        morph = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
-        enhanced_images.append(morph)
-        
-        best_text = ""
-        best_conf = 0.0
-        
-        # Try OCR on all enhanced versions
-        for enhanced_img in enhanced_images:
-            try:
-                result = ocr_reader.ocr(enhanced_img, det=True, rec=True, cls=False)
-                
-                if result and result[0]:
-                    for line in result[0]:
-                        if len(line) >= 2:
-                            text = line[1][0].strip()
-                            conf = line[1][1]
-                            
-                            # Enhanced cleaning for Vietnamese plates
-                            cleaned = re.sub(r'[^\w\-.]', '', text.upper())
-                            
-                            # Better validation for Vietnamese license plates
-                            if (len(cleaned) >= 4 and conf > best_conf and 
-                                (cleaned.count('-') <= 2 and cleaned.count('.') <= 2)):
-                                best_text = cleaned
-                                best_conf = conf
-            except:
-                continue
+        if result and result[0]:
+            best_text = ""
+            best_conf = 0.0
+            
+            for line in result[0]:
+                if len(line) >= 2:
+                    text = line[1][0].strip()
+                    conf = line[1][1]
+                    
+                    # Fast cleaning for Vietnamese plates
+                    cleaned = re.sub(r'[^\w\-.]', '', text.upper())
+                    
+                    # Quick validation
+                    if (len(cleaned) >= 4 and conf > best_conf and 
+                        cleaned.count('-') <= 2 and cleaned.count('.') <= 2):
+                        best_text = cleaned
+                        best_conf = conf
         
         return best_text if best_text else None, best_conf
         
@@ -189,8 +171,8 @@ def save_plate_crop(plate_crop, plate_text, frame_count):
         return ""
 
 def detect_and_ocr_simple(frame):
-    """Optimized detection function with better performance"""
-    global frame_count, last_detection_time
+    """Ultra-optimized detection function for high FPS"""
+    global frame_count, last_detection_time, last_ocr_time
     
     try:
         if frame is None or frame.size == 0:
@@ -202,13 +184,13 @@ def detect_and_ocr_simple(frame):
         
         current_time = time.time()
         
-        # Calculate FPS
+        # Calculate FPS (optimized)
         if not hasattr(detect_and_ocr_simple, 'fps_times'):
             detect_and_ocr_simple.fps_times = []
         
         detect_and_ocr_simple.fps_times.append(current_time)
-        # Keep only last 10 frames for FPS calculation
-        if len(detect_and_ocr_simple.fps_times) > 10:
+        # Keep only last 5 frames for faster FPS calculation
+        if len(detect_and_ocr_simple.fps_times) > 5:
             detect_and_ocr_simple.fps_times.pop(0)
         
         if len(detect_and_ocr_simple.fps_times) > 1:
@@ -218,16 +200,14 @@ def detect_and_ocr_simple(frame):
         else:
             fps = 0
         
-        # Draw FPS
+        # Draw FPS (simplified)
         fps_text = f"FPS: {fps:.1f}"
-        cv2.putText(display_frame, fps_text, (original_width - 120, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(display_frame, fps_text, (original_width - 100, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         
-        # Draw ROI
+        # Draw ROI (simplified)
         roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
-        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 2)
-        cv2.putText(display_frame, "DETECTION ZONE", (roi_xmin + 10, roi_ymin - 10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 1)
         
         # Initialize results
         boxes = []
@@ -235,18 +215,19 @@ def detect_and_ocr_simple(frame):
         ocr_results = []
         tracked_objects = {}
         
-        # THROTTLED DETECTION - Only run detection every 0.5 seconds
+        # OPTIMIZED DETECTION - Run detection more frequently
         should_detect = (current_time - last_detection_time) >= detection_interval
+        should_ocr = (current_time - last_ocr_time) >= ocr_interval
         
         if should_detect and yolo_model is not None:
             last_detection_time = current_time
             
             try:
-                # Single YOLO run with higher confidence threshold
-                results = yolo_model(frame, conf=0.5, verbose=False, half=False, imgsz=640)
+                # Optimized YOLO run with smaller input size
+                results = yolo_model(frame, conf=0.4, verbose=False, half=True, imgsz=416)
                 
                 plate_count = 0
-                max_plates = 2  # Process max 2 plates per detection cycle
+                max_plates = 1  # Process only 1 plate per detection for speed
                 
                 for result in results:
                     if result.boxes is not None and plate_count < max_plates:
@@ -259,7 +240,7 @@ def detect_and_ocr_simple(frame):
                             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                             
                             # Basic size check
-                            if (x2 - x1) < 40 or (y2 - y1) < 15:
+                            if (x2 - x1) < 30 or (y2 - y1) < 10:
                                 continue
                             
                             # ROI check
@@ -268,79 +249,67 @@ def detect_and_ocr_simple(frame):
                             
                             plate_count += 1
                             
-                            # Draw bounding box immediately (before OCR)
-                            color = (0, 255, 0) if conf > 0.7 else (0, 255, 255)
-                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 3)
+                            # Draw bounding box immediately
+                            color = (0, 255, 0) if conf > 0.6 else (0, 255, 255)
+                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
                             
-                            # Quick OCR attempt
-                            plate_crop = frame[max(0, y1):min(original_height, y2), 
-                                             max(0, x1):min(original_width, x2)]
-                            
-                            if plate_crop.size > 0:
-                                plate_text, ocr_conf = simple_ocr(plate_crop)
+                            # OCR only when needed
+                            if should_ocr:
+                                last_ocr_time = current_time
+                                plate_crop = frame[max(0, y1):min(original_height, y2), 
+                                                 max(0, x1):min(original_width, x2)]
                                 
-                                if plate_text and len(plate_text.strip()) >= 3:
-                                    is_valid, _ = is_valid_license_plate(plate_text)
+                                if plate_crop.size > 0:
+                                    plate_text, ocr_conf = simple_ocr(plate_crop)
                                     
-                                    # Display text
-                                    display_text = f"{plate_text} ({conf:.2f})"
-                                    text_y = max(30, y1 - 10)
-                                    
-                                    # Text background
-                                    text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-                                    cv2.rectangle(display_frame, 
-                                                (x1, text_y - text_size[1] - 10),
-                                                (x1 + text_size[0] + 10, text_y + 5),
-                                                (0, 0, 0), -1)
-                                    
-                                    cv2.putText(display_frame, display_text, (x1 + 5, text_y),
-                                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                                    
-                                    # Add to results
-                                    boxes.append([x1, y1, x2, y2])
-                                    labels.append(plate_text)
-                                    ocr_results.append([plate_text, float(ocr_conf)])
-                                    
-                                    # Save high confidence detections with crop images
-                                    if is_valid and conf > 0.6:  # Lowered threshold for better detection
-                                        # Save the crop image
-                                        crop_filename = save_plate_crop(plate_crop, plate_text, frame_count)
+                                    if plate_text and len(plate_text.strip()) >= 3:
+                                        is_valid, _ = is_valid_license_plate(plate_text)
                                         
-                                        track_id = f"plate_{frame_count}_{plate_count}"
-                                        tracked_objects[track_id] = {
-                                            'plate_number': plate_text,
-                                            'confidence': float(conf),
-                                            'ocr_confidence': float(ocr_conf),
-                                            'bbox': [x1, y1, x2, y2],
-                                            'crop_filename': crop_filename,
-                                            'first_seen': current_time,
-                                            'last_seen': current_time,
-                                            'is_valid': True,
-                                            'validation_confidence': 0.8,
-                                            'vehicle_type': 'license_plate'
-                                        }
-                                else:
-                                    # Show "Processing..." for boxes without OCR result
-                                    cv2.putText(display_frame, f"Processing... ({conf:.2f})", 
-                                               (x1 + 5, max(30, y1 - 10)),
-                                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                                        # Display text (simplified)
+                                        display_text = f"{plate_text} ({conf:.2f})"
+                                        cv2.putText(display_frame, display_text, (x1 + 5, max(30, y1 - 10)),
+                                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                                        
+                                        # Add to results
+                                        boxes.append([x1, y1, x2, y2])
+                                        labels.append(plate_text)
+                                        ocr_results.append([plate_text, float(ocr_conf)])
+                                        
+                                        # Save high confidence detections
+                                        if is_valid and conf > 0.5:
+                                            crop_filename = save_plate_crop(plate_crop, plate_text, frame_count)
+                                            
+                                            track_id = f"plate_{frame_count}_{plate_count}"
+                                            tracked_objects[track_id] = {
+                                                'plate_number': plate_text,
+                                                'confidence': float(conf),
+                                                'ocr_confidence': float(ocr_conf),
+                                                'bbox': [x1, y1, x2, y2],
+                                                'crop_filename': crop_filename,
+                                                'first_seen': current_time,
+                                                'last_seen': current_time,
+                                                'is_valid': True,
+                                                'validation_confidence': 0.8,
+                                                'vehicle_type': 'license_plate'
+                                            }
+                                    else:
+                                        # Show detection without OCR
+                                        cv2.putText(display_frame, f"Detected ({conf:.2f})", 
+                                                   (x1 + 5, max(30, y1 - 10)),
+                                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
                             
             except Exception as e:
                 logger.error(f"Detection failed: {e}")
         
-        # Status indicator
+        # Status indicator (simplified)
         status_text = "DETECTING" if should_detect else "STANDBY"
         status_color = (0, 255, 0) if should_detect else (0, 255, 255)
         cv2.putText(display_frame, status_text, (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
         
-        # Frame counter
-        cv2.putText(display_frame, f"Frame: {frame_count}", (10, 60), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # Encode frame with higher quality for better visual
+        # Encode frame with optimized quality
         try:
-            encode_params = [cv2.IMWRITE_JPEG_QUALITY, 85]
+            encode_params = [cv2.IMWRITE_JPEG_QUALITY, 75]  # Lower quality for speed
             _, buffer = cv2.imencode('.jpg', display_frame, encode_params)
             frame_bytes = buffer.tobytes()
         except Exception as e:

@@ -157,13 +157,13 @@ def recognize_ws(ws):
     
     frame_count = 0
     last_save_time = 0
-    save_interval = 2.0  # Save to DB only every 2 seconds
+    save_interval = 1.0  # Save to DB every 1 second for better responsiveness
     
     try:
         while True:
             try:
-                # Receive frame with timeout
-                message = ws.receive(timeout=1.0)
+                # Receive frame with shorter timeout for better responsiveness
+                message = ws.receive(timeout=0.1)
                 if message is None or not isinstance(message, bytes):
                     continue
                 
