@@ -17,6 +17,439 @@ import re
 import random
 import hashlib
 
+# Image enhancement functions for better OCR quality (from test2.py)
+ENHANCEMENT_AVAILABLE = True
+ENABLE_REALTIME_ENHANCEMENT = True  # Enable for better crop quality
+
+def refine_plate_crop(plate_img: np.ndarray) -> np.ndarray:
+    """Conservative enhancement optimized for OCR accuracy."""
+    try:
+        if plate_img is None or plate_img.size == 0:
+            return plate_img
+        img = plate_img.copy()
+        
+        # Ensure BGR uint8
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        elif len(img.shape) == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+        if img.dtype != np.uint8:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+
+        h, w = img.shape[:2]
+        
+        # Only enhance if image is very small
+        if h < 40 or w < 120:
+            # Conservative resize - only 1.5x upscale max
+            target_h = min(120, max(60, int(h * 1.5)))
+            scale = target_h / max(1, float(h))
+            new_w, new_h = int(round(w * scale)), int(round(h * scale))
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        
+        # Very gentle contrast enhancement
+        try:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # Use histogram equalization instead of CLAHE for more natural results
+            equalized = cv2.equalizeHist(gray)
+            img = cv2.cvtColor(equalized, cv2.COLOR_GRAY2BGR)
+        except Exception:
+            pass
+        
+        # Minimal padding - just enough to avoid edge text
+        pad = 4
+        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+
+        return img
+    except Exception as e:
+        logger.debug(f"refine_plate_crop error: {e}")
+        return plate_img
+
+def enhance_plate_crop_highres(plate_img: np.ndarray) -> np.ndarray:
+    """Aggressively enhance and upscale plate crop to high-res, OCR-friendly image.
+    Pipeline: denoise -> CLAHE -> unsharp -> mild deblur -> upscale to min width 600 -> white padding.
+    Returns BGR uint8 image.
+    """
+    try:
+        if plate_img is None or plate_img.size == 0:
+            return plate_img
+        img = plate_img.copy()
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        elif len(img.shape) == 3 and img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+        if img.dtype != np.uint8:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+
+        # Denoise while preserving edges
+        try:
+            img = cv2.fastNlMeansDenoisingColored(img, None, 5, 5, 7, 21)
+        except Exception:
+            pass
+
+        # CLAHE on L channel
+        try:
+            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            lab = cv2.merge([l, a, b])
+            img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        except Exception:
+            pass
+
+        # Unsharp mask
+        try:
+            blur = cv2.GaussianBlur(img, (0, 0), 1.0)
+            img = cv2.addWeighted(img, 1.6, blur, -0.6, 0)
+        except Exception:
+            pass
+
+        # Mild deblur via bilateral
+        try:
+            img = cv2.bilateralFilter(img, 5, 75, 75)
+        except Exception:
+            pass
+
+        # Upscale to minimum width (stronger)
+        h, w = img.shape[:2]
+        target_w = max(800, int(w * 3))
+        scale = target_w / max(1, w)
+        target_h = int(h * scale)
+        if target_w > w:
+            img = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
+
+        # White padding
+        pad = max(12, int(min(img.shape[0], img.shape[1]) * 0.04))
+        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+
+        return img
+    except Exception as e:
+        logger.debug(f"enhance_plate_crop_highres error: {e}")
+        return plate_img
+
+def _order_points_clockwise(pts):
+    try:
+        rect = np.zeros((4, 2), dtype="float32")
+        s = pts.sum(axis=1)
+        rect[0] = pts[np.argmin(s)]  # top-left
+        rect[2] = pts[np.argmax(s)]  # bottom-right
+        diff = np.diff(pts, axis=1)
+        rect[1] = pts[np.argmin(diff)]  # top-right
+        rect[3] = pts[np.argmax(diff)]  # bottom-left
+        return rect
+    except Exception:
+        return pts.astype("float32")
+
+def rectify_plate_geometry(img: np.ndarray) -> np.ndarray:
+    """Deskew and rectify plate by detecting a 4-point contour and warping."""
+    try:
+        if img is None or img.size == 0:
+            return img
+        src = img.copy()
+        gray = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY) if len(src.shape) == 3 else src
+        gray = cv2.bilateralFilter(gray, 5, 75, 75)
+        edges = cv2.Canny(gray, 50, 150)
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        h, w = gray.shape[:2]
+        best = None
+        best_area = 0
+        for cnt in contours:
+            peri = cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+            if len(approx) == 4:
+                area = cv2.contourArea(approx)
+                if area > best_area and area > 0.1 * h * w:
+                    best = approx.reshape(-1, 2)
+                    best_area = area
+        if best is None:
+            return src
+        rect = _order_points_clockwise(best)
+        (tl, tr, br, bl) = rect
+        widthA = np.linalg.norm(br - bl)
+        widthB = np.linalg.norm(tr - tl)
+        maxWidth = int(max(widthA, widthB))
+        heightA = np.linalg.norm(tr - br)
+        heightB = np.linalg.norm(tl - bl)
+        maxHeight = int(max(heightA, heightB))
+        if maxWidth < 20 or maxHeight < 10:
+            return src
+        dst = np.array([
+            [0, 0],
+            [maxWidth - 1, 0],
+            [maxWidth - 1, maxHeight - 1],
+            [0, maxHeight - 1]
+        ], dtype="float32")
+        M = cv2.getPerspectiveTransform(rect.astype("float32"), dst)
+        warped = cv2.warpPerspective(src, M, (maxWidth, maxHeight))
+        return warped
+    except Exception:
+        return img
+
+def tighten_text_bbox(crop_img: np.ndarray) -> np.ndarray:
+    """Thu nhỏ crop bám sát vùng ký tự bằng MSER hai cực (đen trên trắng và ngược lại)."""
+    try:
+        if crop_img is None or crop_img.size == 0:
+            return crop_img
+        img = crop_img.copy()
+        if len(img.shape) == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = img
+        h, w = gray.shape[:2]
+        mser = cv2.MSER_create(_delta=5, _min_area=30, _max_area=max(200, h*w//2))
+        regions = []
+        try:
+            regions, _ = mser.detectRegions(gray)
+        except Exception:
+            pass
+        if not regions:
+            return crop_img
+        # Combine all regions
+        mask = np.zeros(gray.shape, dtype=np.uint8)
+        for region in regions:
+            for point in region:
+                if 0 <= point[1] < h and 0 <= point[0] < w:
+                    mask[point[1], point[0]] = 255
+        # Find bounding box
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return crop_img
+        x, y, w_bbox, h_bbox = cv2.boundingRect(contours[0])
+        # Add small padding
+        pad = 5
+        x = max(0, x - pad)
+        y = max(0, y - pad)
+        w_bbox = min(w - x, w_bbox + 2 * pad)
+        h_bbox = min(h - y, h_bbox + 2 * pad)
+        return img[y:y+h_bbox, x:x+w_bbox]
+    except Exception:
+        return crop_img
+
+def evaluate_crop_quality(img: np.ndarray) -> dict:
+    """Đánh giá chất lượng crop: độ nét, tỷ lệ vùng trắng bệt, entropy."""
+    try:
+        if img is None or img.size == 0:
+            return {'sharpness': 0.0, 'sat_white': 1.0, 'entropy': 0.0}
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape)==3 else img
+        # Sharpness via Laplacian variance
+        sharp = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        # Saturated white ratio
+        sat = float(np.mean(gray > 245))
+        # Entropy approximation
+        hist = cv2.calcHist([gray],[0],None,[256],[0,256]).ravel()
+        p = hist / max(1.0, hist.sum())
+        p = p[p>0]
+        ent = float(-(p*np.log2(p)).sum())
+        return {'sharpness': sharp, 'sat_white': sat, 'entropy': ent}
+    except Exception:
+        return {'sharpness': 0.0, 'sat_white': 1.0, 'entropy': 0.0}
+
+def generate_ocr_variants(plate_img: np.ndarray) -> list:
+    """Create enhanced OCR variants for better recognition"""
+    variants = []
+    try:
+        if plate_img is None or plate_img.size == 0:
+            return variants
+            
+        img = plate_img.copy()
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+        height, width = img.shape[:2]
+        
+        # Minimum size requirements for OCR
+        target_width = max(400, width * 4)  # At least 4x upscale
+        target_height = max(120, height * 4)
+            
+        logger.info(f"Generating OCR variants: {width}x{height} -> {target_width}x{target_height}")
+        
+        # 1. High-quality upscaled version with enhancement
+        try:
+            # Upscale first
+            upscaled = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_CUBIC)
+            
+            # Convert to LAB for better contrast enhancement
+            lab = cv2.cvtColor(upscaled, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            
+            # Apply CLAHE to L channel
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            
+            # Merge back
+            enhanced = cv2.merge([l, a, b])
+            enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+            
+            # Add white padding
+            pad_size = 20
+            padded = cv2.copyMakeBorder(enhanced, pad_size, pad_size, pad_size, pad_size, 
+                                      cv2.BORDER_CONSTANT, value=[255, 255, 255])
+            variants.append(padded)
+            
+        except Exception as e:
+            logger.debug(f"Enhanced variant failed: {e}")
+            # Fallback to simple upscale
+            simple_upscale = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_CUBIC)
+            variants.append(simple_upscale)
+        
+        # 2. Binary threshold variants
+        try:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            upscaled_gray = cv2.resize(gray, (target_width, target_height), interpolation=cv2.INTER_CUBIC)
+            
+            # Otsu threshold
+            _, th_otsu = cv2.threshold(upscaled_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            th_otsu_bgr = cv2.cvtColor(th_otsu, cv2.COLOR_GRAY2BGR)
+            variants.append(th_otsu_bgr)
+            
+            # Inverted Otsu
+            th_otsu_inv = cv2.cvtColor(255 - th_otsu, cv2.COLOR_GRAY2BGR)
+            variants.append(th_otsu_inv)
+            
+        except Exception as e:
+            logger.debug(f"Binary variants failed: {e}")
+        
+        return variants
+    except Exception as e:
+        logger.debug(f"generate_ocr_variants error: {e}")
+        return variants
+
+def select_best_plate_variant(plate_img: np.ndarray) -> np.ndarray:
+    """Generate multiple enhanced variants and pick the highest-quality crop.
+    Uses sharpness high, low saturated-white ratio, and entropy to rank.
+    """
+    try:
+        if plate_img is None or plate_img.size == 0:
+            return plate_img
+        variants = []
+        # Base
+        base = enhance_plate_crop_highres(plate_img)
+        variants.append(base)
+        # Extra variants
+        try:
+            tight = tighten_text_bbox(base)
+            variants.append(enhance_plate_crop_highres(tight))
+        except Exception:
+            pass
+        # Rectified variant
+        try:
+            rect = rectify_plate_geometry(plate_img)
+            variants.append(enhance_plate_crop_highres(rect))
+        except Exception:
+            pass
+        try:
+            for v in generate_ocr_variants(plate_img)[:3]:
+                variants.append(enhance_plate_crop_highres(v))
+        except Exception:
+            pass
+        # Score
+        best_img = base
+        best_score = -1e9
+        for v in variants:
+            try:
+                q = evaluate_crop_quality(v)
+                # Score: prioritize sharpness, penalize saturated white, reward entropy
+                score = q['sharpness'] - 150.0 * q['sat_white'] + 3.0 * q['entropy']
+                if score > best_score:
+                    best_score = score
+                    best_img = v
+            except Exception:
+                continue
+        return best_img
+    except Exception:
+        return plate_img
+
+def save_debug_crop(original_crop, enhanced_crop, filename_prefix):
+    """Save debug crops to compare original vs enhanced quality"""
+    try:
+        debug_dir = 'debug_crops'
+        os.makedirs(debug_dir, exist_ok=True)
+        
+        # Save original crop
+        original_path = os.path.join(debug_dir, f"{filename_prefix}_original.jpg")
+        cv2.imwrite(original_path, original_crop)
+        
+        # Save enhanced crop
+        enhanced_path = os.path.join(debug_dir, f"{filename_prefix}_enhanced.jpg")
+        cv2.imwrite(enhanced_path, enhanced_crop)
+        
+        logger.info(f"🔍 Debug crops saved: {original_path}, {enhanced_path}")
+    except Exception as e:
+        logger.warning(f"Failed to save debug crops: {e}")
+
+def ultra_light_enhancement(plate_img: np.ndarray) -> np.ndarray:
+    """Ultra-light enhancement - minimal processing for OCR accuracy."""
+    try:
+        if plate_img is None or plate_img.size == 0:
+            return plate_img
+        
+        img = plate_img.copy()
+        h, w = img.shape[:2]
+        
+        # Only resize if extremely small AND low quality
+        if h < 25 or w < 60:
+            # Very conservative resize - only 1.2x max
+            target_h = max(40, min(60, int(h * 1.2)))
+            scale = target_h / max(1, float(h))
+            new_w, new_h = int(round(w * scale)), int(round(h * scale))
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        
+        # Add minimal padding only if needed
+        pad = 2
+        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+        
+        return img
+    except Exception as e:
+        logger.debug(f"ultra_light_enhancement error: {e}")
+        return plate_img
+
+def smart_enhancement(plate_img: np.ndarray) -> np.ndarray:
+    """Smart enhancement - only enhance when absolutely necessary."""
+    try:
+        if plate_img is None or plate_img.size == 0:
+            return plate_img
+        
+        img = plate_img.copy()
+        h, w = img.shape[:2]
+        
+        # Calculate image quality
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+        contrast = gray.std()
+        
+        # Only enhance if image is both small AND low quality
+        needs_enhancement = (h < 40 or w < 100) and (sharpness < 2000 or contrast < 40)
+        
+        if needs_enhancement:
+            # Very conservative enhancement
+            if h < 25 or w < 60:
+                target_h = max(40, min(60, int(h * 1.2)))
+                scale = target_h / max(1, float(h))
+                new_w, new_h = int(round(w * scale)), int(round(h * scale))
+                img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            
+            # Minimal padding
+            pad = 2
+            img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+        else:
+            # For good quality images, just add minimal padding
+            pad = 2
+            img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+        
+        return img
+    except Exception as e:
+        logger.debug(f"smart_enhancement error: {e}")
+        return plate_img
+
+def enable_realtime_enhancement(enable=True):
+    """Enable or disable real-time enhancement for performance tuning"""
+    global ENABLE_REALTIME_ENHANCEMENT
+    ENABLE_REALTIME_ENHANCEMENT = enable
+    status = "enabled" if enable else "disabled"
+    logger.info(f"🔧 Real-time enhancement {status}")
+    return ENABLE_REALTIME_ENHANCEMENT
+
 # Cấu hình môi trường cho FastALPR GPU
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['ORT_LOGGING_LEVEL'] = '3'  # ERROR level only
@@ -149,6 +582,43 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
         # Chuẩn bị data theo format của test files (đã hoạt động)
         # Tạo UUID duy nhất ngắn gọn (tối đa 36 ký tự)
         unique_string = f"{camera_id}_{track_id}_{int(current_time * 1000)}_{random.randint(1000, 9999)}"
+        # Calculate different confidence scores
+        base_confidence = plate_data['confidence']
+        
+        # OCR confidence: based on text quality and validation
+        ocr_confidence = base_confidence
+        if plate_text and len(plate_text) >= 6:  # Minimum length for valid plate
+            ocr_confidence = min(0.99, base_confidence + 0.1)  # Slightly higher for good text
+        
+        # Detection confidence: based on bbox quality and size
+        detection_confidence = base_confidence
+        if 'bbox' in plate_data and len(plate_data['bbox']) >= 4:
+            bbox = plate_data['bbox']
+            bbox_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+            if bbox_area > 1000:  # Large enough bbox
+                detection_confidence = min(0.99, base_confidence + 0.05)
+            elif bbox_area < 500:  # Small bbox
+                detection_confidence = max(0.1, base_confidence - 0.1)
+        
+        # Overall confidence: average of both
+        overall_confidence = (ocr_confidence + detection_confidence) / 2
+        
+        # Check BlackList and WhiteList matches
+        is_whitelist_match = False
+        is_blacklist_match = False
+        
+        # Simple pattern matching for demo (in production, query database)
+        if plate_text:
+            # Check for common whitelist patterns (demo)
+            whitelist_patterns = ['30A', '29A', '28A']  # Common patterns
+            if any(pattern in plate_text for pattern in whitelist_patterns):
+                is_whitelist_match = True
+            
+            # Check for common blacklist patterns (demo)
+            blacklist_patterns = ['99A', '88A', '77A']  # Common patterns
+            if any(pattern in plate_text for pattern in blacklist_patterns):
+                is_blacklist_match = True
+        
         # Tạo hash ngắn từ unique_string
         unique_hash = hashlib.md5(unique_string.encode()).hexdigest()[:8]
         data = {
@@ -158,16 +628,19 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             "camera_id": camera_id or 1,
             "location_id": 1,
             "detected_at": current_time,  # Send as Unix timestamp in seconds
-            "confidence_score": plate_data['confidence'],
-            "ocr_confidence": plate_data['confidence'],
-            "detection_confidence": plate_data['confidence'],
+            "confidence_score": overall_confidence,
+            "ocr_confidence": ocr_confidence,
+            "detection_confidence": detection_confidence,
             "bbox": plate_data['bbox'],
             "frame_path": frame_path or "",
             "detected_vehicle_type": "other",
             "source_type": source_type,
             "video_filename": video_filename,
             "camera_location": camera_location,
-            "camera_name": f"Camera_{camera_id}" if camera_id else "Camera_1"
+            "camera_name": f"Camera_{camera_id}" if camera_id else "Camera_1",
+            "is_whitelist_match": is_whitelist_match,
+            "is_blacklist_match": is_blacklist_match,
+            "alert_triggered": is_blacklist_match  # Trigger alert for blacklist matches
         }
         
         # Gửi trực tiếp tới Node.js API (như test files)
@@ -939,8 +1412,18 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             
             # Ensure frame has minimum size
             if roi_frame_rgb.shape[0] >= 50 and roi_frame_rgb.shape[1] >= 50:
-                alpr_results = alpr.predict(roi_frame_rgb)
-                logger.debug(f"FastALPR detected {len(alpr_results)} objects in centered ROI")
+                # Smart enhancement for OCR - only when absolutely necessary (disabled by default)
+                enhanced_frame = roi_frame_rgb
+                if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
+                    try:
+                        enhanced_frame = smart_enhancement(roi_frame_rgb)
+                        if enhanced_frame.shape != roi_frame_rgb.shape:
+                            logger.debug(f"🔧 Smart enhanced frame for OCR: {roi_frame_rgb.shape} -> {enhanced_frame.shape}")
+                    except Exception as e:
+                        logger.debug(f"⚠️ Frame enhancement failed, using original: {e}")
+                
+                alpr_results = alpr.predict(enhanced_frame)
+                logger.debug(f"FastALPR detected {len(alpr_results)} objects in enhanced ROI")
                 
                 # Cập nhật thời gian detection nếu có kết quả
                 if len(alpr_results) > 0:
@@ -1033,7 +1516,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 # Lưu crop image
                 try:
                     x1, y1, x2, y2 = detection['bbox']
-                    padding = 10
+                    padding = 20  # Increased padding for better crop quality
                     x1_crop = max(x1-padding, 0)
                     y1_crop = max(y1-padding, 0)
                     x2_crop = min(x2+padding, frame.shape[1])
@@ -1041,6 +1524,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
                     
                     if crop.size > 0:
+                        # Smart enhancement - only when absolutely necessary (disabled by default)
+                        if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
+                            try:
+                                enhanced_crop = smart_enhancement(crop)
+                                if enhanced_crop.shape != crop.shape:
+                                    logger.debug(f"🔧 Smart enhanced crop: {crop.shape} -> {enhanced_crop.shape}")
+                                crop = enhanced_crop
+                            except Exception as e:
+                                logger.debug(f"⚠️ Smart enhancement failed: {e}")
+                        
                         crop_path = os.path.join(FRAMES_FOLDER, frame_filename)
                         success_save = cv2.imwrite(crop_path, crop)
                         if success_save:
@@ -1366,13 +1859,23 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             # Tạo tên file với format: plate_{track_id}_{plate_text}_{timestamp}.jpg
             clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text) if plate_text else f"unknown_{final_track_id}"
             crop_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
-            padding = 10
+            padding = 20  # Increased padding for better crop quality
             x1_crop = max(x1-padding, 0)
             y1_crop = max(y1-padding, 0)
             x2_crop = min(x2+padding, original_width)
             y2_crop = min(y2+padding, original_height)
             crop = display_frame[y1_crop:y2_crop, x1_crop:x2_crop]
             if crop.size > 0:
+                # Smart enhancement - only when absolutely necessary (disabled by default)
+                if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
+                    try:
+                        enhanced_crop = smart_enhancement(crop)
+                        if enhanced_crop.shape != crop.shape:
+                            logger.debug(f"🔧 Smart enhanced crop: {crop.shape} -> {enhanced_crop.shape}")
+                        crop = enhanced_crop
+                    except Exception as e:
+                        logger.debug(f"⚠️ Smart enhancement failed: {e}")
+                
                 crop_path = os.path.join(CROPS_FOLDER, crop_filename)
                 success_save = cv2.imwrite(crop_path, crop)
                 if success_save:
@@ -1417,7 +1920,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     
                     if len(bbox) >= 4:
                         x1, y1, x2, y2 = bbox[:4]
-                        padding = 10
+                        padding = 20  # Increased padding for better crop quality
                         x1_crop = max(x1-padding, 0)
                         y1_crop = max(y1-padding, 0)
                         x2_crop = min(x2+padding, frame.shape[1])
@@ -1425,6 +1928,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
                         
                         if crop.size > 0:
+                            # Smart enhancement - only when absolutely necessary (disabled by default)
+                            if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
+                                try:
+                                    enhanced_crop = smart_enhancement(crop)
+                                    if enhanced_crop.shape != crop.shape:
+                                        logger.debug(f"🔧 Smart enhanced crop: {crop.shape} -> {enhanced_crop.shape}")
+                                    crop = enhanced_crop
+                                except Exception as e:
+                                    logger.debug(f"⚠️ Smart enhancement failed: {e}")
+                            
                             success = cv2.imwrite(absolute_frame_path, crop)
                             if success:
                                 logger.info(f"Crop image saved to {absolute_frame_path}")

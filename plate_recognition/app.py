@@ -705,7 +705,9 @@ def process_video_file(video_path, video_id):
                 break
 
             # Xử lý frame với detection/OCR
-            result = detect_and_ocr_stable(frame, camera_id=video_id, source_type="video_upload", video_filename=video_id)
+            # Extract original filename from video_id (remove UUID prefix)
+            original_filename = video_id.split('_', 1)[1] if '_' in video_id else video_id
+            result = detect_and_ocr_stable(frame, camera_id=video_id, source_type="video_upload", video_filename=original_filename)
             
             if isinstance(result, dict):
                 tracked_objects = result.get('tracked_objects', {})
