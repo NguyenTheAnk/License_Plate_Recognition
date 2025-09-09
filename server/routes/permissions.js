@@ -16,35 +16,35 @@ const { getPermissionUsageAnalytics, exportPermissions, compareRolePermissions, 
 // GET /permissions - Get all permissions with pagination and filtering
 router.get('/', 
     auth, 
-    // checkPermission('permissions.view'),
+    checkPermission('permission.view'),
     getAllPermissions
 );
 
 // GET /permissions/:id - Get permission by ID
 router.get('/:id', 
     auth, 
-    //checkPermission('permissions.view'),
+    checkPermission('permission.view_detail'),
     getPermissionById
 );
 
 // POST /permissions - Create new permission
 router.post('/', 
     auth, 
-    //checkPermission('permissions.create'),
+    checkPermission('permission.create'),
     createPermission
 );
 
 // PUT /permissions/:id - Update permission
 router.put('/:id', 
     auth, 
-    //checkPermission('permissions.update'),
+    checkPermission('permission.update'),
     updatePermission
 );
 
 // DELETE /permissions/:id - Delete permission
 router.delete('/:id', 
     auth, 
-    //checkPermission('permissions.delete'),
+    checkPermission('permission.delete'),
     deletePermission
 );
 
@@ -106,7 +106,7 @@ router.get('/export/data',
 // DELETE /permissions/bulk/delete - Bulk delete permissions
 router.delete('/bulk/delete', 
     auth, 
-    //checkPermission('permissions.delete'),
+    checkPermission('permission.delete_all'),
     bulkDeletePermissions
 );
 

@@ -46,7 +46,7 @@ const {
 
 // Get all blacklist entries with pagination and filters
 router.get('/', 
-    auth, 
+    auth, checkPermission('blacklist.view'),
     getAllBlacklist
 );
 
@@ -60,14 +60,13 @@ router.get('/statistics',
 // Search blacklist entries
 router.get('/search', 
     auth, 
-    //checkPermission('blacklist.view'), 
+    checkPermission('blacklist.search'), 
     searchBlacklist
 );
 
 // Get blacklist entry by ID
 router.get('/:id', 
     auth, 
-    checkPermission('blacklist.view'), 
     getBlacklistById
 );
 

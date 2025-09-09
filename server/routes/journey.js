@@ -2,9 +2,9 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middlewares/authMiddleware');
 const journeyController = require('../controllers/journeyController');
-
+const checkPermission = require('../middlewares/checkPermission');
 // Lấy danh sách lộ trình
-router.get('/', auth, journeyController.getJourneys);
+router.get('/', auth,checkPermission('monitor_journey.view'), journeyController.getJourneys);
 
 // Lấy chi tiết lộ trình theo id
 router.get('/:id', auth, journeyController.getJourneyDetail);

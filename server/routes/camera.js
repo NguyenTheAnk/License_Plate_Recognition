@@ -42,7 +42,7 @@ const {
 // Camera CRUD routes
 router.post('/create',
     auth,
-    // checkPermission('cameras.create'), 
+    checkPermission('camera.create'), 
     createCameraValidator,
     createCamera
 );
@@ -69,19 +69,19 @@ router.get('/:id/stream/status',
 
 router.get('/',
     auth,
-    // checkPermission('cameras.view'), 
+    checkPermission('camera.view'), 
     getAllCameras
 );
 
 router.get('/statistics',
     auth,
-    // checkPermission('cameras.view'), 
+    // checkPermission('camera.view'), 
     getCameraStatistics
 );
 
 router.get('/health-report',
     auth,
-    // checkPermission('cameras.view'), 
+    // checkPermission('camera.view'), 
     healthReportValidator,
     getCameraHealthReport
 );
@@ -103,14 +103,14 @@ router.post('/comparison-report',
 
 router.get('/:id',
     auth,
-    // checkPermission('cameras.view'), 
+    checkPermission('camera.view_detail'), 
     deleteCameraValidator,
     getCameraById
 );
 
 router.get('/:id/detailed',
     auth,
-    // checkPermission('cameras.view'), 
+    checkPermission('camera.view_detail'), 
     deleteCameraValidator,
     getCameraDetailedView
 );
@@ -151,7 +151,7 @@ router.get('/streams/all',
 
 router.delete('/:id',
     auth,
-    // checkPermission('cameras.delete'), 
+    checkPermission('camera.delete'), 
     deleteCameraValidator,
     deleteCamera
 );

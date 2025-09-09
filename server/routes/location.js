@@ -17,13 +17,13 @@ const { onlyAdminAccess } = require('../middlewares/adminMiddleware');
 // Location CRUD routes
 router.post('/create', 
     auth, 
-    // checkPermission('locations.create'), 
+    checkPermission('location.create'), 
     createLocation
 );
 
 router.get('/', 
     auth, 
-    // checkPermission('locations.view'),
+    checkPermission('location.view'),
     getAllLocations
 );
 
@@ -47,19 +47,19 @@ router.get('/hierarchy',
 
 router.get('/:id', 
     auth, 
-    // checkPermission('locations.view'),
+    checkPermission('locations.view_detail'),
     getLocationById
 );
 
 router.get('/:id/detailed', 
     auth, 
-    // checkPermission('locations.view'),
+    checkPermission('locations.view_detail'),
     getLocationDetailedView
 );
 
 router.put('/:id', 
     auth, 
-    // checkPermission('locations.update'),
+    checkPermission('locations.update'),
     updateLocation
 );
 
@@ -71,7 +71,7 @@ router.put('/:id/status',
 
 router.delete('/:id', 
     auth, 
-    // checkPermission('locations.delete'),
+    checkPermission('locations.delete'),
     deleteLocation
 );
 

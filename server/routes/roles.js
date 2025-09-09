@@ -13,23 +13,23 @@ const auth = require('../middlewares/authMiddleware');
 const checkPermission = require('../middlewares/checkPermission');
 const { onlyAdminAccess } = require('../middlewares/adminMiddleware');
 // Get all roles with pagination, filtering, sorting
-router.get('/', auth, getRoles);
+router.get('/', auth,checkPermission('role.view'), getRoles);
 
 // Get specific role by ID with detailed information
-router.get('/:id', auth, getRoleById);
+router.get('/:id', auth,checkPermission('role.view_detail'), getRoleById);
 
 // Create new role
-router.post('/', auth, createRole);
+router.post('/', auth,checkPermission('role.create'), createRole);
 
 // Update role information
-router.put('/:id', auth, updateRole);
+router.put('/:id', auth, checkPermission('role.update'), updateRole);
 
-router.put('/:id/rolePermission', auth, updateRolePermissions);
+router.put('/:id/rolePermission', auth,checkPermission('role.update_permission'), updateRolePermissions);
 // Delete role (hard delete)
-router.delete('/:id', auth, deleteRole);
+router.delete('/:id', auth,checkPermission('role.delete'), deleteRole);
 
 // Lấy thông tin role đó có những quyền nào ứng với module nào
-router.get('/:id/permissions', auth, getRolePermissionsWithRemaining);
+router.get('/:id/permissions', auth, checkPermission('role.view_detail'), getRolePermissionsWithRemaining);
 
 // Lấy tất cả các quyền ứng với từng module
 router.get('/permissions/all', auth, getAllPermissions);

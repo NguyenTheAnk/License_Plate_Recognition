@@ -27,7 +27,7 @@ router.put('/change-password/:id', auth, changePassword);
 router.post('/create', 
     auth, 
     // onlyAdminAccess, 
-    // checkPermission('users.create'), 
+    checkPermission('users.create'), 
     createUserValidator, 
     createUser
 );
@@ -75,12 +75,14 @@ router.get('/permission/:permissionCode',
 // Generic routes (these should come after specific routes)
 router.get('/', 
     auth, 
+    checkPermission('user.view'),
     getAllUsers
 );
 
 // FIXED: Specific ID-based routes
 router.get('/:id/detailed', 
     auth, 
+    checkPermission('user.view_detail'),
     getUserDetailedView
 );
 
@@ -91,6 +93,7 @@ router.get('/:id',
 
 router.put('/:id', 
     auth, 
+    checkPermission('user.update'),
     updateUserValidator, 
     updateUser
 );
@@ -102,6 +105,7 @@ router.put('/:id/status',
 
 router.delete('/:id', 
     auth, 
+    checkPermission('user.delete'),
     deleteUserValidator, 
     deleteUser
 );
@@ -110,7 +114,7 @@ router.delete('/:id',
 router.post('/:id/reset-password', 
     auth, 
     // onlyAdminAccess, 
-    // checkPermission('user.update'), 
+    checkPermission('user.reset_password'), 
     resetUserPassword
 );
 
