@@ -113,4 +113,3 @@ const onlyAdminAccess = async (req, res, next) => {
 module.exports = {
   onlyAdminAccess,
 };
-

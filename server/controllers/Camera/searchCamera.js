@@ -1,3 +1,4 @@
+
 const db = require('../../db');
 
 const searchCameras = async (req, res) => {
@@ -8,22 +9,16 @@ const searchCameras = async (req, res) => {
             keyword = '',
             page = 1,
             limit = 20,
-            sort = 'id',
+            sort = 'created_at',
             order = 'DESC'
         } = req.query;
 
-        // Convert to numbers
-        const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20;
-        const offset = (pageNum - 1) * limitNum;
+        const offset = (page - 1) * limit;
 
-        // Validate sort field - only use columns that actually exist in cameras table
-        const allowedSortFields = ['id', 'name', 'code', 'status', 'last_heartbeat', 'installation_date'];
-        const sortField = allowedSortFields.includes(sort) ? sort : 'id';
+        // Validate sort field
+        const allowedSortFields = ['id', 'name', 'code', 'status', 'created_at', 'updated_at', 'last_heartbeat'];
+        const sortField = allowedSortFields.includes(sort) ? sort : 'created_at';
         const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-        
-        // Ensure sortField is properly escaped
-        const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'id';
 
         // Search query
         const searchKeyword = `%${keyword}%`;
@@ -40,8 +35,8 @@ const searchCameras = async (req, res) => {
 
         const total = countResult[0].total;
 
-        // Get cameras with search - build query with proper ORDER BY
-        const query = `
+        // Get cameras with search
+        const [cameras] = await connection.execute(`
             SELECT 
                 c.*,
                 l.name as location_name,
@@ -51,109 +46,50 @@ const searchCameras = async (req, res) => {
                 ml.zone_type as monitoring_zone_type,
                 TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat,
                 CASE 
-                    WHEN c.status = 'online' THEN 'online'
-                    WHEN c.status = 'offline' THEN 'offline'
-                    WHEN c.status = 'warning' THEN 'warning'
+                    WHEN c.last_heartbeat IS NULL THEN 'never'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
                 END as connection_status,
-                CASE 
-                    WHEN c.protocol = 'rtsp' AND c.username IS NOT NULL AND c.password IS NOT NULL THEN 
-                        CONCAT(c.protocol, '://', c.username, ':', c.password, '@', c.host, ':', c.port, c.path)
-                    WHEN c.protocol = 'rtsp' THEN 
-                        CONCAT(c.protocol, '://', c.host, ':', c.port, c.path)
-                    ELSE 
-                        CONCAT(c.protocol, '://', c.host, ':', c.port, c.path)
-                END as rtsp_url,
-                CONCAT(c.width, 'x', c.height) as resolution,
-                CASE 
-                    WHEN c.installation_date IS NOT NULL THEN 
-                        DATEDIFF(NOW(), c.installation_date)
-                    ELSE NULL 
-                END as days_since_installation,
-                CASE 
-                    WHEN c.maintenance_schedule IS NOT NULL THEN 
-                        CASE 
-                            WHEN c.maintenance_schedule = 'weekly' THEN 7
-                            WHEN c.maintenance_schedule = 'monthly' THEN 30
-                            WHEN c.maintenance_schedule = 'quarterly' THEN 90
-                            WHEN c.maintenance_schedule = 'yearly' THEN 365
-                            ELSE 30
-                        END 
-                    ELSE 30 
-                END as maintenance_interval_days,
                 (SELECT COUNT(*) FROM license_plate_detections lpd 
-                 WHERE lpd.camera_id = c.id AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) as detections_24h
+                 WHERE lpd.camera_id = c.id AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) as detections_24h
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.is_active = 1 
             AND (c.name LIKE ? OR c.code LIKE ? OR l.name LIKE ? OR ml.name LIKE ?)
-            ORDER BY c.${safeSortField} ${sortOrder}
+            ORDER BY c.${sortField} ${sortOrder}
             LIMIT ? OFFSET ?
-        `;
-        
-        console.log('Camera search query:', query);
-        console.log('Query parameters:', [searchKeyword, searchKeyword, searchKeyword, searchKeyword, limitNum, offset]);
-        
-        const [cameras] = await connection.query(query, [searchKeyword, searchKeyword, searchKeyword, searchKeyword, limitNum, offset]);
+        `, [searchKeyword, searchKeyword, searchKeyword, searchKeyword, parseInt(limit), offset]);
 
         // Log access
-        try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'SEARCH', 'CAMERAS', ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user?.userId || null,
-                    req.user?.username || 'Anonymous',
-                    JSON.stringify({ keyword, page: pageNum, limit: limitNum, sort, order }),
-                    req.ip || '127.0.0.1',
-                    req.get('User-Agent') || 'Unknown'
-                ]
-            );
-        } catch (logError) {
-            console.error('Error logging access:', logError);
-        }
-
-        // Process cameras data with additional information
-        const processedCameras = cameras.map(camera => ({
-            ...camera,
-            // Hide sensitive information
-            username: undefined,
-            password: undefined,
-            // Add additional computed fields
-            is_online: camera.connection_status === 'online',
-            is_offline: camera.connection_status === 'offline',
-            is_warning: camera.connection_status === 'warning',
-            has_credentials: !!(camera.username && camera.password),
-            // Format dates
-            installation_date_formatted: camera.installation_date ? 
-                new Date(camera.installation_date).toLocaleDateString('vi-VN') : null,
-            last_heartbeat_formatted: camera.last_heartbeat ? 
-                new Date(camera.last_heartbeat).toLocaleString('vi-VN') : null,
-            // Add status indicators
-            status_indicators: {
-                is_active: !!camera.is_active,
-                is_detect_enabled: !!camera.is_detect,
-                has_maintenance_schedule: !!camera.maintenance_schedule,
-                is_recently_installed: camera.days_since_installation !== null && camera.days_since_installation < 30
-            }
-        }));
+        await connection.execute(
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'SEARCH', 'CAMERAS', ?, 'SUCCESS', ?, ?, NOW())`,
+            [
+                req.user.userId,
+                req.user.username,
+                JSON.stringify({ keyword, page, limit, sort, order }),
+                req.ip,
+                req.get('User-Agent')
+            ]
+        );
 
         res.status(200).json({
             success: true,
             data: {
-                cameras: processedCameras,
+                cameras: cameras,
                 search_params: {
                     keyword: keyword,
                     total_results: total
                 },
                 pagination: {
-                    current_page: pageNum,
-                    per_page: limitNum,
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
                     total: total,
-                    total_pages: Math.ceil(total / limitNum),
-                    has_next: pageNum * limitNum < total,
-                    has_prev: pageNum > 1
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
                 }
             }
         });
@@ -191,10 +127,7 @@ const searchCamerasByCriteria = async (req, res) => {
             order = 'DESC'
         } = req.body;
 
-        // Convert to numbers
-        const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20;
-        const offset = (pageNum - 1) * limitNum;
+        const offset = (page - 1) * limit;
 
         // Build dynamic where conditions
         let whereConditions = ['c.is_active = 1'];
@@ -279,7 +212,7 @@ const searchCamerasByCriteria = async (req, res) => {
         const total = countResult[0].total;
 
         // Get cameras
-        const [cameras] = await connection.query(`
+        const [cameras] = await connection.execute(`
             SELECT 
                 c.*,
                 l.name as location_name,
@@ -289,41 +222,37 @@ const searchCamerasByCriteria = async (req, res) => {
                 ml.zone_type as monitoring_zone_type,
                 TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat,
                 CASE 
-                    WHEN c.status = 'online' THEN 'online'
-                    WHEN c.status = 'offline' THEN 'offline'
-                    WHEN c.status = 'warning' THEN 'warning'
+                    WHEN c.last_heartbeat IS NULL THEN 'never'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
                 END as connection_status,
                 (SELECT COUNT(*) FROM license_plate_detections lpd 
-                 WHERE lpd.camera_id = c.id AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) as detections_24h
+                 WHERE lpd.camera_id = c.id AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) as detections_24h
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE ${whereClause}
             ORDER BY c.${sortField} ${sortOrder}
             LIMIT ? OFFSET ?
-        `, [...queryParams, limitNum, offset]);
+        `, [...queryParams, parseInt(limit), offset]);
 
         // Log access
-        try {
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'SEARCH_CRITERIA', 'CAMERAS', ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user?.userId || null,
-                    req.user?.username || 'Anonymous',
-                    JSON.stringify({
-                        name, code, status, location_id, monitoring_location_id,
-                        camera_type, camera_role, direction, installation_date_from, installation_date_to,
-                        last_heartbeat_from, last_heartbeat_to, page: pageNum, limit: limitNum, sort, order
-                    }),
-                    req.ip || '127.0.0.1',
-                    req.get('User-Agent') || 'Unknown'
-                ]
-            );
-        } catch (logError) {
-            console.error('Error logging access:', logError);
-        }
+        await connection.execute(
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, request_data, status, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'SEARCH_CRITERIA', 'CAMERAS', ?, 'SUCCESS', ?, ?, NOW())`,
+            [
+                req.user.userId,
+                req.user.username,
+                JSON.stringify({
+                    name, code, status, location_id, monitoring_location_id,
+                    camera_type, camera_role, direction, installation_date_from, installation_date_to,
+                    last_heartbeat_from, last_heartbeat_to, page, limit, sort, order
+                }),
+                req.ip,
+                req.get('User-Agent')
+            ]
+        );
 
         res.status(200).json({
             success: true,
@@ -335,12 +264,12 @@ const searchCamerasByCriteria = async (req, res) => {
                     last_heartbeat_from, last_heartbeat_to
                 },
                 pagination: {
-                    current_page: pageNum,
-                    per_page: limitNum,
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
                     total: total,
-                    total_pages: Math.ceil(total / limitNum),
-                    has_next: pageNum * limitNum < total,
-                    has_prev: pageNum > 1
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
                 }
             }
         });
@@ -378,9 +307,9 @@ const searchCamerasByKeyword = async (req, res) => {
                 l.address as location_address,
                 ml.name as monitoring_location_name,
                 CASE 
-                    WHEN c.status = 'online' THEN 'online'
-                    WHEN c.status = 'offline' THEN 'offline'
-                    WHEN c.status = 'warning' THEN 'warning'
+                    WHEN c.last_heartbeat IS NULL THEN 'never'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
                 END as connection_status,
                 CASE 
@@ -438,10 +367,7 @@ const getCamerasByStatus = async (req, res) => {
             });
         }
 
-        // Convert to numbers
-        const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20;
-        const offset = (pageNum - 1) * limitNum;
+        const offset = (page - 1) * limit;
 
         // Get total count
         const [countResult] = await connection.execute(
@@ -472,7 +398,7 @@ const getCamerasByStatus = async (req, res) => {
             WHERE c.status = ? AND c.is_active = 1
             ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?
-        `, [status, limitNum, offset]);
+        `, [status, parseInt(limit), offset]);
 
         res.status(200).json({
             success: true,
@@ -482,12 +408,12 @@ const getCamerasByStatus = async (req, res) => {
                     status: status
                 },
                 pagination: {
-                    current_page: pageNum,
-                    per_page: limitNum,
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
                     total: total,
-                    total_pages: Math.ceil(total / limitNum),
-                    has_next: pageNum * limitNum < total,
-                    has_prev: pageNum > 1
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
                 }
             }
         });
@@ -518,10 +444,7 @@ const getCamerasByType = async (req, res) => {
             });
         }
 
-        // Convert to numbers
-        const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20;
-        const offset = (pageNum - 1) * limitNum;
+        const offset = (page - 1) * limit;
 
         // Get total count
         const [countResult] = await connection.execute(
@@ -552,7 +475,7 @@ const getCamerasByType = async (req, res) => {
             WHERE c.camera_type = ? AND c.is_active = 1
             ORDER BY c.name
             LIMIT ? OFFSET ?
-        `, [type, limitNum, offset]);
+        `, [type, parseInt(limit), offset]);
 
         res.status(200).json({
             success: true,
@@ -562,12 +485,12 @@ const getCamerasByType = async (req, res) => {
                     camera_type: type
                 },
                 pagination: {
-                    current_page: pageNum,
-                    per_page: limitNum,
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
                     total: total,
-                    total_pages: Math.ceil(total / limitNum),
-                    has_next: pageNum * limitNum < total,
-                    has_prev: pageNum > 1
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
                 }
             }
         });
@@ -598,10 +521,7 @@ const getCamerasByRole = async (req, res) => {
             });
         }
 
-        // Convert to numbers
-        const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20;
-        const offset = (pageNum - 1) * limitNum;
+        const offset = (page - 1) * limit;
 
         // Get total count
         const [countResult] = await connection.execute(
@@ -621,20 +541,20 @@ const getCamerasByRole = async (req, res) => {
                 ml.name as monitoring_location_name,
                 TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat,
                 CASE 
-                    WHEN c.status = 'online' THEN 'online'
-                    WHEN c.status = 'offline' THEN 'offline'
-                    WHEN c.status = 'warning' THEN 'warning'
+                    WHEN c.last_heartbeat IS NULL THEN 'never'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
                 END as connection_status,
                 (SELECT COUNT(*) FROM license_plate_detections lpd 
-                 WHERE lpd.camera_id = c.id AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) as detections_7d
+                 WHERE lpd.camera_id = c.id AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)) as detections_7d
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.camera_role = ? AND c.is_active = 1
             ORDER BY c.name
             LIMIT ? OFFSET ?
-        `, [role, limitNum, offset]);
+        `, [role, parseInt(limit), offset]);
 
         res.status(200).json({
             success: true,
@@ -644,12 +564,12 @@ const getCamerasByRole = async (req, res) => {
                     camera_role: role
                 },
                 pagination: {
-                    current_page: pageNum,
-                    per_page: limitNum,
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
                     total: total,
-                    total_pages: Math.ceil(total / limitNum),
-                    has_next: pageNum * limitNum < total,
-                    has_prev: pageNum > 1
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
                 }
             }
         });
@@ -669,11 +589,7 @@ const getOfflineCameras = async (req, res) => {
     
     try {
         const { minutes = 15, page = 1, limit = 20 } = req.query;
-        
-        // Convert to numbers
-        const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20;
-        const offset = (pageNum - 1) * limitNum;
+        const offset = (page - 1) * limit;
 
         // Get total count
         const [countResult] = await connection.execute(`
@@ -702,7 +618,7 @@ const getOfflineCameras = async (req, res) => {
             AND (c.last_heartbeat IS NULL OR TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) >= ?)
             ORDER BY c.last_heartbeat ASC
             LIMIT ? OFFSET ?
-        `, [parseInt(minutes), limitNum, offset]);
+        `, [parseInt(minutes), parseInt(limit), offset]);
 
         res.status(200).json({
             success: true,
@@ -712,12 +628,12 @@ const getOfflineCameras = async (req, res) => {
                     offline_threshold_minutes: parseInt(minutes)
                 },
                 pagination: {
-                    current_page: pageNum,
-                    per_page: limitNum,
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
                     total: total,
-                    total_pages: Math.ceil(total / limitNum),
-                    has_next: pageNum * limitNum < total,
-                    has_prev: pageNum > 1
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
                 }
             }
         });
@@ -820,7 +736,6 @@ const getRecentlyAddedCameras = async (req, res) => {
     
     try {
         const { days = 7, limit = 20 } = req.query;
-        const limitNum = parseInt(limit) || 20;
 
         const [cameras] = await connection.execute(`
             SELECT 
@@ -830,9 +745,9 @@ const getRecentlyAddedCameras = async (req, res) => {
                 ml.name as monitoring_location_name,
                 DATEDIFF(NOW(), c.created_at) as days_since_added,
                 CASE 
-                    WHEN c.status = 'online' THEN 'online'
-                    WHEN c.status = 'offline' THEN 'offline'
-                    WHEN c.status = 'warning' THEN 'warning'
+                    WHEN c.last_heartbeat IS NULL THEN 'never'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
+                    WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
                 END as connection_status,
                 (SELECT COUNT(*) FROM license_plate_detections lpd 
@@ -844,7 +759,7 @@ const getRecentlyAddedCameras = async (req, res) => {
             AND c.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
             ORDER BY c.created_at DESC
             LIMIT ?
-        `, [days, limitNum]);
+        `, [days, parseInt(limit)]);
 
         res.status(200).json({
             success: true,
@@ -852,7 +767,7 @@ const getRecentlyAddedCameras = async (req, res) => {
                 cameras: cameras,
                 filter: {
                     days: parseInt(days),
-                    limit: limitNum
+                    limit: parseInt(limit)
                 },
                 total_results: cameras.length
             }
@@ -873,11 +788,7 @@ const getInactiveCameras = async (req, res) => {
     
     try {
         const { page = 1, limit = 20 } = req.query;
-        
-        // Convert to numbers
-        const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20;
-        const offset = (pageNum - 1) * limitNum;
+        const offset = (page - 1) * limit;
 
         // Get total count
         const [countResult] = await connection.execute(
@@ -902,19 +813,19 @@ const getInactiveCameras = async (req, res) => {
             WHERE c.is_active = 0
             ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?
-        `, [limitNum, offset]);
+        `, [parseInt(limit), offset]);
 
         res.status(200).json({
             success: true,
             data: {
                 cameras: cameras,
                 pagination: {
-                    current_page: pageNum,
-                    per_page: limitNum,
+                    current_page: parseInt(page),
+                    per_page: parseInt(limit),
                     total: total,
-                    total_pages: Math.ceil(total / limitNum),
-                    has_next: pageNum * limitNum < total,
-                    has_prev: pageNum > 1
+                    total_pages: Math.ceil(total / limit),
+                    has_next: page * limit < total,
+                    has_prev: page > 1
                 }
             }
         });
@@ -953,7 +864,7 @@ const getLowPerformanceCameras = async (req, res) => {
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
-                AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
             WHERE c.is_active = 1 
             AND c.status = 'online'
             GROUP BY c.id, c.name, l.name, l.address
@@ -1011,7 +922,7 @@ const getHighErrorRateCameras = async (req, res) => {
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
-                AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
             WHERE c.is_active = 1
             GROUP BY c.id, c.name, l.name, l.address
             HAVING COUNT(lpd.id) > 0 AND error_rate_percentage >= ?
@@ -1077,7 +988,7 @@ const getCamerasByLocationWithStats = async (req, res) => {
                     COUNT(*) as detection_count,
                     AVG(confidence) as avg_confidence
                 FROM license_plate_detections
-                WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                WHERE detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
                 GROUP BY camera_id
             ) detection_stats ON c.id = detection_stats.camera_id
             WHERE l.is_active = 1

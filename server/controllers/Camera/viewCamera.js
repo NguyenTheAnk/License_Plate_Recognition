@@ -44,16 +44,16 @@ const getCameraDetailedView = async (req, res) => {
         // Get detection statistics for different time periods
         const [detectionStats] = await connection.execute(`
             SELECT 
-                COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR) THEN 1 END) as detections_1h,
-                COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 END) as detections_24h,
-                COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 END) as detections_7d,
-                COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as detections_30d,
+                COUNT(CASE WHEN detection_time >= DATE_SUB(NOW(), INTERVAL 1 HOUR) THEN 1 END) as detections_1h,
+                COUNT(CASE WHEN detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 END) as detections_24h,
+                COUNT(CASE WHEN detection_time >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 END) as detections_7d,
+                COUNT(CASE WHEN detection_time >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as detections_30d,
                 COUNT(*) as detections_total,
                 COUNT(DISTINCT plate_number) as unique_plates_total,
-                COUNT(DISTINCT DATE(detected_at)) as active_days,
+                COUNT(DISTINCT DATE(detection_time)) as active_days,
                 AVG(confidence) as avg_confidence,
-                MAX(detected_at) as last_detected_at,
-                MIN(detected_at) as first_detected_at
+                MAX(detection_time) as last_detection_time,
+                MIN(detection_time) as first_detection_time
             FROM license_plate_detections 
             WHERE camera_id = ?
         `, [cameraId]);
@@ -61,28 +61,28 @@ const getCameraDetailedView = async (req, res) => {
         // Get hourly detection pattern (last 24 hours)
         const [hourlyPattern] = await connection.execute(`
             SELECT 
-                HOUR(detected_at) as hour,
+                HOUR(detection_time) as hour,
                 COUNT(*) as detection_count,
                 COUNT(DISTINCT plate_number) as unique_plates,
                 AVG(confidence) as avg_confidence
             FROM license_plate_detections 
             WHERE camera_id = ? 
-            AND detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-            GROUP BY HOUR(detected_at)
+            AND detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+            GROUP BY HOUR(detection_time)
             ORDER BY hour
         `, [cameraId]);
 
         // Get daily detection pattern (last 30 days)
         const [dailyPattern] = await connection.execute(`
             SELECT 
-                DATE(detected_at) as date,
+                DATE(detection_time) as date,
                 COUNT(*) as detection_count,
                 COUNT(DISTINCT plate_number) as unique_plates,
                 AVG(confidence) as avg_confidence
             FROM license_plate_detections 
             WHERE camera_id = ? 
-            AND detected_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            GROUP BY DATE(detected_at)
+            AND detection_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY DATE(detection_time)
             ORDER BY date DESC
         `, [cameraId]);
 
@@ -91,7 +91,7 @@ const getCameraDetailedView = async (req, res) => {
             SELECT 
                 id,
                 plate_number,
-                detected_at,
+                detection_time,
                 confidence,
                 direction,
                 speed,
@@ -102,7 +102,7 @@ const getCameraDetailedView = async (req, res) => {
                 cropped_image_path
             FROM license_plate_detections 
             WHERE camera_id = ?
-            ORDER BY detected_at DESC
+            ORDER BY detection_time DESC
             LIMIT 10
         `, [cameraId]);
 
@@ -193,15 +193,15 @@ const getCameraHealthReport = async (req, res) => {
                     ELSE 'critical'
                 END as health_status,
                 COUNT(lpd.id) as detections_period,
-                COUNT(DISTINCT DATE(lpd.detected_at)) as active_days,
+                COUNT(DISTINCT DATE(lpd.detection_time)) as active_days,
                 AVG(lpd.confidence) as avg_confidence,
                 COUNT(CASE WHEN lpd.confidence < 0.7 THEN 1 END) as low_confidence_count,
-                MAX(lpd.detected_at) as last_detection,
+                MAX(lpd.detection_time) as last_detection,
                 (SELECT COUNT(*) FROM alerts a WHERE a.camera_id = c.id AND a.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)) as alert_count
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
-                AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
             WHERE c.is_active = 1
             GROUP BY c.id, c.name, c.code, c.status, l.name, c.last_heartbeat
             ORDER BY 
@@ -264,20 +264,20 @@ const getCameraPerformanceReport = async (req, res) => {
                 l.name as location_name,
                 COUNT(lpd.id) as total_detections,
                 COUNT(DISTINCT lpd.plate_number) as unique_plates,
-                COUNT(DISTINCT DATE(lpd.detected_at)) as active_days,
+                COUNT(DISTINCT DATE(lpd.detection_time)) as active_days,
                 AVG(lpd.confidence) as avg_confidence,
                 COUNT(CASE WHEN lpd.confidence >= 0.9 THEN 1 END) as high_confidence_count,
                 COUNT(CASE WHEN lpd.confidence < 0.7 THEN 1 END) as low_confidence_count,
                 COUNT(CASE WHEN lpd.is_verified = 1 THEN 1 END) as verified_count,
-                MAX(lpd.detected_at) as last_detection,
-                MIN(lpd.detected_at) as first_detection,
-                ROUND(COUNT(lpd.id) / NULLIF(COUNT(DISTINCT DATE(lpd.detected_at)), 0), 2) as avg_detections_per_day,
+                MAX(lpd.detection_time) as last_detection,
+                MIN(lpd.detection_time) as first_detection,
+                ROUND(COUNT(lpd.id) / NULLIF(COUNT(DISTINCT DATE(lpd.detection_time)), 0), 2) as avg_detections_per_day,
                 ROUND(COUNT(CASE WHEN lpd.confidence >= 0.9 THEN 1 END) * 100.0 / NULLIF(COUNT(lpd.id), 0), 2) as high_confidence_rate,
                 ROUND(COUNT(CASE WHEN lpd.is_verified = 1 THEN 1 END) * 100.0 / NULLIF(COUNT(lpd.id), 0), 2) as verification_rate
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
-                AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
             WHERE c.is_active = 1
             GROUP BY c.id, c.name, c.code, l.name
             ORDER BY total_detections DESC
@@ -350,16 +350,16 @@ const getCameraComparisonReport = async (req, res) => {
                 TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) as minutes_since_heartbeat,
                 COUNT(lpd.id) as total_detections,
                 COUNT(DISTINCT lpd.plate_number) as unique_plates,
-                COUNT(DISTINCT DATE(lpd.detected_at)) as active_days,
+                COUNT(DISTINCT DATE(lpd.detection_time)) as active_days,
                 AVG(lpd.confidence) as avg_confidence,
                 COUNT(CASE WHEN lpd.confidence >= 0.9 THEN 1 END) as high_confidence_count,
                 COUNT(CASE WHEN lpd.is_verified = 1 THEN 1 END) as verified_count,
-                MAX(lpd.detected_at) as last_detection,
-                ROUND(COUNT(lpd.id) / NULLIF(COUNT(DISTINCT DATE(lpd.detected_at)), 0), 2) as avg_detections_per_day
+                MAX(lpd.detection_time) as last_detection,
+                ROUND(COUNT(lpd.id) / NULLIF(COUNT(DISTINCT DATE(lpd.detection_time)), 0), 2) as avg_detections_per_day
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
             LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id 
-                AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+                AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
             WHERE c.id IN (${placeholders}) AND c.is_active = 1
             GROUP BY c.id, c.name, c.code, l.name, c.status, c.last_heartbeat
             ORDER BY total_detections DESC
@@ -370,15 +370,15 @@ const getCameraComparisonReport = async (req, res) => {
             SELECT 
                 lpd.camera_id,
                 c.name as camera_name,
-                DATE(lpd.detected_at) as date,
+                DATE(lpd.detection_time) as date,
                 COUNT(*) as detection_count,
                 COUNT(DISTINCT lpd.plate_number) as unique_plates,
                 AVG(lpd.confidence) as avg_confidence
             FROM license_plate_detections lpd
             JOIN cameras c ON lpd.camera_id = c.id
             WHERE lpd.camera_id IN (${placeholders}) 
-            AND lpd.detected_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-            GROUP BY lpd.camera_id, c.name, DATE(lpd.detected_at)
+            AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
+            GROUP BY lpd.camera_id, c.name, DATE(lpd.detection_time)
             ORDER BY camera_id, date
         `, [...camera_ids, days]);
 

@@ -1,75 +1,6 @@
 const db = require('../db');
 const { v4: uuidv4 } = require('uuid');
 
-// Kiểm tra trùng lặp detection trong khoảng thời gian
-const checkDuplicateDetection = async (plate_number, camera_id, location_id, time_window_seconds = 30) => {
-    try {
-        const query = `
-            SELECT id, detected_at, confidence_score, cropped_plate_image_path
-            FROM license_plate_detections 
-            WHERE plate_number = ? 
-            AND camera_id = ? 
-            AND location_id = ? 
-            AND detected_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)
-            ORDER BY detected_at DESC 
-            LIMIT 1
-        `;
-        
-        const [rows] = await db.execute(query, [plate_number, camera_id, location_id, time_window_seconds]);
-        
-        if (rows.length > 0) {
-            const { id, detected_at, confidence_score, cropped_plate_image_path } = rows[0];
-            console.log(`🔄 Duplicate detection found for ${plate_number} at ${detected_at} (confidence: ${confidence_score})`);
-            return { isDuplicate: true, id, detected_at, confidence_score, image_path: cropped_plate_image_path };
-        }
-        
-        return { isDuplicate: false };
-    } catch (error) {
-        console.error('Error checking duplicate detection:', error);
-        return { isDuplicate: false }; // Lỗi thì cho phép lưu để an toàn
-    }
-};
-
-// Cập nhật detection đã tồn tại
-const updateExistingDetection = async (detection_id, detectionData) => {
-    try {
-        const query = `
-            UPDATE license_plate_detections SET
-                confidence_score = ?,
-                ocr_confidence = ?,
-                detection_confidence = ?,
-                cropped_plate_image_path = ?,
-                bbox_x1 = ?,
-                bbox_y1 = ?,
-                bbox_x2 = ?,
-                bbox_y2 = ?,
-                detected_at = NOW(),
-                raw_detection_data = ?
-            WHERE id = ?
-        `;
-        
-        const values = [
-            detectionData.confidence_score || 0.0,
-            detectionData.ocr_confidence || 0.0,
-            detectionData.detection_confidence || 0.0,
-            detectionData.cropped_plate_image_path || '',
-            detectionData.bbox_x1 || 0,
-            detectionData.bbox_y1 || 0,
-            detectionData.bbox_x2 || 0,
-            detectionData.bbox_y2 || 0,
-            JSON.stringify(detectionData.raw_detection_data || {}),
-            detection_id
-        ];
-        
-        await db.execute(query, values);
-        console.log(`✅ Updated detection ${detection_id} successfully`);
-        return true;
-    } catch (error) {
-        console.error('Error updating existing detection:', error);
-        return false;
-    }
-};
-
 // Lưu detection mới vào database
 const saveDetection = async (detectionData) => {
     try {
@@ -91,29 +22,6 @@ const saveDetection = async (detectionData) => {
             ai_model_version,
             source_type
         } = detectionData;
-
-        // Kiểm tra trùng lặp trước khi lưu
-        const final_camera_id = camera_id || 1;
-        const final_location_id = location_id || 1;
-        
-        if (plate_number && final_camera_id && final_location_id) {
-            const duplicateCheck = await checkDuplicateDetection(plate_number, final_camera_id, final_location_id, 30);
-            
-            if (duplicateCheck.isDuplicate) {
-                const current_confidence = confidence_score || 0.5;
-                const existing_confidence = duplicateCheck.confidence_score || 0;
-                
-                // Nếu confidence hiện tại cao hơn ít nhất 0.1, cập nhật record cũ
-                if (current_confidence > existing_confidence + 0.1) {
-                    console.log(`🔄 Updating existing detection ${duplicateCheck.id} with better confidence: ${current_confidence} > ${existing_confidence}`);
-                    await updateExistingDetection(duplicateCheck.id, detectionData);
-                    return duplicateCheck.id;
-                } else {
-                    console.log(`⏭️ Skipping duplicate detection for ${plate_number} (confidence: ${current_confidence} <= ${existing_confidence})`);
-                    return null; // Không lưu vì đã có detection tương tự
-                }
-            }
-        }
 
         const query = `
             INSERT INTO license_plate_detections (
@@ -142,8 +50,8 @@ const saveDetection = async (detectionData) => {
             uuidv4(),
             plate_number,
             raw_plate_text || plate_number,
-            final_camera_id,
-            final_location_id,
+            camera_id || 1, // Default camera ID
+            location_id || 1, // Default location ID
             confidence_score || 0.5, // Default confidence score
             ocr_confidence || 0.5, // Default OCR confidence
             detection_confidence || 0.5, // Default detection confidence
@@ -159,7 +67,6 @@ const saveDetection = async (detectionData) => {
         ];
 
         const [result] = await db.execute(query, values);
-        console.log(`✅ Saved new detection for ${plate_number} with ID: ${result.insertId}`);
         return result.insertId;
     } catch (error) {
         console.error('Error saving detection:', error);

@@ -3,13 +3,13 @@ const db = require('../../db');
 const deletePermission = async (req, res) => {
     const connection = await db.promise();
     
+    // Helper function to convert undefined to null
+    const sanitizeParam = (value) => {
+        return value === undefined ? null : value;
+    };
+    
     try {
         const { id } = req.params;
-
-        // Helper function to convert undefined to null
-        const sanitizeParam = (value) => {
-            return value === undefined ? null : value;
-        };
 
         // Validate ID
         if (!id || isNaN(parseInt(id))) {
@@ -73,24 +73,26 @@ const deletePermission = async (req, res) => {
             });
         }
 
-        // Start transaction for safe deletion
-        await connection.beginTransaction();
-
+        // Start transaction for safe deletion - get a connection from pool
+        const transactionConnection = await db.promise().getConnection();
+        
         try {
+            await transactionConnection.beginTransaction();
+
             // Delete any role_permissions entries (should be 0 based on check above, but for safety)
-            await connection.execute(
+            await transactionConnection.execute(
                 'DELETE FROM role_permissions WHERE permission_id = ?',
                 [sanitizeParam(id)]
             );
 
             // Delete the permission
-            const [deleteResult] = await connection.execute(
+            const [deleteResult] = await transactionConnection.execute(
                 'DELETE FROM permissions WHERE id = ?',
                 [sanitizeParam(id)]
             );
 
             if (deleteResult.affectedRows === 0) {
-                await connection.rollback();
+                await transactionConnection.rollback();
                 return res.status(404).json({
                     success: false,
                     message: 'Quyền không tồn tại hoặc đã bị xóa'
@@ -98,7 +100,7 @@ const deletePermission = async (req, res) => {
             }
 
             // Commit transaction
-            await connection.commit();
+            await transactionConnection.commit();
 
             // Log access with sanitized parameters
             const logParams = [
@@ -131,8 +133,11 @@ const deletePermission = async (req, res) => {
             });
 
         } catch (error) {
-            await connection.rollback();
+            await transactionConnection.rollback();
             throw error;
+        } finally {
+            // Always release the connection back to the pool
+            transactionConnection.release();
         }
 
     } catch (error) {
@@ -258,10 +263,12 @@ const bulkDeletePermissions = async (req, res) => {
             });
         }
 
-        // Start transaction
-        await connection.beginTransaction();
-
+        // Start transaction - get a connection from pool
+        const transactionConnection = await db.promise().getConnection();
+        
         try {
+            await transactionConnection.beginTransaction();
+
             const deletedPermissions = [];
             let successCount = 0;
             let failedCount = 0;
@@ -269,13 +276,13 @@ const bulkDeletePermissions = async (req, res) => {
             for (const permission of permissions) {
                 try {
                     // Delete role_permissions first (should be none based on check above)
-                    await connection.execute(
+                    await transactionConnection.execute(
                         'DELETE FROM role_permissions WHERE permission_id = ?',
                         [sanitizeParam(permission.id)]
                     );
 
                     // Delete the permission
-                    const [deleteResult] = await connection.execute(
+                    const [deleteResult] = await transactionConnection.execute(
                         'DELETE FROM permissions WHERE id = ?',
                         [sanitizeParam(permission.id)]
                     );
@@ -300,7 +307,7 @@ const bulkDeletePermissions = async (req, res) => {
             }
 
             if (successCount === 0) {
-                await connection.rollback();
+                await transactionConnection.rollback();
                 return res.status(400).json({
                     success: false,
                     message: 'Không thể xóa bất kỳ quyền nào'
@@ -308,7 +315,7 @@ const bulkDeletePermissions = async (req, res) => {
             }
 
             // Commit transaction
-            await connection.commit();
+            await transactionConnection.commit();
 
             // Log bulk delete access with sanitized parameters
             const logParams = [
@@ -320,7 +327,7 @@ const bulkDeletePermissions = async (req, res) => {
                 sanitizeParam((req.get('User-Agent') || '').substring(0, 255))
             ];
 
-            await connection.execute(
+            await transactionConnection.execute(
                 `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, status, ip_address, user_agent, created_at)
                  VALUES (?, ?, 'DELETE', 'PERMISSION_BULK', ?, ?, 'SUCCESS', ?, ?, NOW())`,
                 logParams
@@ -337,8 +344,11 @@ const bulkDeletePermissions = async (req, res) => {
             });
 
         } catch (error) {
-            await connection.rollback();
+            await transactionConnection.rollback();
             throw error;
+        } finally {
+            // Always release the connection back to the pool
+            transactionConnection.release();
         }
 
     } catch (error) {

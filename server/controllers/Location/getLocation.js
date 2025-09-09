@@ -827,7 +827,7 @@ const getLocationDetailedView = async (req, res) => {
                 c.name as camera_name, c.camera_key,
                 u1.name as acknowledged_by_name, u2.name as resolved_by_name,
                 lpd.confidence_score as detection_confidence,
-                lpd.detected_at as detected_at
+                lpd.detected_at as detection_time
             FROM alerts a
             LEFT JOIN cameras c ON a.camera_id = c.id
             LEFT JOIN users u1 ON a.acknowledged_by = u1.id

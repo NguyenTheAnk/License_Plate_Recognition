@@ -1,5 +1,29 @@
 const db = require('../db');
 
+// Simple in-memory cache for frequently accessed data
+const cache = {
+    locations: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }, // 5 minutes
+    cameras: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }, // 5 minutes
+    stats: { data: null, timestamp: 0, ttl: 2 * 60 * 1000 } // 2 minutes
+};
+
+// Cache helper functions
+const getCachedData = (key) => {
+    const cached = cache[key];
+    if (cached && (Date.now() - cached.timestamp) < cached.ttl) {
+        return cached.data;
+    }
+    return null;
+};
+
+const setCachedData = (key, data) => {
+    cache[key] = {
+        data: data,
+        timestamp: Date.now(),
+        ttl: cache[key]?.ttl || 5 * 60 * 1000
+    };
+};
+
 // Vietnamese license plate validation function
 function validateVietnamesePlateFormat(plateText) {
     if (!plateText || typeof plateText !== 'string') {
@@ -63,8 +87,6 @@ const getLicensePlateRecognitions = async (req, res) => {
             is_verified,
             is_whitelist_match,
             is_blacklist_match,
-            direction,
-            vehicle_type,
             source_type,
             detection_status,
             alert_triggered,
@@ -76,6 +98,23 @@ const getLicensePlateRecognitions = async (req, res) => {
         const parsedPage = Math.max(1, parseInt(page) || 1);
         const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
         const offset = (parsedPage - 1) * parsedLimit;
+        
+        // Validate pagination bounds
+        if (parsedPage < 1 || parsedPage > 10000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Số trang không hợp lệ (1-10000)',
+                error: 'Invalid page number'
+            });
+        }
+        
+        if (parsedLimit < 1 || parsedLimit > 100) {
+            return res.status(400).json({
+                success: false,
+                message: 'Số lượng bản ghi không hợp lệ (1-100)',
+                error: 'Invalid limit'
+            });
+        }
         
         console.log('Pagination params:', { page, limit, offset, parsedPage, parsedLimit });
         
@@ -108,120 +147,181 @@ const getLicensePlateRecognitions = async (req, res) => {
 
         // Plate number search
         if (plate_number) {
-            whereConditions.push('lpd.plate_number LIKE ?');
-            queryParams.push(`%${plate_number}%`);
+            // Sanitize plate number input
+            const sanitizedPlateNumber = plate_number.trim().replace(/[^A-Z0-9\-\.]/g, '');
+            if (sanitizedPlateNumber.length > 0) {
+                whereConditions.push('lpd.plate_number LIKE ?');
+                queryParams.push(`%${sanitizedPlateNumber}%`);
+            }
         }
 
         // Camera filter
         if (camera_id) {
-            whereConditions.push('lpd.camera_id = ?');
-            queryParams.push(camera_id);
+            const cameraId = parseInt(camera_id);
+            if (!isNaN(cameraId) && cameraId > 0) {
+                whereConditions.push('lpd.camera_id = ?');
+                queryParams.push(cameraId);
+            }
         }
 
         // Location filter
         if (location_id) {
-            whereConditions.push('lpd.location_id = ?');
-            queryParams.push(location_id);
+            const locationId = parseInt(location_id);
+            if (!isNaN(locationId) && locationId > 0) {
+                whereConditions.push('lpd.location_id = ?');
+                queryParams.push(locationId);
+            }
         }
 
         // Date range filters
         if (start_date) {
-            whereConditions.push('lpd.detected_at >= ?');
-            queryParams.push(start_date);
+            // Validate date format
+            const startDate = new Date(start_date);
+            if (!isNaN(startDate.getTime())) {
+                whereConditions.push('lpd.detected_at >= ?');
+                queryParams.push(start_date);
+            }
         }
 
         if (end_date) {
-            whereConditions.push('lpd.detected_at <= ?');
-            queryParams.push(end_date);
+            // Validate date format
+            const endDate = new Date(end_date);
+            if (!isNaN(endDate.getTime())) {
+                whereConditions.push('lpd.detected_at <= ?');
+                queryParams.push(end_date);
+            }
         }
 
-        // Confidence filters
+        // Confidence range filters
         if (confidence_min) {
-            whereConditions.push('lpd.confidence_score >= ?');
-            queryParams.push(parseFloat(confidence_min) / 100); // Convert percentage to decimal
+            const minVal = parseFloat(confidence_min);
+            if (!isNaN(minVal) && minVal >= 0 && minVal <= 1) {
+                whereConditions.push('lpd.confidence_score >= ?');
+                queryParams.push(minVal);
+            }
         }
 
         if (confidence_max) {
-            whereConditions.push('lpd.confidence_score <= ?');
-            queryParams.push(parseFloat(confidence_max) / 100); // Convert percentage to decimal
+            const maxVal = parseFloat(confidence_max);
+            if (!isNaN(maxVal) && maxVal >= 0 && maxVal <= 1) {
+                whereConditions.push('lpd.confidence_score <= ?');
+                queryParams.push(maxVal);
+            }
         }
 
         // Verification status filter
         if (is_verified !== undefined && is_verified !== '') {
-            whereConditions.push('lpd.is_verified = ?');
-            queryParams.push(is_verified === 'true' ? 1 : 0);
+            const validVerificationValues = ['verified', 'unverified'];
+            if (validVerificationValues.includes(is_verified)) {
+                if (is_verified === 'verified') {
+                    whereConditions.push('lpd.is_verified = 1');
+                } else if (is_verified === 'unverified') {
+                    whereConditions.push('lpd.is_verified = 0');
+                }
+            }
         }
 
         // Whitelist match filter
         if (is_whitelist_match !== undefined && is_whitelist_match !== '') {
-            whereConditions.push('lpd.is_whitelist_match = ?');
-            queryParams.push(is_whitelist_match === 'true' ? 1 : 0);
+            const validWhitelistValues = ['match', 'no_match'];
+            if (validWhitelistValues.includes(is_whitelist_match)) {
+                if (is_whitelist_match === 'match') {
+                    whereConditions.push('lpd.is_whitelist_match = 1');
+                } else if (is_whitelist_match === 'no_match') {
+                    whereConditions.push('lpd.is_whitelist_match = 0');
+                }
+            }
         }
 
         // Blacklist match filter
         if (is_blacklist_match !== undefined && is_blacklist_match !== '') {
-            whereConditions.push('lpd.is_blacklist_match = ?');
-            queryParams.push(is_blacklist_match === 'true' ? 1 : 0);
-        }
-
-        // Direction filter
-        if (direction) {
-            whereConditions.push('lpd.direction = ?');
-            queryParams.push(direction);
-        }
-
-        // Vehicle type filter
-        if (vehicle_type) {
-            whereConditions.push('lpd.detected_vehicle_type = ?');
-            queryParams.push(vehicle_type);
+            const validBlacklistValues = ['match', 'no_match'];
+            if (validBlacklistValues.includes(is_blacklist_match)) {
+                if (is_blacklist_match === 'match') {
+                    whereConditions.push('lpd.is_blacklist_match = 1');
+                } else if (is_blacklist_match === 'no_match') {
+                    whereConditions.push('lpd.is_blacklist_match = 0');
+                }
+            }
         }
 
         // Source type filter
         if (source_type) {
-            whereConditions.push('lpd.source_type = ?');
-            queryParams.push(source_type);
-        }
-
-        // Detection status filter
-        if (detection_status) {
-            if (detection_status === 'verified') {
-                whereConditions.push('lpd.is_verified = 1');
-            } else if (detection_status === 'unverified') {
-                whereConditions.push('lpd.is_verified = 0');
-            } else if (detection_status === 'pending') {
-                whereConditions.push('lpd.is_verified = 0 AND lpd.verified_by IS NULL');
-            } else if (detection_status === 'error') {
-                whereConditions.push('lpd.confidence_score < 0.5');
+            const validSourceTypes = ['camera', 'video_upload', 'rtsp_stream', 'websocket_stream', 'http_upload', 'video_file', 'websocket_video'];
+            if (validSourceTypes.includes(source_type)) {
+                whereConditions.push('lpd.source_type = ?');
+                queryParams.push(source_type);
             }
         }
 
         // Alert triggered filter
         if (alert_triggered !== undefined && alert_triggered !== '') {
-            whereConditions.push('lpd.alert_triggered = ?');
-            queryParams.push(alert_triggered === 'triggered' ? 1 : 0);
+            const validAlertValues = ['true', 'false', '1', '0'];
+            if (validAlertValues.includes(alert_triggered)) {
+                if (alert_triggered === 'true' || alert_triggered === '1') {
+                    whereConditions.push('lpd.alert_triggered = 1');
+                } else if (alert_triggered === 'false' || alert_triggered === '0') {
+                    whereConditions.push('lpd.alert_triggered = 0');
+                }
+            }
         }
 
-
-
-
+        // Detection status filter (based on verification status)
+        if (detection_status) {
+            const validStatuses = ['detected', 'verified', 'pending', 'error'];
+            if (validStatuses.includes(detection_status)) {
+                if (detection_status === 'detected') {
+                    whereConditions.push('lpd.is_verified = 0');
+                } else if (detection_status === 'verified') {
+                    whereConditions.push('lpd.is_verified = 1');
+                } else if (detection_status === 'pending') {
+                    whereConditions.push('lpd.is_verified = 0 AND lpd.is_whitelist_match = 0 AND lpd.is_blacklist_match = 0');
+                } else if (detection_status === 'error') {
+                    whereConditions.push('lpd.confidence_score < 0.5');
+                }
+            }
+        }
 
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
+        // Debug logging for filters
+        console.log('Filter conditions:', whereConditions);
+        console.log('Filter parameters:', queryParams);
+        console.log('Final WHERE clause:', whereClause);
+        
+        // Query performance monitoring
+        const queryStartTime = Date.now();
+
         // Validate sort parameters
-        const allowedSortFields = ['detected_at', 'created_at', 'plate_number', 'confidence_score', 'camera_id', 'location_id', 'is_verified', 'direction', 'detected_vehicle_type'];
+        const allowedSortFields = ['detected_at', 'created_at', 'plate_number', 'confidence_score', 'camera_id', 'location_id', 'is_verified', 'is_whitelist_match', 'is_blacklist_match', 'source_type', 'alert_triggered'];
         const sortBy = allowedSortFields.includes(sort_by) ? sort_by : 'detected_at';
         const sortOrder = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-        // Get total count first
+        // Get total count first - optimized for performance
         const countQuery = `SELECT COUNT(*) as total FROM license_plate_detections lpd ${whereClause}`;
         
+        const countStartTime = Date.now();
         const countResults = await new Promise((resolve, reject) => {
             db.query(countQuery, queryParams, (error, results) => {
+                const countEndTime = Date.now();
+                const countDuration = countEndTime - countStartTime;
+                
                 if (error) {
                     console.error('Count query error:', error);
-                    reject(error);
+                    console.error('Count query duration:', countDuration + 'ms');
+                    reject(new Error(`Database count query failed: ${error.message}`));
                 } else {
                     console.log('Count query results:', results);
+                    console.log('Count query duration:', countDuration + 'ms');
+                    
+                    // Log slow count queries
+                    if (countDuration > 500) {
+                        console.warn('Slow count query detected:', {
+                            duration: countDuration + 'ms',
+                            conditions: whereConditions.length
+                        });
+                    }
+                    
                     resolve(results);
                 }
             });
@@ -230,6 +330,7 @@ const getLicensePlateRecognitions = async (req, res) => {
         const total = countResults && countResults.length > 0 ? countResults[0].total : 0;
 
         // FIXED: Get data with pagination - using parameterized query for LIMIT/OFFSET
+        // Optimized query with proper indexing hints
         const dataQuery = `
             SELECT 
                 lpd.id, lpd.detection_uuid, lpd.plate_number, lpd.raw_plate_text, 
@@ -256,11 +357,26 @@ const getLicensePlateRecognitions = async (req, res) => {
 
         const detections = await new Promise((resolve, reject) => {
             db.query(dataQuery, dataParams, (error, results) => {
+                const queryEndTime = Date.now();
+                const queryDuration = queryEndTime - queryStartTime;
+                
                 if (error) {
                     console.error('Database query error:', error);
-                    reject(error);
+                    console.error('Query duration:', queryDuration + 'ms');
+                    reject(new Error(`Database data query failed: ${error.message}`));
                 } else {
                     console.log('Data query results count:', results ? results.length : 0);
+                    console.log('Query duration:', queryDuration + 'ms');
+                    
+                    // Log slow queries
+                    if (queryDuration > 1000) {
+                        console.warn('Slow query detected:', {
+                            duration: queryDuration + 'ms',
+                            conditions: whereConditions.length,
+                            params: queryParams.length
+                        });
+                    }
+                    
                     resolve(results || []);
                 }
             });
@@ -286,6 +402,16 @@ const getLicensePlateRecognitions = async (req, res) => {
             console.warn('Audit log failed:', auditError.message);
         }
 
+        // Validate response data
+        if (!Array.isArray(detections)) {
+            console.error('Invalid detections data type:', typeof detections);
+            return res.status(500).json({
+                success: false,
+                message: 'Dữ liệu trả về không hợp lệ',
+                error: 'Invalid data type'
+            });
+        }
+
         // Return response
         res.status(200).json({
             success: true,
@@ -302,8 +428,17 @@ const getLicensePlateRecognitions = async (req, res) => {
             filters_applied: {
                 plate_number: plate_number || null,
                 camera_id: camera_id || null,
+                location_id: location_id || null,
                 start_date: start_date || null,
-                end_date: end_date || null
+                end_date: end_date || null,
+                confidence_min: confidence_min || null,
+                confidence_max: confidence_max || null,
+                is_verified: is_verified || null,
+                is_whitelist_match: is_whitelist_match || null,
+                is_blacklist_match: is_blacklist_match || null,
+                source_type: source_type || null,
+                detection_status: detection_status || null,
+                alert_triggered: alert_triggered || null
             }
         });
 
@@ -426,101 +561,185 @@ const getLicensePlateRecognitionStats = async (req, res) => {
         
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         
-        // Thống kê tổng quan
-        const statsQuery = `
-            SELECT 
-                COUNT(*) as total_detections,
-                COUNT(DISTINCT plate_number) as unique_plates,
-                COUNT(CASE WHEN is_whitelist_match = 1 THEN 1 END) as whitelist_matches,
-                COUNT(CASE WHEN is_blacklist_match = 1 THEN 1 END) as blacklist_matches,
-                COUNT(CASE WHEN is_verified = 1 THEN 1 END) as verified_detections,
-                AVG(confidence_score) as avg_confidence,
-                AVG(ocr_confidence) as avg_ocr_confidence,
-                AVG(detection_confidence) as avg_detection_confidence
-            FROM license_plate_detections 
-            ${whereClause}
-        `;
-        
-        const statsResult = await new Promise((resolve, reject) => {
-            db.query(statsQuery, queryParams, (error, results) => {
-                if (error) {
-                    console.error('Stats query error:', error);
-                    reject(error);
-                } else {
-                    resolve(results);
-                }
+        // Thống kê tổng quan - check cache first
+        let stats = getCachedData('stats');
+        if (!stats) {
+            const statsQuery = `
+                SELECT 
+                    COUNT(*) as total_detections,
+                    COUNT(DISTINCT plate_number) as unique_plates,
+                    COUNT(CASE WHEN is_whitelist_match = 1 THEN 1 END) as whitelist_matches,
+                    COUNT(CASE WHEN is_blacklist_match = 1 THEN 1 END) as blacklist_matches,
+                    COUNT(CASE WHEN is_verified = 1 THEN 1 END) as verified_detections,
+                    AVG(confidence_score) as avg_confidence,
+                    AVG(ocr_confidence) as avg_ocr_confidence,
+                    AVG(detection_confidence) as avg_detection_confidence
+                FROM license_plate_detections 
+                ${whereClause}
+            `;
+            
+            const statsStartTime = Date.now();
+            const statsResult = await new Promise((resolve, reject) => {
+                db.query(statsQuery, queryParams, (error, results) => {
+                    const statsEndTime = Date.now();
+                    const statsDuration = statsEndTime - statsStartTime;
+                    
+                    if (error) {
+                        console.error('Stats query error:', error);
+                        console.error('Stats query duration:', statsDuration + 'ms');
+                        reject(error);
+                    } else {
+                        console.log('Stats query duration:', statsDuration + 'ms');
+                        
+                        // Log slow stats queries
+                        if (statsDuration > 1000) {
+                            console.warn('Slow stats query detected:', {
+                                duration: statsDuration + 'ms',
+                                conditions: whereConditions.length
+                            });
+                        }
+                        
+                        resolve(results);
+                    }
+                });
             });
-        });
-        const stats = statsResult[0];
+            stats = statsResult[0];
+            
+            // Cache the stats
+            setCachedData('stats', stats);
+        }
         
-        // Thống kê theo loại xe
-        const vehicleTypeQuery = `
-            SELECT 
-                detected_vehicle_type,
-                COUNT(*) as count
-            FROM license_plate_detections 
-            ${whereClause}
-            GROUP BY detected_vehicle_type
-            ORDER BY count DESC
-        `;
-        
-        const vehicleTypeStats = await new Promise((resolve, reject) => {
-            db.query(vehicleTypeQuery, queryParams, (error, results) => {
-                if (error) {
-                    console.error('Vehicle type query error:', error);
-                    reject(error);
-                } else {
-                    resolve(results);
-                }
+        // Thống kê theo loại xe - check cache first
+        let vehicleTypeStats = getCachedData('vehicleTypeStats');
+        if (!vehicleTypeStats) {
+            const vehicleTypeQuery = `
+                SELECT 
+                    detected_vehicle_type,
+                    COUNT(*) as count
+                FROM license_plate_detections 
+                ${whereClause}
+                GROUP BY detected_vehicle_type
+                ORDER BY count DESC
+            `;
+            
+            const vehicleTypeStartTime = Date.now();
+            vehicleTypeStats = await new Promise((resolve, reject) => {
+                db.query(vehicleTypeQuery, queryParams, (error, results) => {
+                    const vehicleTypeEndTime = Date.now();
+                    const vehicleTypeDuration = vehicleTypeEndTime - vehicleTypeStartTime;
+                    
+                    if (error) {
+                        console.error('Vehicle type query error:', error);
+                        console.error('Vehicle type query duration:', vehicleTypeDuration + 'ms');
+                        reject(error);
+                    } else {
+                        console.log('Vehicle type query duration:', vehicleTypeDuration + 'ms');
+                        
+                        // Log slow vehicle type queries
+                        if (vehicleTypeDuration > 1000) {
+                            console.warn('Slow vehicle type query detected:', {
+                                duration: vehicleTypeDuration + 'ms',
+                                conditions: whereConditions.length
+                            });
+                        }
+                        
+                        resolve(results || []);
+                    }
+                });
             });
-        });
+            
+            // Cache the vehicle type stats
+            setCachedData('vehicleTypeStats', vehicleTypeStats);
+        }
         
-        // Thống kê theo camera
-        const cameraQuery = `
-            SELECT 
-                lpd.camera_id,
-                c.name as camera_name,
-                COUNT(*) as count
-            FROM license_plate_detections lpd
-            LEFT JOIN cameras c ON lpd.camera_id = c.id
-            ${whereClause}
-            GROUP BY lpd.camera_id, c.name
-            ORDER BY count DESC
-        `;
-        
-        const cameraStats = await new Promise((resolve, reject) => {
-            db.query(cameraQuery, queryParams, (error, results) => {
-                if (error) {
-                    console.error('Camera stats query error:', error);
-                    reject(error);
-                } else {
-                    resolve(results);
-                }
+        // Thống kê theo camera - check cache first
+        let cameraStats = getCachedData('cameraStats');
+        if (!cameraStats) {
+            const cameraQuery = `
+                SELECT 
+                    lpd.camera_id,
+                    c.name as camera_name,
+                    COUNT(*) as count
+                FROM license_plate_detections lpd
+                LEFT JOIN cameras c ON lpd.camera_id = c.id
+                ${whereClause}
+                GROUP BY lpd.camera_id, c.name
+                ORDER BY count DESC
+            `;
+            
+            const cameraStartTime = Date.now();
+            cameraStats = await new Promise((resolve, reject) => {
+                db.query(cameraQuery, queryParams, (error, results) => {
+                    const cameraEndTime = Date.now();
+                    const cameraDuration = cameraEndTime - cameraStartTime;
+                    
+                    if (error) {
+                        console.error('Camera stats query error:', error);
+                        console.error('Camera query duration:', cameraDuration + 'ms');
+                        reject(error);
+                    } else {
+                        console.log('Camera query duration:', cameraDuration + 'ms');
+                        
+                        // Log slow camera queries
+                        if (cameraDuration > 1000) {
+                            console.warn('Slow camera query detected:', {
+                                duration: cameraDuration + 'ms',
+                                conditions: whereConditions.length
+                            });
+                        }
+                        
+                        resolve(results || []);
+                    }
+                });
             });
-        });
+            
+            // Cache the camera stats
+            setCachedData('cameraStats', cameraStats);
+        }
         
-        // Thống kê theo ngày
-        const dailyQuery = `
-            SELECT 
-                DATE(detected_at) as date,
-                COUNT(*) as count
-            FROM license_plate_detections 
-            ${whereClause}
-            GROUP BY DATE(detected_at)
-            ORDER BY date DESC
-            LIMIT 30
-        `;
-        
-        const dailyStats = await new Promise((resolve, reject) => {
-            db.query(dailyQuery, queryParams, (error, results) => {
-                if (error) {
-                    console.error('Daily stats query error:', error);
-                    reject(error);
-                } else {
-                    resolve(results);
-                }
+        // Thống kê theo ngày - check cache first
+        let dailyStats = getCachedData('dailyStats');
+        if (!dailyStats) {
+            const dailyQuery = `
+                SELECT 
+                    DATE(detected_at) as date,
+                    COUNT(*) as count
+                FROM license_plate_detections 
+                ${whereClause}
+                GROUP BY DATE(detected_at)
+                ORDER BY date DESC
+                LIMIT 30
+            `;
+            
+            const dailyStartTime = Date.now();
+            dailyStats = await new Promise((resolve, reject) => {
+                db.query(dailyQuery, queryParams, (error, results) => {
+                    const dailyEndTime = Date.now();
+                    const dailyDuration = dailyEndTime - dailyStartTime;
+                    
+                    if (error) {
+                        console.error('Daily stats query error:', error);
+                        console.error('Daily query duration:', dailyDuration + 'ms');
+                        reject(error);
+                    } else {
+                        console.log('Daily query duration:', dailyDuration + 'ms');
+                        
+                        // Log slow daily queries
+                        if (dailyDuration > 1000) {
+                            console.warn('Slow daily query detected:', {
+                                duration: dailyDuration + 'ms',
+                                conditions: whereConditions.length
+                            });
+                        }
+                        
+                        resolve(results || []);
+                    }
+                });
             });
-        });
+            
+            // Cache the daily stats
+            setCachedData('dailyStats', dailyStats);
+        }
         
         res.status(200).json({
             success: true,

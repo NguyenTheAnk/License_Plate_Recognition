@@ -40,109 +40,6 @@ async function getAccessControl(req, res) {
   }
 }
 
-// Search access control entries
-async function searchAccessControl(req, res) {
-  try {
-    const {
-      plate_number,
-      list_type,
-      reason,
-      location_id,
-      is_active,
-      page = 1,
-      limit = 10
-    } = req.query;
-
-    // Fallback: Trả về dữ liệu mẫu với filtering
-    let mockData = [
-      {
-        id: 1,
-        plate_number: '30A-12345',
-        list_type: 'whitelist',
-        reason: 'Xe công vụ',
-        description: 'Xe của cơ quan nhà nước',
-        location_id: 1,
-        added_by: 1,
-        is_active: 1,
-        created_at: new Date().toISOString(),
-        added_by_name: 'Admin',
-        location_name: 'Cổng chính'
-      },
-      {
-        id: 2,
-        plate_number: '51G-67890',
-        list_type: 'blacklist',
-        reason: 'Xe vi phạm',
-        description: 'Xe đã vi phạm nhiều lần',
-        location_id: 1,
-        added_by: 1,
-        is_active: 1,
-        created_at: new Date().toISOString(),
-        added_by_name: 'Admin',
-        location_name: 'Cổng chính'
-      },
-      {
-        id: 3,
-        plate_number: '29A-11111',
-        list_type: 'whitelist',
-        reason: 'Xe VIP',
-        description: 'Xe của khách VIP',
-        location_id: 2,
-        added_by: 1,
-        is_active: 1,
-        created_at: new Date().toISOString(),
-        added_by_name: 'Admin',
-        location_name: 'Cổng phụ'
-      }
-    ];
-
-    // Apply filters
-    if (plate_number) {
-      mockData = mockData.filter(item => 
-        item.plate_number.toLowerCase().includes(plate_number.toLowerCase())
-      );
-    }
-    if (list_type) {
-      mockData = mockData.filter(item => item.list_type === list_type);
-    }
-    if (reason) {
-      mockData = mockData.filter(item => 
-        item.reason.toLowerCase().includes(reason.toLowerCase())
-      );
-    }
-    if (location_id) {
-      mockData = mockData.filter(item => item.location_id == location_id);
-    }
-    if (is_active !== undefined) {
-      mockData = mockData.filter(item => item.is_active == is_active);
-    }
-
-    // Pagination
-    const totalCount = mockData.length;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    const paginatedData = mockData.slice(offset, offset + parseInt(limit));
-
-    res.json({
-      success: true,
-      data: paginatedData,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
-        totalCount: totalCount,
-        hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
-        hasPrevPage: parseInt(page) > 1
-      }
-    });
-  } catch (error) {
-    console.error('searchAccessControl error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Server error',
-      message: error.message 
-    });
-  }
-}
-
 // Thêm mới entry
 async function createAccessControl(req, res) {
   try {
@@ -193,7 +90,6 @@ async function deleteAccessControl(req, res) {
 
 module.exports = {
   getAccessControl,
-  searchAccessControl,
   createAccessControl,
   updateAccessControl,
   deleteAccessControl

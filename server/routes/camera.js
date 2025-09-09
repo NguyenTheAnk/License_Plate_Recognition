@@ -48,7 +48,7 @@ router.post('/create',
 );
 
 router.post('/:id/stream/start',
-    // auth, // Tạm thời bỏ auth để test camera
+    auth,
     // checkPermission('cameras.update'), 
     // có thể thêm validator nếu muốn
     startCameraStream
@@ -68,7 +68,7 @@ router.get('/:id/stream/status',
 );
 
 router.get('/',
-    // auth, // Tạm thời bỏ auth để test
+    auth,
     // checkPermission('cameras.view'), 
     getAllCameras
 );

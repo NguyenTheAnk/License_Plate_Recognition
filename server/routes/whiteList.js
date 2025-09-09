@@ -44,7 +44,7 @@ const {
 
 // Get all whitelist entries with pagination and filters
 router.get('/', 
-    auth, 
+    auth, checkPermission('whitelist.view'),
     getAllWhitelist
 );
 
@@ -56,7 +56,7 @@ router.get('/statistics',
 
 // Search whitelist entries
 router.get('/search', 
-    auth, 
+    auth, checkPermission('whitelist.search'),
     searchWhitelist
 );
 
@@ -69,7 +69,7 @@ router.post('/ocr-preview', auth, upload.single('image'), ocrPreview);
 
 // SỬA: Bulk delete - ĐẶT TRƯỚC route /:id
 router.delete('/bulk-delete', 
-    auth, 
+    auth, checkPermission('whitelist.delete_all'),
     bulkDeleteWhitelist
 );
 
@@ -88,7 +88,7 @@ router.post('/bulk/restore',
 // Create single whitelist entry
 router.post('/create', 
     auth, 
-    upload.single('image'),
+    upload.single('image'),checkPermission('whitelist.create'),
     createWhitelist
 );
 
@@ -105,7 +105,7 @@ router.post('/create/bulk',
 
 // Get whitelist entry by ID
 router.get('/:id', 
-    auth, 
+    auth, checkPermission('whitelist.view_detail'),
     getWhitelistById
 );
 
@@ -116,9 +116,9 @@ router.put('/:id',
         { name: 'plate_image', maxCount: 1 },
         { name: 'plate_image_cropped', maxCount: 1 },
         { name: 'plate_image_processed', maxCount: 1 }
-    ]),
+    ]),checkPermission('whitelist.update'),
     // SỬA: TẠM THỜI BỎ updateWhitelistValidator để debug
-    // updateWhitelistValidator, 
+    // updateWhitelistValidator, chec
     updateWhitelist
 );
 
@@ -142,7 +142,7 @@ router.put('/:id/extend',
 
 // Single delete whitelist entry
 router.delete('/:id', 
-    auth, 
+    auth, checkPermission('whitelist.delete'),
     deleteWhitelist
 );
 

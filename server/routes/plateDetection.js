@@ -3,11 +3,6 @@ const router = express.Router();
 const plateDetectionController = require('../controllers/plateDetectionController');
 const authMiddleware = require('../middlewares/authMiddleware');
 
-// Test route - no auth
-router.get('/test', async (req, res) => {
-    res.json({ message: 'Plate detection API is working!', timestamp: new Date().toISOString() });
-});
-
 // Lưu detection mới
 router.post('/save', authMiddleware, async (req, res) => {
     try {
@@ -27,50 +22,7 @@ router.post('/save', authMiddleware, async (req, res) => {
     }
 });
 
-// Lấy danh sách detections với phân trang và lọc (root route) - No auth for testing
-router.get('/', async (req, res) => {
-    try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const search = req.query.search || '';
-        const cameraId = req.query.camera_id || '';
-        const startDate = req.query.start_date || '';
-        const endDate = req.query.end_date || '';
-        
-        const filters = {};
-        if (search) filters.plate_number = search;
-        if (cameraId) filters.camera_id = cameraId;
-        if (startDate) filters.date_from = startDate;
-        if (endDate) filters.date_to = endDate;
-        
-        const result = await plateDetectionController.getDetections(
-            filters,
-            page - 1, // Convert to 0-based page
-            limit
-        );
-        
-        res.json({
-            success: true,
-            data: result.detections,
-            pagination: {
-                currentPage: page,
-                totalPages: Math.ceil(result.totalCount / limit),
-                totalCount: result.totalCount,
-                hasNextPage: page < Math.ceil(result.totalCount / limit),
-                hasPrevPage: page > 1
-            }
-        });
-    } catch (error) {
-        console.error('Error getting detections:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error getting detections',
-            error: error.message
-        });
-    }
-});
-
-// Lấy danh sách detections với phân trang và lọc (legacy route)
+// Lấy danh sách detections với phân trang và lọc
 router.get('/list', authMiddleware, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 0;

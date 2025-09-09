@@ -79,43 +79,45 @@ const searchPermissions = async (req, res) => {
         // Build select query based on whether usage stats are needed
         let selectQuery;
         if (includeUsageStats === 'true') {
-            selectQuery = 
-                "SELECT " +
-                    "p.id, " +
-                    "p.module, " +
-                    "p.action, " +
-                    "p.code, " +
-                    "p.description, " +
-                    "p.is_active, " +
-                    "p.created_at, " +
-                    "p.updated_at, " +
-                    "COUNT(DISTINCT CASE WHEN rp.granted = 1 THEN rp.role_id END) as granted_roles_count, " +
-                    "COUNT(DISTINCT CASE WHEN rp.granted = 0 THEN rp.role_id END) as denied_roles_count, " +
-                    "COUNT(DISTINCT ur.user_id) as affected_users_count, " +
-                    "(COUNT(DISTINCT CASE WHEN rp.granted = 1 THEN rp.role_id END) + " +
-                     "COUNT(DISTINCT CASE WHEN rp.granted = 0 THEN rp.role_id END)) as usage_count " +
-                "FROM permissions p " +
-                "LEFT JOIN role_permissions rp ON p.id = rp.permission_id " +
-                "LEFT JOIN user_roles ur ON rp.role_id = ur.role_id AND ur.is_active = 1 " +
-                whereClause + " " +
-                "GROUP BY p.id " +
-                "ORDER BY " + (validSortBy === 'usage_count' ? 'usage_count' : 'p.' + validSortBy) + " " + validSortOrder + " " +
-                "LIMIT ? OFFSET ?";
+            selectQuery = `
+                SELECT 
+                    p.id,
+                    p.module,
+                    p.action,
+                    p.code,
+                    p.description,
+                    p.is_active,
+                    p.created_at,
+                    p.updated_at,
+                    COUNT(DISTINCT CASE WHEN rp.granted = 1 THEN rp.role_id END) as granted_roles_count,
+                    COUNT(DISTINCT CASE WHEN rp.granted = 0 THEN rp.role_id END) as denied_roles_count,
+                    COUNT(DISTINCT ur.user_id) as affected_users_count,
+                    (COUNT(DISTINCT CASE WHEN rp.granted = 1 THEN rp.role_id END) + 
+                     COUNT(DISTINCT CASE WHEN rp.granted = 0 THEN rp.role_id END)) as usage_count
+                FROM permissions p
+                LEFT JOIN role_permissions rp ON p.id = rp.permission_id
+                LEFT JOIN user_roles ur ON rp.role_id = ur.role_id AND ur.is_active = 1
+                ${whereClause}
+                GROUP BY p.id
+                ORDER BY ${validSortBy === 'usage_count' ? 'usage_count' : `p.${validSortBy}`} ${validSortOrder}
+                LIMIT ? OFFSET ?
+            `;
         } else {
-            selectQuery = 
-                "SELECT " +
-                    "p.id, " +
-                    "p.module, " +
-                    "p.action, " +
-                    "p.code, " +
-                    "p.description, " +
-                    "p.is_active, " +
-                    "p.created_at, " +
-                    "p.updated_at " +
-                "FROM permissions p " +
-                whereClause + " " +
-                "ORDER BY p." + validSortBy + " " + validSortOrder + " " +
-                "LIMIT ? OFFSET ?";
+            selectQuery = `
+                SELECT 
+                    p.id,
+                    p.module,
+                    p.action,
+                    p.code,
+                    p.description,
+                    p.is_active,
+                    p.created_at,
+                    p.updated_at
+                FROM permissions p
+                ${whereClause}
+                ORDER BY p.${validSortBy} ${validSortOrder}
+                LIMIT ? OFFSET ?
+            `;
         }
 
         // Get permissions with search and sorting
@@ -269,30 +271,29 @@ const getPermissionsByModule = async (req, res) => {
             `;
         }
 
-        const [permissions] = await connection.execute(
-            "SELECT " +
-                "p.module, " +
-                "JSON_ARRAYAGG( " +
-                    "JSON_OBJECT( " +
-                        selectFields.split(',').map(field => {
+        const [permissions] = await connection.execute(`
+            SELECT 
+                p.module,
+                JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                        ${selectFields.split(',').map(field => {
                             const cleanField = field.trim();
                             const fieldName = cleanField.includes(' as ') 
                                 ? cleanField.split(' as ')[1] 
                                 : cleanField.split('.')[1] || cleanField;
-                            return "'" + fieldName + "', " + cleanField;
-                        }).join(', ') +
-                    ") ORDER BY p.action " +
-                ") as permissions, " +
-                "COUNT(*) as total_permissions, " +
-                "COUNT(CASE WHEN p.is_active = 1 THEN 1 END) as active_permissions, " +
-                "COUNT(CASE WHEN p.is_active = 0 THEN 1 END) as inactive_permissions " +
-            "FROM permissions p " +
-            joinClause + " " +
-            whereClause + " " +
-            "GROUP BY p.module " +
-            "ORDER BY " + (sortBy === 'count' ? 'COUNT(*) DESC' : 'p.module'),
-            queryParams
-        );
+                            return `'${fieldName}', ${cleanField}`;
+                        }).join(', ')}
+                    ) ORDER BY p.action
+                ) as permissions,
+                COUNT(*) as total_permissions,
+                COUNT(CASE WHEN p.is_active = 1 THEN 1 END) as active_permissions,
+                COUNT(CASE WHEN p.is_active = 0 THEN 1 END) as inactive_permissions
+            FROM permissions p
+            ${joinClause}
+            ${whereClause}
+            GROUP BY p.module
+            ORDER BY ${sortBy === 'count' ? 'COUNT(*) DESC' : 'p.module'}
+        `, queryParams);
 
         // Get overall statistics
         const [overallStats] = await connection.execute(`

@@ -27,14 +27,6 @@ router.get('/',
     getAllLocations
 );
 
-// Test endpoint without auth
-router.get('/test', (req, res) => {
-    res.json({ success: true, message: 'Test endpoint working' });
-});
-
-// Test locations endpoint without auth
-router.get('/test-locations', getAllLocations);
-
 router.get('/active', 
     auth, 
     // checkPermission('locations.view'),

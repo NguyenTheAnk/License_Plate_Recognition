@@ -93,10 +93,10 @@ const getAllBlacklist = async (req, res) => {
              LEFT JOIN vehicles v ON b.vehicle_id = v.id
              LEFT JOIN users u ON b.created_by = u.id
              ${whereClause}
-             ORDER BY b.${sortBy} ${sortOrder}
+             ORDER BY ${`b.${sortBy}`} ${sortOrder}
              LIMIT ${parsedLimit} OFFSET ${offset}`;
 
-        const [blacklistEntries] = await connection.query(dataQuery, queryParams);
+        const [blacklistEntries] = await connection.execute(dataQuery, queryParams);
 
         // Log access
         await connection.execute(

@@ -34,93 +34,6 @@ async function getJourneys(req, res) {
   }
 }
 
-// Search journeys with advanced filters
-async function searchJourneys(req, res) {
-  try {
-    const {
-      plate_number,
-      journey_date,
-      start_date,
-      end_date,
-      make,
-      model,
-      color,
-      page = 1,
-      limit = 10
-    } = req.query;
-
-    let query = `
-      SELECT vj.*, v.make, v.model, v.color
-      FROM vehicle_journeys vj
-      LEFT JOIN vehicles v ON vj.plate_number = v.plate_number
-      WHERE 1=1
-    `;
-    const params = [];
-
-    // Search filters
-    if (plate_number) {
-      query += ' AND vj.plate_number LIKE ?';
-      params.push(`%${plate_number}%`);
-    }
-    if (journey_date) {
-      query += ' AND vj.journey_date = ?';
-      params.push(journey_date);
-    }
-    if (start_date) {
-      query += ' AND vj.journey_date >= ?';
-      params.push(start_date);
-    }
-    if (end_date) {
-      query += ' AND vj.journey_date <= ?';
-      params.push(end_date);
-    }
-    if (make) {
-      query += ' AND v.make LIKE ?';
-      params.push(`%${make}%`);
-    }
-    if (model) {
-      query += ' AND v.model LIKE ?';
-      params.push(`%${model}%`);
-    }
-    if (color) {
-      query += ' AND v.color LIKE ?';
-      params.push(`%${color}%`);
-    }
-
-    // Count total records
-    const countQuery = query.replace('SELECT vj.*, v.make, v.model, v.color', 'SELECT COUNT(*) as total');
-    const [countResult] = await db.promise().query(countQuery, params);
-    const totalCount = countResult[0].total;
-
-    // Add pagination
-    query += ' ORDER BY vj.journey_date DESC, vj.started_at DESC';
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    query += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
-
-    const [rows] = await db.promise().query(query, params);
-
-    res.json({
-      success: true,
-      data: rows,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
-        totalCount: totalCount,
-        hasNextPage: parseInt(page) < Math.ceil(totalCount / parseInt(limit)),
-        hasPrevPage: parseInt(page) > 1
-      }
-    });
-  } catch (error) {
-    console.error('searchJourneys error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Server error',
-      message: error.message 
-    });
-  }
-}
-
 // Lấy chi tiết lộ trình
 async function getJourneyDetail(req, res) {
   try {
@@ -253,36 +166,6 @@ async function detectPlatesFromStream(req, res) {
   }
 }
 
-// Kiểm tra trùng lặp detection trong khoảng thời gian
-async function checkDuplicateDetection(plate_number, camera_id, location_id, time_window_seconds = 30) {
-  try {
-    const connection = await db.promise();
-    const query = `
-      SELECT id, detected_at, confidence_score, cropped_plate_image_path
-      FROM license_plate_detections 
-      WHERE plate_number = ? 
-      AND camera_id = ? 
-      AND location_id = ? 
-      AND detected_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)
-      ORDER BY detected_at DESC 
-      LIMIT 1
-    `;
-    
-    const [rows] = await connection.execute(query, [plate_number, camera_id, location_id, time_window_seconds]);
-    
-    if (rows.length > 0) {
-      const { id, detected_at, confidence_score, cropped_plate_image_path } = rows[0];
-      console.log(`🔄 Duplicate detection found for ${plate_number} at ${detected_at} (confidence: ${confidence_score})`);
-      return { isDuplicate: true, id, detected_at, confidence_score, image_path: cropped_plate_image_path };
-    }
-    
-    return { isDuplicate: false };
-  } catch (error) {
-    console.error('Error checking duplicate detection:', error);
-    return { isDuplicate: false }; // Lỗi thì cho phép lưu để an toàn
-  }
-}
-
 // Lưu kết quả nhận diện vào database
 async function saveDetectionToDatabase(detection, cameraId) {
   try {
@@ -296,44 +179,21 @@ async function saveDetectionToDatabase(detection, cameraId) {
 
     if (cameras.length > 0) {
       const locationId = cameras[0].location_id;
-      const plateNumber = detection.plate_text;
       
-      // Kiểm tra trùng lặp trước khi lưu
-      const duplicateCheck = await checkDuplicateDetection(plateNumber, cameraId, locationId, 30);
-      
-      if (duplicateCheck.isDuplicate) {
-        const current_confidence = detection.confidence || 0.5;
-        const existing_confidence = duplicateCheck.confidence_score || 0;
-        
-        // Nếu confidence hiện tại cao hơn ít nhất 0.1, cập nhật record cũ
-        if (current_confidence > existing_confidence + 0.1) {
-          console.log(`🔄 Updating existing detection ${duplicateCheck.id} with better confidence: ${current_confidence} > ${existing_confidence}`);
-          await connection.execute(`
-            UPDATE license_plate_detections SET
-              confidence_score = ?,
-              bbox_data = ?,
-              detected_at = NOW()
-            WHERE id = ?
-          `, [current_confidence, JSON.stringify(detection.bbox), duplicateCheck.id]);
-          console.log(`Updated detection: ${plateNumber} from camera ${cameraId}`);
-        } else {
-          console.log(`⏭️ Skipping duplicate detection for ${plateNumber} (confidence: ${current_confidence} <= ${existing_confidence})`);
-        }
-      } else {
-        // Lưu detection mới
-        await connection.execute(`
-          INSERT INTO license_plate_detections 
-          (plate_number, camera_id, location_id, detected_at, confidence_score, bbox_data, is_verified, created_at)
-          VALUES (?, ?, ?, NOW(), ?, ?, 0, NOW())
-        `, [
-          plateNumber,
-          cameraId,
-          locationId,
-          detection.confidence,
-          JSON.stringify(detection.bbox)
-        ]);
-        console.log(`Saved detection: ${plateNumber} from camera ${cameraId}`);
-      }
+      // Lưu vào bảng license_plate_detections
+      await connection.execute(`
+        INSERT INTO license_plate_detections 
+        (plate_number, camera_id, location_id, detected_at, confidence_score, bbox_data, is_verified, created_at)
+        VALUES (?, ?, ?, NOW(), ?, ?, 0, NOW())
+      `, [
+        detection.plate_text,
+        cameraId,
+        locationId,
+        detection.confidence,
+        JSON.stringify(detection.bbox)
+      ]);
+
+      console.log(`Saved detection: ${detection.plate_text} from camera ${cameraId}`);
     }
   } catch (error) {
     console.error('Error saving detection to database:', error);
@@ -510,7 +370,6 @@ async function createJourneyFromDetections(req, res) {
 
 module.exports = {
   getJourneys,
-  searchJourneys,
   getJourneyDetail,
   detectPlatesFromStream,
   getJourneyDetections,

@@ -47,7 +47,6 @@ const {
 // Get all blacklist entries with pagination and filters
 router.get('/', 
     auth, 
-    //checkPermission('blacklist.view'), 
     getAllBlacklist
 );
 
@@ -68,7 +67,7 @@ router.get('/search',
 // Get blacklist entry by ID
 router.get('/:id', 
     auth, 
-    //checkPermission('blacklist.view'), 
+    checkPermission('blacklist.view'), 
     getBlacklistById
 );
 
@@ -85,6 +84,7 @@ router.post(
   auth,
   uploadField1s, // Sử dụng uploadFields từ createBlackList.js
   //createBlacklistValidator, // Tạm comment để test
+  checkPermission('blacklist.create'),
   createBlacklist
 );
 router.post('/ocr-preview', auth, upload.single('image'), ocrPreview);
@@ -102,6 +102,7 @@ router.put('/:id',
     //checkPermission('blacklist.update'), 
     updateBlacklistValidator, 
     uploadFields,
+    checkPermission('blacklist.update'),
     updateBlacklist
 );
 
@@ -122,7 +123,7 @@ router.put('/:id/extend',
 // Delete blacklist entry (permanent)
 router.delete('/:id', 
     auth, 
-   // checkPermission('blacklist.delete'), 
+    checkPermission('blacklist.delete'), 
     deleteBlacklist
 );
 

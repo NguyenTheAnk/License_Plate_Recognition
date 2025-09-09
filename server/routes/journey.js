@@ -6,9 +6,6 @@ const journeyController = require('../controllers/journeyController');
 // Lấy danh sách lộ trình
 router.get('/', auth, journeyController.getJourneys);
 
-// Search journeys with filters
-router.get('/search', auth, journeyController.searchJourneys);
-
 // Lấy chi tiết lộ trình theo id
 router.get('/:id', auth, journeyController.getJourneyDetail);
 

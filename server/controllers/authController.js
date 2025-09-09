@@ -1,12 +1,59 @@
 const db = require('../db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { validationResult } = require('express-validator');
+
+// Helper function to create login log
+const createLoginLog = async (connection, user, email, ip, userAgent, status, message) => {
+    try {
+        await connection.execute(
+            `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, login_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [user, email, ip, userAgent, status, message]
+        );
+    } catch (error) {
+        console.error('Error creating login log:', error);
+    }
+};
+
+// Helper function to validate password strength
+const validatePasswordStrength = (password) => {
+    const errors = [];
+    
+    if (password.length < 8) {
+        errors.push('Password must be at least 8 characters long');
+    }
+    if (!/[a-z]/.test(password)) {
+        errors.push('Password must contain at least one lowercase letter');
+    }
+    if (!/[A-Z]/.test(password)) {
+        errors.push('Password must contain at least one uppercase letter');
+    }
+    if (!/[0-9]/.test(password)) {
+        errors.push('Password must contain at least one number');
+    }
+    if (!/[^A-Za-z0-9]/.test(password)) {
+        errors.push('Password must contain at least one special character');
+    }
+    
+    return errors;
+};
 
 // Register new user
 const registerUser = async (req, res) => {
     const connection = await db.promise();
     
     try {
+        // Check validation errors
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                msg: 'Validation errors',
+                errors: errors.array(),
+            });
+        }
+
         const {
             name,
             email,
@@ -18,7 +65,7 @@ const registerUser = async (req, res) => {
         if (!name || !email || !password) {
             return res.status(400).json({
                 success: false,
-                message: 'Tên, email và mật khẩu là bắt buộc'
+                msg: 'Name, email and password are required'
             });
         }
 
@@ -27,15 +74,17 @@ const registerUser = async (req, res) => {
         if (!emailRegex.test(email)) {
             return res.status(400).json({
                 success: false,
-                message: 'Định dạng email không hợp lệ'
+                msg: 'Invalid email format'
             });
         }
 
         // Validate password strength
-        if (password.length < 8) {
+        const passwordErrors = validatePasswordStrength(password);
+        if (passwordErrors.length > 0) {
             return res.status(400).json({
                 success: false,
-                message: 'Mật khẩu phải có ít nhất 8 ký tự'
+                msg: 'Password validation failed',
+                errors: passwordErrors
             });
         }
 
@@ -46,9 +95,10 @@ const registerUser = async (req, res) => {
         );
 
         if (existingUsers.length > 0) {
+            await createLoginLog(connection, null, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'Email already exists');
             return res.status(400).json({
                 success: false,
-                message: 'Email đã tồn tại'
+                msg: 'Email already exists!'
             });
         }
 
@@ -68,16 +118,29 @@ const registerUser = async (req, res) => {
 
         const userId = userResult.insertId;
 
-        // Assign default role (Viewer)
-        const [defaultRole] = await connection.execute(
-            'SELECT id FROM roles WHERE is_default_role = 1 AND is_active = 1 LIMIT 1'
+        // Assign role with id = 4 (Người dùng)
+        const [targetRole] = await connection.execute(
+            'SELECT id, name FROM roles WHERE id = ? AND is_active = 1',
+            [4]
         );
 
-        if (defaultRole.length > 0) {
+        if (targetRole.length > 0) {
             await connection.execute(
                 'INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at, is_active) VALUES (?, ?, ?, NOW(), 1)',
-                [userId, defaultRole[0].id, userId]
+                [userId, 4, userId]
             );
+        } else {
+            // Fallback to default role if role id = 4 doesn't exist
+            const [defaultRole] = await connection.execute(
+                'SELECT id FROM roles WHERE is_default_role = 1 AND is_active = 1 LIMIT 1'
+            );
+            
+            if (defaultRole.length > 0) {
+                await connection.execute(
+                    'INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at, is_active) VALUES (?, ?, ?, NOW(), 1)',
+                    [userId, defaultRole[0].id, userId]
+                );
+            }
         }
 
         // Get user with roles and permissions
@@ -145,15 +208,11 @@ const registerUser = async (req, res) => {
         );
 
         // Log successful registration
-        await connection.execute(
-            `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, login_at)
-             VALUES (?, ?, ?, ?, 'success', NOW())`,
-            [userId, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
-        );
+        await createLoginLog(connection, userId, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'success', 'User registered successfully');
 
         res.status(201).json({
             success: true,
-            message: 'Đăng ký thành công',
+            msg: 'User registered successfully!',
             data: {
                 user,
                 token,
@@ -164,9 +223,16 @@ const registerUser = async (req, res) => {
     } catch (error) {
         console.error('Error registering user:', error);
         
+        // Log registration error
+        try {
+            await createLoginLog(connection, null, req.body.email || 'unknown', req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', error.message);
+        } catch (logError) {
+            console.error('Error logging registration failure:', logError);
+        }
+        
         res.status(500).json({
             success: false,
-            message: 'Lỗi khi thay đổi email',
+            msg: 'Server error',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -361,6 +427,49 @@ const getUserProfile = async (req, res) => {
             success: false,
             message: 'Lỗi khi lấy thông tin hồ sơ',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get user permissions
+const getUserPermissions = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const userId = req.user.userId;
+
+        // Get permissions
+        const [userPermissions] = await connection.execute(`
+            SELECT DISTINCT
+                p.id,
+                p.module,
+                p.action,
+                p.code,
+                p.description
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            JOIN role_permissions rp ON r.id = rp.role_id
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE ur.user_id = ? 
+            AND ur.is_active = 1 
+            AND r.is_active = 1 
+            AND rp.granted = 1 
+            AND p.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        `, [userId]);
+
+        res.status(200).json({
+            success: true,
+            msg: 'User permissions retrieved successfully!',
+            data: userPermissions
+        });
+
+    } catch (error) {
+        console.error('Error getting user permissions:', error);
+        
+        res.status(500).json({
+            success: false,
+            msg: error.message
         });
     }
 };
@@ -561,13 +670,25 @@ const loginUser = async (req, res) => {
     const connection = await db.promise();
     
     try {
+        // Check validation errors
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            await createLoginLog(connection, null, req.body.email || '', req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'Validation errors');
+            return res.status(400).json({
+                success: false,
+                msg: 'Validation errors',
+                errors: errors.array(),
+            });
+        }
+
         const { email, password } = req.body;
 
         // Validate input
         if (!email || !password) {
+            await createLoginLog(connection, null, email || '', req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'Email and password are required');
             return res.status(400).json({
                 success: false,
-                message: 'Email và mật khẩu là bắt buộc'
+                msg: 'Email and password are required'
             });
         }
 
@@ -594,15 +715,10 @@ const loginUser = async (req, res) => {
 
         // Log failed login if user not found
         if (users.length === 0) {
-            await connection.execute(
-                `INSERT INTO login_logs (email, ip_address, user_agent, status, failure_reason, login_at)
-                 VALUES (?, ?, ?, 'failed', 'User not found', NOW())`,
-                [email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
-            );
-
+            await createLoginLog(connection, null, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'User not found');
             return res.status(401).json({
                 success: false,
-                message: 'Email hoặc mật khẩu không chính xác'
+                msg: 'Login information is incorrect!'
             });
         }
 
@@ -611,37 +727,28 @@ const loginUser = async (req, res) => {
 
         // Check if account is locked
         if (user.is_account_locked && user.locked_until && new Date(user.locked_until) > new Date()) {
-            await connection.execute(
-                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, login_at)
-                 VALUES (?, ?, ?, ?, 'failed', 'Account locked', NOW())`,
-                [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
-            );
-
+            await createLoginLog(connection, user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'Account locked');
             return res.status(401).json({
                 success: false,
-                message: `Tài khoản bị khóa đến ${new Date(user.locked_until).toLocaleString('vi-VN')}`
+                msg: `Account locked until ${new Date(user.locked_until).toLocaleString()}`
             });
         }
 
         // Check account status
         if (user.status !== 'active') {
-            await connection.execute(
-                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, login_at)
-                 VALUES (?, ?, ?, ?, 'failed', 'Account inactive', NOW())`,
-                [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
-            );
-
+            await createLoginLog(connection, user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'Account inactive');
             return res.status(401).json({
                 success: false,
-                message: 'Tài khoản đã bị vô hiệu hóa'
+                msg: 'Account has been disabled'
             });
         }
 
         // Check password expiry
         if (user.password_expires_at && new Date(user.password_expires_at) < new Date()) {
+            await createLoginLog(connection, user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'Password expired');
             return res.status(401).json({
                 success: false,
-                message: 'Mật khẩu đã hết hạn. Vui lòng đặt lại mật khẩu.',
+                msg: 'Password has expired. Please reset your password.',
                 requirePasswordReset: true
             });
         }
@@ -672,17 +779,13 @@ const loginUser = async (req, res) => {
                 ]
             );
 
-            await connection.execute(
-                `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, failure_reason, login_at)
-                 VALUES (?, ?, ?, ?, 'failed', 'Invalid password', NOW())`,
-                [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown']
-            );
+            await createLoginLog(connection, user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', 'Wrong password');
 
             return res.status(401).json({
                 success: false,
-                message: shouldLock 
-                    ? 'Đăng nhập sai quá nhiều lần. Tài khoản đã bị khóa 30 phút.'
-                    : `Email hoặc mật khẩu không chính xác (Còn ${maxAttempts - newFailedAttempts} lần thử)`
+                msg: shouldLock 
+                    ? 'Too many failed login attempts. Account locked for 30 minutes.'
+                    : `Login information is incorrect! (${maxAttempts - newFailedAttempts} attempts remaining)`
             });
         }
 
@@ -763,11 +866,7 @@ const loginUser = async (req, res) => {
         );
 
         // Log successful login with session ID
-        await connection.execute(
-            `INSERT INTO login_logs (user_id, email, ip_address, user_agent, status, session_id, login_at)
-             VALUES (?, ?, ?, ?, 'success', ?, NOW())`,
-            [user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', sessionId]
-        );
+        await createLoginLog(connection, user.id, email, req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'success', 'Login successfully');
 
         // Log access event
         await connection.execute(
@@ -787,12 +886,11 @@ const loginUser = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: 'Đăng nhập thành công',
+            msg: 'Login successfully!',
             data: {
-                user,
-                token,
-                refreshToken,
-                sessionId
+                token: token,
+                refreshToken: refreshToken,
+                user: user
             }
         });
 
@@ -801,19 +899,14 @@ const loginUser = async (req, res) => {
         
         // Log error
         try {
-            await connection.execute(
-                `INSERT INTO login_logs (email, ip_address, user_agent, status, failure_reason, login_at)
-                 VALUES (?, ?, ?, 'failed', ?, NOW())`,
-                [req.body.email || 'unknown', req.ip || 'unknown', req.get('User-Agent') || 'unknown', error.message]
-            );
+            await createLoginLog(connection, null, req.body.email || 'unknown', req.ip || 'unknown', req.get('User-Agent') || 'unknown', 'failed', error.message);
         } catch (logError) {
             console.error('Error logging to database:', logError);
         }
 
         res.status(500).json({
             success: false,
-            message: 'Lỗi khi đăng nhập',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            msg: error.message
         });
     }
 };
@@ -1077,5 +1170,7 @@ module.exports = {
     verifyEmail,
     resetPassword,
     toggle2FA,
-    getUserSessions
+    getUserSessions,
+    getUserProfile,
+    getUserPermissions
 };
