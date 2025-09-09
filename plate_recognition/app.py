@@ -34,69 +34,8 @@ app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
 
-# Global variable to store detected plates for database saving
-detected_plates_queue = []
-detected_plates_lock = threading.Lock()
-
-def save_detection_to_database(plate_data):
-    """Save detection to database via API call"""
-    try:
-        # API endpoint for saving plate recognitions
-        api_url = "http://localhost:5000/api/plate-recognitions/detected-plates"
-        
-        # Prepare data for API
-        payload = {
-            "detection_uuid": plate_data.get('detection_uuid', f"detection_{int(time.time())}"),
-            "plate_number": plate_data.get('plate_number', ''),
-            "raw_plate_text": plate_data.get('raw_plate_text', ''),
-            "camera_id": plate_data.get('camera_id', 'default'),
-            "location_id": plate_data.get('location_id'),
-            "detected_at": plate_data.get('detected_at', time.time()),
-            "confidence_score": plate_data.get('confidence_score', 0.0),
-            "ocr_confidence": plate_data.get('ocr_confidence', 0.0),
-            "detection_confidence": plate_data.get('detection_confidence', 0.0),
-            "bbox": plate_data.get('bbox', [0, 0, 0, 0]),
-            "frame_path": plate_data.get('frame_path', ''),
-            "detected_vehicle_type": plate_data.get('detected_vehicle_type', 'unknown'),
-            "source_type": plate_data.get('source_type', 'camera_stream')
-        }
-        
-        # Make API call
-        response = requests.post(api_url, json=payload, timeout=5)
-        
-        if response.status_code == 200:
-            logger.info(f"Successfully saved plate detection: {plate_data.get('plate_number')}")
-            return True
-        else:
-            logger.error(f"Failed to save detection. Status: {response.status_code}, Response: {response.text}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error saving detection to database: {str(e)}")
-        return False
-
-def process_detected_plates():
-    """Background thread to process detected plates and save to database"""
-    global detected_plates_queue
-    
-    while True:
-        try:
-            if detected_plates_queue:
-                with detected_plates_lock:
-                    plate_data = detected_plates_queue.pop(0)
-                
-                # Save to database
-                save_detection_to_database(plate_data)
-                
-            time.sleep(0.1)  # Small delay to prevent busy waiting
-            
-        except Exception as e:
-            logger.error(f"Error in process_detected_plates: {str(e)}")
-            time.sleep(1)
-
-# Start background thread for database saving
-db_thread = threading.Thread(target=process_detected_plates, daemon=True)
-db_thread.start()
+# SIMPLIFIED: Loại bỏ background thread phức tạp
+# Detector.py sẽ gửi trực tiếp tới Node.js API
 
 # Trong hàm recognize_ws, thêm xử lý cho HLS stream nếu RTSP không khả dụng
 @sock.route('/recognize-ws')
@@ -104,6 +43,9 @@ def recognize_ws(ws):
     logger.info("Kết nối WebSocket mới được thiết lập")
     cap = None
     camera_id = "default"  # Khởi tạo camera_id mặc định
+    source_type = "camera"  # Khởi tạo source_type mặc định
+    video_filename = None
+    camera_location = None
 
     try:
         while True:
@@ -122,40 +64,14 @@ def recognize_ws(ws):
                     if frame is not None:
                         logger.info(f"Received frame from frontend: {frame.shape}")
                         # Xử lý frame với detect_and_ocr_stable
-                        result = detect_and_ocr_stable(frame, camera_id=camera_id)
+                        result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location)
                         
                         if isinstance(result, dict):
                             processed_frame_bytes = result.get('frame', b'')
                             tracked_objects = result.get('tracked_objects', {})
                             
-                            # Process tracked objects for database saving
-                            for track_id, obj_data in tracked_objects.items():
-                                if (obj_data.get('validation_passed') and 
-                                    not obj_data.get('saved_to_db', False) and
-                                    obj_data.get('plate_number') != 'Đang nhận diện...'):
-                                    
-                                    # Prepare plate data for database
-                                    plate_data = {
-                                        'detection_uuid': f"ws_{camera_id}_{track_id}_{int(time.time())}",
-                                        'plate_number': obj_data.get('plate_number', ''),
-                                        'raw_plate_text': obj_data.get('raw_text', ''),
-                                        'camera_id': camera_id,
-                                        'detected_at': time.time(),
-                                        'confidence_score': obj_data.get('confidence', 0.0),
-                                        'ocr_confidence': obj_data.get('confidence', 0.0),
-                                        'detection_confidence': obj_data.get('confidence', 0.0),
-                                        'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
-                                        'frame_path': obj_data.get('crop_filename', ''),
-                                        'detected_vehicle_type': 'unknown',
-                                        'source_type': 'websocket_stream'
-                                    }
-                                    
-                                    # Add to queue for database saving
-                                    with detected_plates_lock:
-                                        detected_plates_queue.append(plate_data)
-                                    
-                                    # Mark as saved to avoid duplicate saving
-                                    obj_data['saved_to_db'] = True
+                            # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
+                            # Không cần xử lý queue ở đây nữa
                             
                             # Send processed frame
                             if processed_frame_bytes:
@@ -192,8 +108,10 @@ def recognize_ws(ws):
                         # Lưu thông tin camera để sử dụng sau
                         camera_id = data.get('camera_id') or "default"
                         camera_name = data.get('camera_name')
-                        source_type = data.get('source_type')
-                        logger.info(f"Camera info: ID={camera_id}, Name={camera_name}, Type={source_type}")
+                        source_type = data.get('source_type') or "camera"
+                        video_filename = data.get('video_filename')
+                        camera_location = data.get('camera_location')
+                        logger.info(f"Camera info: ID={camera_id}, Name={camera_name}, Type={source_type}, Video={video_filename}, Location={camera_location}")
                         continue
                     
                     # Xử lý RTSP URL
@@ -226,49 +144,31 @@ def recognize_ws(ws):
                                 break
                             
                             # Xử lý frame với detect_and_ocr_stable
-                            logger.info(f"Processing frame for camera {camera_id}")
-                            result = detect_and_ocr_stable(frame, camera_id=camera_id)
+                            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location)
                             
                             if isinstance(result, dict):
                                 processed_frame_bytes = result.get('frame', b'')
                                 tracked_objects = result.get('tracked_objects', {})
+                                detection_count = result.get('detection_count', 0)
+                                skipped = result.get('skipped', False)
                                 
-                                # Process tracked objects for database saving
-                                for track_id, obj_data in tracked_objects.items():
-                                    if (obj_data.get('validation_passed') and 
-                                        not obj_data.get('saved_to_db', False) and
-                                        obj_data.get('plate_number') != 'Đang nhận diện...'):
-                                        
-                                        # Prepare plate data for database
-                                        plate_data = {
-                                            'detection_uuid': f"rtsp_{camera_id}_{track_id}_{int(time.time())}",
-                                            'plate_number': obj_data.get('plate_number', ''),
-                                            'raw_plate_text': obj_data.get('raw_text', ''),
-                                            'camera_id': camera_id,
-                                            'detected_at': time.time(),
-                                            'confidence_score': obj_data.get('confidence', 0.0),
-                                            'ocr_confidence': obj_data.get('confidence', 0.0),
-                                            'detection_confidence': obj_data.get('confidence', 0.0),
-                                            'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
-                                            'frame_path': obj_data.get('crop_filename', ''),
-                                            'detected_vehicle_type': 'unknown',
-                                            'source_type': 'rtsp_stream'
-                                        }
-                                        
-                                        # Add to queue for database saving
-                                        with detected_plates_lock:
-                                            detected_plates_queue.append(plate_data)
-                                        
-                                        # Mark as saved to avoid duplicate saving
-                                        obj_data['saved_to_db'] = True
+                                # Chỉ gửi frame khi có detection hoặc không bị skip
+                                should_send_frame = detection_count > 0 or not skipped
                                 
-                                # Send processed frame
-                                if processed_frame_bytes:
-                                    ws.send(processed_frame_bytes)
+                                if should_send_frame:
+                                    logger.info(f"📤 Sending frame for camera {camera_id} - Detections: {detection_count}, Skipped: {skipped}")
+                                    
+                                    # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
+                                    
+                                    # Send processed frame only when needed
+                                    if processed_frame_bytes:
+                                        ws.send(processed_frame_bytes)
+                                    else:
+                                        # Fallback
+                                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                        ws.send(buffer.tobytes())
                                 else:
-                                    # Fallback
-                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                                    ws.send(buffer.tobytes())
+                                    logger.debug(f"⏭️ Skipping frame send for camera {camera_id} - No detections")
                             else:
                                 # Legacy support
                                 if isinstance(result, np.ndarray):
@@ -358,7 +258,7 @@ def video_stream(video_id):
 
                 # Xử lý frame với detection/OCR
                 try:
-                    result = detect_and_ocr_stable(frame)
+                    result = detect_and_ocr_stable(frame, source_type="video_upload", video_filename=video_id)
 
                     # Handle both dict and direct frame results
                     if isinstance(result, dict):
@@ -473,7 +373,7 @@ def process_rtsp_to_llhls(rtsp_url, output_dir, stream_id):
                     break
 
                 # Process frame with license plate recognition
-                result = detect_and_ocr_stable(frame)
+                result = detect_and_ocr_stable(frame, source_type="rtsp_stream")
                 
                 # Handle both dict and direct frame results
                 if isinstance(result, dict):
@@ -551,7 +451,7 @@ def test_detection():
         cv2.rectangle(test_frame, (300, 200), (400, 250), (255, 255, 255), -1)
         
         # Xử lý với detector
-        result = detect_and_ocr_stable(test_frame, camera_id="test")
+        result = detect_and_ocr_stable(test_frame, camera_id="test", source_type="test")
         
         # Handle both dict and direct frame results
         if isinstance(result, dict):
@@ -585,7 +485,7 @@ def test_real_detection():
         cv2.putText(test_frame, "Should show ROI and debug info", (50, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         
         # Xử lý với detector
-        result = detect_and_ocr_stable(test_frame, camera_id="test")
+        result = detect_and_ocr_stable(test_frame, camera_id="test", source_type="test")
         
         # Handle both dict and direct frame results
         if isinstance(result, dict):
@@ -655,6 +555,9 @@ def cleanup_system():
         logger.error(f"Error in cleanup: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+# SIMPLIFIED: Removed queue-related endpoints
+# Detector.py now sends directly to Node.js API
+
 
 @app.errorhandler(404)
 def not_found(error):
@@ -706,44 +609,27 @@ def recognize():
         return jsonify({"error": "Cần cung cấp ảnh hoặc RTSP URL"}), 400
 
     detect_start = time.time()
-    result = detect_and_ocr_stable(img)
+    result = detect_and_ocr_stable(img, source_type="http_request")
     
     # Handle both dict and direct frame results
     if isinstance(result, dict):
         frame_bytes = result.get('frame', b'')
         tracked_objects = result.get('tracked_objects', {})
+        detection_count = result.get('detection_count', 0)
+        skipped = result.get('skipped', False)
         
-        # Process tracked objects for database saving
-        for track_id, obj_data in tracked_objects.items():
-            if (obj_data.get('validation_passed') and 
-                not obj_data.get('saved_to_db', False) and
-                obj_data.get('plate_number') != 'Đang nhận diện...'):
-                
-                # Prepare plate data for database
-                plate_data = {
-                    'detection_uuid': f"http_{track_id}_{int(time.time())}",
-                    'plate_number': obj_data.get('plate_number', ''),
-                    'raw_plate_text': obj_data.get('raw_text', ''),
-                    'camera_id': 'http_upload',
-                    'detected_at': time.time(),
-                    'confidence_score': obj_data.get('confidence', 0.0),
-                    'ocr_confidence': obj_data.get('confidence', 0.0),
-                    'detection_confidence': obj_data.get('confidence', 0.0),
-                    'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
-                    'frame_path': obj_data.get('crop_filename', ''),
-                    'detected_vehicle_type': 'unknown',
-                    'source_type': 'http_upload'
-                }
-                
-                # Add to queue for database saving
-                with detected_plates_lock:
-                    detected_plates_queue.append(plate_data)
-                
-                # Mark as saved to avoid duplicate saving
-                obj_data['saved_to_db'] = True
+        # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
         
-        if not frame_bytes:
-            # Fallback: encode manually
+        # Chỉ trả về frame khi có detection hoặc không bị skip
+        if detection_count > 0 or not skipped:
+            logger.info(f"📤 Returning frame - Detections: {detection_count}, Skipped: {skipped}")
+            if not frame_bytes:
+                # Fallback: encode manually
+                _, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_bytes = buffer.tobytes()
+        else:
+            logger.debug(f"⏭️ Skipping frame return - No detections")
+            # Trả về frame trống hoặc thông báo không có detection
             _, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
             frame_bytes = buffer.tobytes()
     else:
@@ -819,42 +705,12 @@ def process_video_file(video_path, video_id):
                 break
 
             # Xử lý frame với detection/OCR
-            result = detect_and_ocr_stable(frame, camera_id=video_id)
+            result = detect_and_ocr_stable(frame, camera_id=video_id, source_type="video_upload", video_filename=video_id)
             
             if isinstance(result, dict):
                 tracked_objects = result.get('tracked_objects', {})
                 
-                # Process tracked objects for database saving
-                for track_id, obj_data in tracked_objects.items():
-                    if (obj_data.get('validation_passed') and 
-                        not obj_data.get('saved_to_db', False) and
-                        obj_data.get('plate_number') != 'Đang nhận diện...'):
-                        
-                        # Prepare plate data for database
-                        plate_data = {
-                            'detection_uuid': f"video_{video_id}_{track_id}_{frame_count}",
-                            'plate_number': obj_data.get('plate_number', ''),
-                            'raw_plate_text': obj_data.get('raw_text', ''),
-                            'camera_id': video_id,
-                            'detected_at': time.time(),
-                            'confidence_score': obj_data.get('confidence', 0.0),
-                            'ocr_confidence': obj_data.get('confidence', 0.0),
-                            'detection_confidence': obj_data.get('confidence', 0.0),
-                            'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
-                            'frame_path': obj_data.get('crop_filename', ''),
-                            'detected_vehicle_type': 'unknown',
-                            'source_type': 'video_file'
-                        }
-                        
-                        # Add to queue for database saving
-                        with detected_plates_lock:
-                            detected_plates_queue.append(plate_data)
-                        
-                        # Add to return list
-                        detected_plates.append(plate_data)
-                        
-                        # Mark as saved to avoid duplicate saving
-                        obj_data['saved_to_db'] = True
+                # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
             
             # Lưu frame đã xử lý (tùy chọn)
             if frame_count % 30 == 0:  # Lưu mỗi 30 frame
@@ -904,7 +760,7 @@ def recognize_stream():
                 if frame is None:
                     continue
 
-                result = detect_and_ocr_stable(frame)  # Nhận frame numpy array
+                result = detect_and_ocr_stable(frame, source_type="stream")  # Nhận frame numpy array
                 
                 # Handle both dict and direct frame results
                 if isinstance(result, dict):
@@ -967,41 +823,14 @@ def processed_video_ws(ws, video_id):
                 break
 
             # Xử lý frame với detection/OCR
-            result = detect_and_ocr_stable(frame, camera_id="1")
+            result = detect_and_ocr_stable(frame, camera_id="1", source_type="video_upload", video_filename=video_id)
 
             # Handle both dict and direct frame results
             if isinstance(result, dict):
                 frame_bytes = result.get('frame', b'')
                 tracked_objects = result.get('tracked_objects', {})
                 
-                # Process tracked objects for database saving
-                for track_id, obj_data in tracked_objects.items():
-                    if (obj_data.get('validation_passed') and 
-                        not obj_data.get('saved_to_db', False) and
-                        obj_data.get('plate_number') != 'Đang nhận diện...'):
-                        
-                        # Prepare plate data for database
-                        plate_data = {
-                            'detection_uuid': f"ws_video_{video_id}_{track_id}_{frame_count}",
-                            'plate_number': obj_data.get('plate_number', ''),
-                            'raw_plate_text': obj_data.get('raw_text', ''),
-                            'camera_id': video_id,
-                            'detected_at': time.time(),
-                            'confidence_score': obj_data.get('confidence', 0.0),
-                            'ocr_confidence': obj_data.get('confidence', 0.0),
-                            'detection_confidence': obj_data.get('confidence', 0.0),
-                            'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
-                            'frame_path': obj_data.get('crop_filename', ''),
-                            'detected_vehicle_type': 'unknown',
-                            'source_type': 'websocket_video'
-                        }
-                        
-                        # Add to queue for database saving
-                        with detected_plates_lock:
-                            detected_plates_queue.append(plate_data)
-                        
-                        # Mark as saved to avoid duplicate saving
-                        obj_data['saved_to_db'] = True
+                # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
                 
                 if not frame_bytes:
                     # Fallback: encode manually

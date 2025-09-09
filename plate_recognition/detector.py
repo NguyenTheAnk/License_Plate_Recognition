@@ -14,6 +14,8 @@ from cjm_byte_track.core import BYTETracker
 from collections import defaultdict
 import requests
 import re
+import random
+import hashlib
 
 # Cấu hình môi trường cho FastALPR GPU
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -49,10 +51,21 @@ track_consistency = {}
 ocr_attempts_per_track = {}
 plate_history = {}
 
-# Anti-duplicate settings - TĂNG THRESHOLD ĐỂ KẾT QUẢ ỔN ĐỊNH HƠN
-consistency_threshold = 5  # Tăng từ 3 lên 5 để yêu cầu nhiều lần nhận diện giống nhau
+# Global background subtractor for motion detection
+global_bg_subtractor = None
+
+# Frame skipping variables
+skip_frame_count = 0
+max_skip_frames = 5  # Giảm từ 10 xuống 5 để phát hiện nhanh hơn
+last_detection_time = 0
+detection_cooldown = 1.0  # Giảm từ 2.0 xuống 1.0 giây
+last_motion_time = 0  # Thời gian có chuyển động cuối cùng
+motion_cooldown = 0.5  # Cooldown 0.5 giây sau khi có chuyển động
+
+# Anti-duplicate settings - GIẢM THRESHOLD ĐỂ LƯU DỮ LIỆU NHANH HƠN
+consistency_threshold = 2  # Giảm xuống 2 để lưu nhanh hơn
 max_ocr_attempts = 8       # Tăng số lần thử OCR
-consistency_window = 15    # Tăng cửa sổ consistency
+consistency_window = 10    # Giảm cửa sổ consistency
 
 # Configuration - OPTIMIZED FOR VEHICLE AND LICENSE PLATE DETECTION
 # ROI toàn chiều rộng khung hình, chiều cao giữa
@@ -117,11 +130,11 @@ current_fps = 0
 last_redis_update = 0
 sent_plates = {}
 plate_cooldown = 300  # 5 phút (300 giây)
-FRAMES_FOLDER = '../public/frames_crops'
+FRAMES_FOLDER = 'static/crops'
 os.makedirs(FRAMES_FOLDER, exist_ok=True)
 
-# Gửi dữ liệu biển số tới server Node.js
-def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None):
+# Gửi dữ liệu biển số tới server Node.js - SIMPLIFIED VERSION
+def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
     try:
         current_time = time.time()
         plate_text = plate_data['plate']
@@ -130,36 +143,62 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None):
         if plate_text in sent_plates:
             last_sent_time = sent_plates[plate_text]
             if current_time - last_sent_time < plate_cooldown:
-                logger.info(f"Biển số {plate_text} đã được gửi gần đây, bỏ qua")
+                logger.info(f"⏭️ Biển số {plate_text} đã được gửi gần đây, bỏ qua")
                 return
         
-        # Gửi tới API mới cho plate recognition
-        url = "http://localhost:5000/api/plate-recognitions/detected-plates"
+        # Chuẩn bị data theo format của test files (đã hoạt động)
+        # Tạo UUID duy nhất ngắn gọn (tối đa 36 ký tự)
+        unique_string = f"{camera_id}_{track_id}_{int(current_time * 1000)}_{random.randint(1000, 9999)}"
+        # Tạo hash ngắn từ unique_string
+        unique_hash = hashlib.md5(unique_string.encode()).hexdigest()[:8]
         data = {
-            "detection_uuid": f"camera_{camera_id}_{track_id}_{int(current_time)}",
+            "detection_uuid": f"cam_{camera_id}_{unique_hash}",
             "plate_number": plate_data['plate'],
             "raw_plate_text": plate_data['plate'],
-            "camera_id": camera_id,
-            "location_id": None,
-            "detected_at": current_time,
+            "camera_id": camera_id or 1,
+            "location_id": 1,
+            "detected_at": current_time,  # Send as Unix timestamp in seconds
             "confidence_score": plate_data['confidence'],
             "ocr_confidence": plate_data['confidence'],
             "detection_confidence": plate_data['confidence'],
             "bbox": plate_data['bbox'],
-            "frame_path": frame_path,
-            "detected_vehicle_type": "unknown",
-            "source_type": "camera_stream"
+            "frame_path": frame_path or "",
+            "detected_vehicle_type": "other",
+            "source_type": source_type,
+            "video_filename": video_filename,
+            "camera_location": camera_location,
+            "camera_name": f"Camera_{camera_id}" if camera_id else "Camera_1"
         }
         
-        response = requests.post(url, json=data, timeout=2)
-        if response.status_code == 200:
-            logger.info(f"Biển số {plate_data['plate']} đã gửi tới server thành công")
+        # Gửi trực tiếp tới Node.js API (như test files)
+        url = "http://localhost:5000/api/plate-recognitions/detected-plates"
+        
+        logger.info(f"🔄 Sending plate data to Node.js API: {plate_text}")
+        logger.info(f"🌐 URL: {url}")
+        
+        response = requests.post(url, json=data, timeout=10, headers={'Content-Type': 'application/json'})
+        
+        logger.info(f"📡 Node.js API response: {response.status_code}")
+        logger.info(f"📄 Response: {response.text}")
+        
+        if response.status_code in [200, 201]:
+            logger.info(f"✅ Biển số {plate_text} đã lưu vào database thành công!")
             # Cập nhật thời gian gửi cuối cùng
             sent_plates[plate_text] = current_time
+            return True
         else:
-            logger.error(f"Lỗi gửi biển số tới server: {response.status_code}")
+            logger.error(f"❌ Lỗi lưu biển số vào database: {response.status_code} - {response.text}")
+            return False
+            
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"❌ Không thể kết nối tới Node.js server: {e}")
+        return False
+    except requests.exceptions.Timeout as e:
+        logger.error(f"❌ Timeout khi gửi tới Node.js server: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Lỗi khi gửi biển số tới server: {str(e)}")
+        logger.error(f"❌ Lỗi khi gửi biển số tới server: {str(e)}")
+        return False
 
 def levenshtein_distance(s1, s2):
     """Tính khoảng cách Levenshtein giữa hai chuỗi."""
@@ -177,6 +216,94 @@ def levenshtein_distance(s1, s2):
             current_row.append(min(insertions, deletions, substitutions))
         previous_row = current_row
     return previous_row[-1]
+
+def should_skip_frame(frame, roi):
+    """Kiểm tra xem có nên skip frame này không - Dựa trên chuyển động trong ROI"""
+    global skip_frame_count, last_detection_time, detection_cooldown, last_motion_time, motion_cooldown
+    
+    current_time = time.time()
+    
+    # Nếu có detection gần đây, không skip
+    if current_time - last_detection_time < detection_cooldown:
+        skip_frame_count = 0
+        return False
+    
+    # Kiểm tra chuyển động trong ROI trước khi quyết định skip
+    has_motion = has_motion_in_roi(frame, roi)
+    
+    if has_motion:
+        # Có chuyển động, reset skip counter và xử lý frame
+        skip_frame_count = 0
+        last_motion_time = current_time
+        logger.debug(f"🔄 Motion detected in ROI - processing frame")
+        return False
+    
+    # Nếu vừa có chuyển động gần đây, vẫn xử lý frame để phát hiện phương tiện mới
+    if current_time - last_motion_time < motion_cooldown:
+        skip_frame_count = 0
+        logger.debug(f"🔄 Recent motion - processing frame to detect new vehicles")
+        return False
+    
+    # Không có chuyển động, có thể skip
+    # Nhưng vẫn phải xử lý định kỳ để phát hiện phương tiện mới
+    if skip_frame_count >= max_skip_frames:
+        # Đã skip quá nhiều frame, phải xử lý để phát hiện phương tiện mới
+        skip_frame_count = 0
+        logger.debug(f"🔄 Max skip reached - processing frame to detect new vehicles")
+        return False
+    
+    # Skip frame
+    skip_frame_count += 1
+    logger.debug(f"⏭️ Skipping frame - no motion in ROI (skip: {skip_frame_count}/{max_skip_frames})")
+    return True
+
+def has_motion_in_roi(frame, roi):
+    """Kiểm tra xem có chuyển động trong ROI không - Cải thiện độ nhạy"""
+    global global_bg_subtractor
+    
+    try:
+        roi_xmin, roi_ymin, roi_xmax, roi_ymax = roi
+        roi_frame = frame[roi_ymin:roi_ymax, roi_xmin:roi_xmax]
+        
+        if roi_frame.size == 0:
+            return True  # Nếu ROI rỗng, xử lý frame để an toàn
+        
+        # Chuyển sang grayscale
+        gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+        
+        # Sử dụng background subtraction toàn cục để phát hiện chuyển động
+        if global_bg_subtractor is None:
+            global_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+                history=300, varThreshold=16, detectShadows=True
+            )
+        
+        # Áp dụng background subtraction
+        fg_mask = global_bg_subtractor.apply(gray)
+        
+        # Tính toán gradient để phát hiện chuyển động
+        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        
+        # Tính magnitude của gradient
+        magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        
+        # Kiểm tra cả background subtraction và gradient
+        fg_pixels = np.sum(fg_mask > 0)
+        gradient_mean = np.mean(magnitude)
+        
+        # Điều kiện phát hiện chuyển động (nhạy hơn)
+        motion_threshold_gradient = 25  # Giảm từ 30 xuống 25
+        motion_threshold_fg = roi_frame.shape[0] * roi_frame.shape[1] * 0.005  # 0.5% pixels
+        
+        has_motion = (gradient_mean > motion_threshold_gradient) or (fg_pixels > motion_threshold_fg)
+        
+        if has_motion:
+            logger.debug(f"Motion detected: gradient={gradient_mean:.2f}, fg_pixels={fg_pixels}")
+        
+        return has_motion
+    except Exception as e:
+        logger.debug(f"Error checking motion: {e}")
+        return True  # Nếu lỗi, xử lý frame để an toàn
 
 def is_bbox_in_roi(bbox, roi):
     """Kiểm tra xem bounding box có giao với vùng ROI hay không."""
@@ -286,17 +413,8 @@ def process_plate_text(text):
             r'^\d{2}[A-Z]\d-\d{2,4}\.\d{2}$',      # 30A1-123.45 (xe máy)
             r'^\d{2}[A-Z]{2}-\d{2,4}\.\d{2}$',     # 30AB-123.45 (xe máy)
             
-            # Xe tải với dấu chấm - ENHANCED
-            r'^\d{2}[A-Z]-\d{3,4}\.\d{2}$',        # 30A-1234.56 (xe tải)
-            r'^\d{2}[A-Z]\d-\d{3,4}\.\d{2}$',      # 30A1-1234.56 (xe tải)
-            
-            # Xe ô tô không có dấu chấm
-            r'^\d{2}[A-Z]-\d{4,5}$',                # 30A-12345 (ô tô)
-            r'^\d{2}[A-Z]\d-\d{4,5}$',              # 30A1-12345 (ô tô)
-            r'^\d{2}[A-Z]{2}-\d{4,5}$',             # 30AB-12345 (ô tô)
             
             # Xe máy không có dấu chấm (format cũ)
-            r'^\d{2}[A-Z]-\d{3,6}$',                # 30A-12345 (xe máy)
             r'^\d{2}[A-Z]\d-\d{3,4}$',              # 30A1-2345 (xe máy)
         ]
         
@@ -309,19 +427,37 @@ def process_plate_text(text):
         # Loại bỏ khoảng trắng và kiểm tra lại
         clean_text = re.sub(r'\s+', '', text)
         
-        # Thử thêm dấu gạch ngang nếu thiếu
+        # Thử thêm dấu gạch ngang và dấu chấm nếu thiếu
         if re.match(r'^\d{2}[A-Z]\d{2,6}$', clean_text):
-            # Format: 30A12345 -> 30A-12345
-            formatted = re.sub(r'^(\d{2}[A-Z])(\d{2,6})$', r'\1-\2', clean_text)
-            if re.match(r'^\d{2}[A-Z]-\d{2,6}$', formatted):
-                logger.info(f"✅ Auto-formatted: '{original}' -> '{formatted}'")
-                return formatted
+            # Format: 30A12345 -> 30A-123.45 (thêm cả dấu gạch ngang và dấu chấm)
+            if len(clean_text) >= 6:  # Đảm bảo có đủ ký tự để tách
+                prefix = clean_text[:3]  # 30A
+                suffix = clean_text[3:]  # 12345
+                
+                # Tách 2 số cuối làm phần sau dấu chấm
+                if len(suffix) >= 4:
+                    main_part = suffix[:-2]
+                    dot_part = suffix[-2:]
+                    formatted = f"{prefix}-{main_part}.{dot_part}"
+                    
+                    # Kiểm tra với patterns
+                    for valid_pattern in patterns:
+                        if re.match(valid_pattern, formatted):
+                            logger.info(f"✅ Auto-formatted with dash and dot: '{original}' -> '{formatted}'")
+                            return formatted
+                
+                # Fallback: chỉ thêm dấu gạch ngang nếu không thể thêm dấu chấm
+                formatted = re.sub(r'^(\d{2}[A-Z])(\d{2,6})$', r'\1-\2', clean_text)
+                if re.match(r'^\d{2}[A-Z]-\d{2,6}$', formatted):
+                    logger.info(f"✅ Auto-formatted with dash only: '{original}' -> '{formatted}'")
+                    return formatted
         
         # ENHANCED: Thử thêm dấu chấm nếu thiếu (cho xe máy/xe tải)
         # Kiểm tra nếu có pattern xe máy/xe tải nhưng thiếu dấu chấm
         dot_patterns = [
             (r'^(\d{2}[A-Z]-\d{2,4})(\d{2})$', r'\1.\2'),      # 30A-12345 -> 30A-123.45
             (r'^(\d{2}[A-Z]\d-\d{2,4})(\d{2})$', r'\1.\2'),    # 30A1-12345 -> 30A1-123.45
+            (r'^(\d{2}[A-Z]{2}-\d{2,4})(\d{2})$', r'\1.\2'),   # 30AB-12345 -> 30AB-123.45
         ]
         
         for pattern, replacement in dot_patterns:
@@ -333,7 +469,7 @@ def process_plate_text(text):
                         logger.info(f"✅ Auto-formatted with dot: '{original}' -> '{formatted}'")
                         return formatted
         
-        # ENHANCED: Thử sửa dấu chấm sai vị trí
+        # ENHANCED: Thử sửa dấu chấm sai vị trí hoặc thêm dấu chấm cho format đúng
         # Tìm các số và thử đặt dấu chấm ở vị trí đúng
         if '-' in clean_text:
             parts = clean_text.split('-')
@@ -341,17 +477,60 @@ def process_plate_text(text):
                 prefix = parts[0]  # 30A hoặc 30A1
                 suffix = parts[1]  # 12345
                 
-                # Nếu suffix có ≥4 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
-                if re.match(r'^\d{4,}$', suffix) and len(suffix) >= 4:
-                    main_part = suffix[:-2]
-                    dot_part = suffix[-2:]
-                    formatted = f"{prefix}-{main_part}.{dot_part}"
+                # Kiểm tra prefix có đúng format không
+                if re.match(r'^\d{2}[A-Z]\d?$', prefix):
+                    # Nếu suffix có ≥4 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
+                    if re.match(r'^\d{4,}$', suffix) and len(suffix) >= 4:
+                        main_part = suffix[:-2]
+                        dot_part = suffix[-2:]
+                        formatted = f"{prefix}-{main_part}.{dot_part}"
+                        
+                        # Kiểm tra với patterns
+                        for valid_pattern in patterns:
+                            if re.match(valid_pattern, formatted):
+                                logger.info(f"✅ Fixed dot position: '{original}' -> '{formatted}'")
+                                return formatted
                     
-                    # Kiểm tra với patterns
-                    for valid_pattern in patterns:
-                        if re.match(valid_pattern, formatted):
-                            logger.info(f"✅ Fixed dot position: '{original}' -> '{formatted}'")
-                            return formatted
+                    # Nếu suffix có 3 chữ số, thử thêm dấu chấm ở cuối
+                    elif re.match(r'^\d{3}$', suffix):
+                        formatted = f"{prefix}-{suffix}.00"
+                        
+                        # Kiểm tra với patterns
+                        for valid_pattern in patterns:
+                            if re.match(valid_pattern, formatted):
+                                logger.info(f"✅ Added dot for 3-digit suffix: '{original}' -> '{formatted}'")
+                                return formatted
+        
+        # FINAL FALLBACK: Thử format lại từ đầu với dấu chấm
+        # Nếu vẫn chưa có dấu chấm, thử thêm vào cuối
+        if '-' in clean_text and '.' not in clean_text:
+            parts = clean_text.split('-')
+            if len(parts) == 2:
+                prefix = parts[0]
+                suffix = parts[1]
+                
+                # Nếu suffix là số và có ít nhất 3 chữ số
+                if re.match(r'^\d{3,}$', suffix):
+                    # Tách 2 số cuối làm phần sau dấu chấm
+                    if len(suffix) >= 4:
+                        main_part = suffix[:-2]
+                        dot_part = suffix[-2:]
+                        formatted = f"{prefix}-{main_part}.{dot_part}"
+                        
+                        # Kiểm tra với patterns
+                        for valid_pattern in patterns:
+                            if re.match(valid_pattern, formatted):
+                                logger.info(f"✅ FINAL FALLBACK with dot: '{original}' -> '{formatted}'")
+                                return formatted
+                    # Nếu chỉ có 3 chữ số, thêm .00
+                    elif len(suffix) == 3:
+                        formatted = f"{prefix}-{suffix}.00"
+                        
+                        # Kiểm tra với patterns
+                        for valid_pattern in patterns:
+                            if re.match(valid_pattern, formatted):
+                                logger.info(f"✅ FINAL FALLBACK 3-digit: '{original}' -> '{formatted}'")
+                                return formatted
         
         logger.debug(f"❌ No valid pattern match for: '{original}' -> '{text}'")
         return None
@@ -661,10 +840,10 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
     except redis.RedisError as e:
         logger.error(f"Redis error: {str(e)}")
 
-def detect_and_ocr_stable(frame, camera_id=None):
+def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
     """Main detection function with enhanced plate detection and CENTERED ROI"""
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
-    global frame_count, tracked_objects
+    global frame_count, tracked_objects, skip_frame_count, last_detection_time
     
     frame_count += 1
     
@@ -682,6 +861,44 @@ def detect_and_ocr_stable(frame, camera_id=None):
     
     # Calculate ROI coordinates - CENTERED HALF FRAME
     roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
+    
+    # FRAME SKIPPING LOGIC - Chỉ xử lý khi cần thiết
+    roi = (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
+    
+    # Vẽ ROI trước khi kiểm tra skip
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 1)  # Vàng, nét mỏng
+    
+    # Kiểm tra xem có nên skip frame không - Dựa trên chuyển động trong ROI
+    if should_skip_frame(frame, roi):
+        # Skip frame này nhưng vẫn vẽ ROI
+        logger.debug(f"⏭️ Skipping frame {frame_count} - no motion in ROI")
+        
+        # Vẽ thông tin debug trên frame
+        fps_text = f"FPS: {current_fps:.1f}"
+        cv2.putText(display_frame, fps_text, (original_width - 150, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        
+        skip_info = f"Skip: {skip_frame_count}/{max_skip_frames}"
+        cv2.putText(display_frame, skip_info, (10, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        
+        return {
+            'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes(),
+            'boxes': [],
+            'labels': [],
+            'ocr_results': [],
+            'tracked_objects': tracked_objects.copy(),
+            'ids': [],
+            'frame_width': original_width,
+            'frame_height': original_height,
+            'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
+            'fps': current_fps,
+            'detection_count': 0,
+            'track_count': 0,
+            'skipped': True
+        }
+    else:
+        logger.debug(f"🔄 Processing frame {frame_count} - motion detected or max skip reached")
     
     # Ensure ROI is valid
     if roi_xmax <= roi_xmin or roi_ymax <= roi_ymin:
@@ -724,6 +941,11 @@ def detect_and_ocr_stable(frame, camera_id=None):
             if roi_frame_rgb.shape[0] >= 50 and roi_frame_rgb.shape[1] >= 50:
                 alpr_results = alpr.predict(roi_frame_rgb)
                 logger.debug(f"FastALPR detected {len(alpr_results)} objects in centered ROI")
+                
+                # Cập nhật thời gian detection nếu có kết quả
+                if len(alpr_results) > 0:
+                    last_detection_time = curr_time
+                    skip_frame_count = 0  # Reset skip counter khi có detection
             else:
                 logger.warning(f"ROI frame too small for detection: {roi_frame_rgb.shape}")
                 
@@ -778,8 +1000,10 @@ def detect_and_ocr_stable(frame, camera_id=None):
     # Convert to numpy array for tracker
     if detections:
         detections_np = np.array(detections, dtype=np.float32)
+        logger.info(f"🔍 Detections for tracker: {len(detections)} detections")
     else:
         detections_np = np.zeros((0, 5), dtype=np.float32)
+        logger.info(f"🔍 No detections for tracker")
 
     # Update tracker
     tracks = tracker.update(
@@ -787,9 +1011,60 @@ def detect_and_ocr_stable(frame, camera_id=None):
         img_info=(original_height, original_width),
         img_size=(original_height, original_width)
     )
+    
+    logger.info(f"🔍 Tracker update completed: {len(tracks)} tracks")
 
-    # Draw ROI - CHỈ HIỂN THỊ KHUNG VÀNG MỎNG
-    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 1)  # Vàng, nét mỏng
+    # SIMPLIFIED: Gửi dữ liệu trực tiếp khi có detection (không cần tracker)
+    for detection in plate_detections:
+        plate_text = detection['plate_text']
+        confidence = detection['confidence']
+        
+        if plate_text and confidence > MIN_CONFIDENCE:
+            # Process plate text
+            processed_text = process_plate_text(plate_text)
+            if processed_text:
+                logger.info(f"🎯 DIRECT PLATE DETECTION: '{processed_text}' (conf: {confidence:.3f})")
+                
+                # Tạo frame path
+                clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
+                frame_filename = f"plate_direct_{clean_plate_text}_{int(time.time())}.jpg"
+                frame_path = f"/static/crops/{frame_filename}"
+                
+                # Lưu crop image
+                try:
+                    x1, y1, x2, y2 = detection['bbox']
+                    padding = 10
+                    x1_crop = max(x1-padding, 0)
+                    y1_crop = max(y1-padding, 0)
+                    x2_crop = min(x2+padding, frame.shape[1])
+                    y2_crop = min(y2+padding, frame.shape[0])
+                    crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
+                    
+                    if crop.size > 0:
+                        crop_path = os.path.join(FRAMES_FOLDER, frame_filename)
+                        success_save = cv2.imwrite(crop_path, crop)
+                        if success_save:
+                            logger.info(f"✅ Direct crop image saved: {crop_path}")
+                        else:
+                            logger.warning(f"❌ Failed to save direct crop image: {crop_path}")
+                    else:
+                        logger.warning("Direct crop area is empty")
+                except Exception as e:
+                    logger.error(f"Error saving direct crop image: {e}")
+                
+                # Gửi trực tiếp tới database
+                success = send_plate_to_server("direct", {
+                    'plate': processed_text,
+                    'confidence': confidence,
+                    'bbox': detection['bbox']
+                }, frame_path, camera_id, source_type, video_filename, camera_location)
+                
+                if success:
+                    logger.info(f"✅ Direct plate '{processed_text}' sent to database successfully!")
+                else:
+                    logger.error(f"❌ Failed to send direct plate '{processed_text}' to database")
+
+    # ROI đã được vẽ ở trên
 
     # Display FPS and debug info - ENHANCED
     fps_text = f"FPS: {current_fps:.1f}"
@@ -813,6 +1088,11 @@ def detect_and_ocr_stable(frame, camera_id=None):
     # Frame size info
     frame_size_text = f"Frame: {original_width}x{original_height}"
     cv2.putText(display_frame, frame_size_text, (10, 125),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    
+    # Skip frame info
+    skip_info = f"Skip: {skip_frame_count}/{max_skip_frames}"
+    cv2.putText(display_frame, skip_info, (10, 155),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
     # Draw all plate detections with bounding boxes - ENHANCED DISPLAY
@@ -882,6 +1162,8 @@ def detect_and_ocr_stable(frame, camera_id=None):
     # Process tracker results for vehicles
     current_track_ids = set()
     
+    logger.info(f"🔍 Tracker results: {len(tracks)} tracks found")
+    
     for track in tracks:
         tlwh = track.tlwh
         current_track_id = track.track_id
@@ -928,11 +1210,12 @@ def detect_and_ocr_stable(frame, camera_id=None):
                     plate_text = processed_text
 
         # Filter plates
-        logger.debug(f"Processing track {current_track_id}: plate='{plate_text}', conf={conf_val:.3f}")
+        logger.info(f"🔍 Processing track {current_track_id}: plate='{plate_text}', conf={conf_val:.3f}, MIN_CONFIDENCE={MIN_CONFIDENCE}")
         
         if not plate_text or conf_val < MIN_CONFIDENCE:
             plate_text = "Đang nhận diện..."
             conf_val = 0.0
+            logger.info(f"⏭️ Skipping track {current_track_id} - invalid plate or low confidence")
 
         # Find existing track_id for similar plates
         existing_track_id = find_existing_track_id(plate_text) if plate_text != "Đang nhận diện..." else None
@@ -975,10 +1258,14 @@ def detect_and_ocr_stable(frame, camera_id=None):
         
         # Update tracked_objects for database saving
         if final_track_id not in tracked_objects:
+            logger.info(f"🆕 Creating NEW tracked object for track_id: {final_track_id}")
+            # Process plate text for new object
+            processed_text = process_plate_text(plate_text) if plate_text != "Đang nhận diện..." else plate_text
+            
             tracked_objects[final_track_id] = {
                 'track_id': final_track_id,
                 'bbox': [x1, y1, x2, y2],
-                'plate_number': plate_text,
+                'plate_number': processed_text,
                 'raw_text': plate_text,
                 'confidence': conf_val,
                 'first_seen': curr_time,
@@ -986,12 +1273,39 @@ def detect_and_ocr_stable(frame, camera_id=None):
                 'crop_filename': '',
                 'disappeared': 0,
                 'validation_passed': plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE,
-                'is_consistent': should_save_plate(plate_text, conf_val, final_track_id),
+                'is_consistent': True if processed_text else False,
                 'ocr_attempts': 1,
-                'saved_to_db': False
+                'saved_to_db': False,
+                'sent_to_db': False
             }
+            
+            # Gửi dữ liệu ngay lập tức cho object mới nếu có kết quả hợp lệ
+            if processed_text and conf_val > MIN_CONFIDENCE:
+                logger.info(f"🎯 NEW PLATE DETECTED: '{processed_text}' (conf: {conf_val:.3f})")
+                
+                # Tạo frame path
+                clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
+                frame_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
+                frame_path = f"/static/crops/{frame_filename}"
+                
+                logger.info(f"📁 Frame path: {frame_path}")
+                logger.info(f"📹 Camera ID: {camera_id}")
+                
+                # Gửi dữ liệu biển số tới server Node.js
+                send_plate_to_server(final_track_id, {
+                    'plate': processed_text,
+                    'confidence': conf_val,
+                    'bbox': [x1, y1, x2, y2]
+                }, frame_path, camera_id, source_type, video_filename, camera_location)
+                
+                # Đánh dấu chưa gửi để app.py xử lý
+                tracked_objects[final_track_id]['sent_to_db'] = False
+                logger.info(f"🎯 NEW plate '{processed_text}' detected - waiting for app.py to save")
+            else:
+                logger.info(f"⏭️ Skipping plate '{processed_text}' - conf: {conf_val:.3f}, min: {MIN_CONFIDENCE}")
         else:
             # Update existing object
+            logger.info(f"🔄 Updating EXISTING tracked object for track_id: {final_track_id}")
             obj = tracked_objects[final_track_id]
             obj['bbox'] = [x1, y1, x2, y2]
             obj['last_seen'] = curr_time
@@ -999,13 +1313,37 @@ def detect_and_ocr_stable(frame, camera_id=None):
             
             # Update plate number if we have a new valid result
             if plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE:
-                if should_save_plate(plate_text, conf_val, final_track_id):
-                    obj['plate_number'] = plate_text
+                # Process plate text first
+                processed_text = process_plate_text(plate_text)
+                if processed_text:
+                    obj['plate_number'] = processed_text
                     obj['raw_text'] = plate_text
                     obj['confidence'] = conf_val
                     obj['validation_passed'] = True
                     obj['is_consistent'] = True
-                    logger.info(f"Updated track {final_track_id} with ENHANCED plate: '{plate_text}' (conf: {conf_val:.3f})")
+                    logger.info(f"Updated track {final_track_id} with ENHANCED plate: '{processed_text}' (conf: {conf_val:.3f})")
+                    
+                    # Gửi dữ liệu mỗi khi có detection mới (bỏ qua điều kiện sent_to_db)
+                    logger.info(f"🎯 UPDATED PLATE DETECTED: '{processed_text}' (conf: {conf_val:.3f})")
+                    
+                    # Tạo frame path
+                    clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
+                    frame_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
+                    frame_path = f"/static/crops/{frame_filename}"
+                    
+                    logger.info(f"📁 Frame path: {frame_path}")
+                    logger.info(f"📹 Camera ID: {camera_id}")
+                    
+                    # Gửi dữ liệu biển số tới server Node.js
+                    send_plate_to_server(final_track_id, {
+                        'plate': processed_text,
+                        'confidence': conf_val,
+                        'bbox': [x1, y1, x2, y2]
+                    }, frame_path, camera_id, source_type, video_filename, camera_location)
+                    
+                    # Đánh dấu đã gửi
+                    obj['sent_to_db'] = True
+                    logger.info(f"🎯 UPDATED plate '{processed_text}' sent to database")
         
         current_track_ids.add(final_track_id)
 
@@ -1023,8 +1361,8 @@ def detect_and_ocr_stable(frame, camera_id=None):
             cv2.putText(display_frame, conf_text, (x1, y2 + 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        # Save crop for first detection
-        if final_track_id not in plate_history or len(plate_history[final_track_id]) == 1:
+        # Save crop for every detection with valid plate
+        if plate_text and plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE:
             # Tạo tên file với format: plate_{track_id}_{plate_text}_{timestamp}.jpg
             clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text) if plate_text else f"unknown_{final_track_id}"
             crop_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
@@ -1036,7 +1374,11 @@ def detect_and_ocr_stable(frame, camera_id=None):
             crop = display_frame[y1_crop:y2_crop, x1_crop:x2_crop]
             if crop.size > 0:
                 crop_path = os.path.join(CROPS_FOLDER, crop_filename)
-                cv2.imwrite(crop_path, crop)
+                success_save = cv2.imwrite(crop_path, crop)
+                if success_save:
+                    logger.info(f"✅ Crop image saved: {crop_path}")
+                else:
+                    logger.warning(f"❌ Failed to save crop image: {crop_path}")
                 
                 # Update crop filename in tracked object
                 if final_track_id in tracked_objects:
@@ -1061,22 +1403,48 @@ def detect_and_ocr_stable(frame, camera_id=None):
                 if plate_text and plate_text != "Đang nhận diện...":
                     clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
                     
-                    # Create frame filename: plate_number_trackID_timestamp.jpg
-                    frame_filename = f"{clean_plate_text}_{track_id}_{int(curr_time)}.jpg"
-                    frame_path = f"/frame_crops/{frame_filename}"
+                    # Create frame filename: plate_trackID_plate_number_timestamp.jpg
+                    frame_filename = f"plate_{track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
+                    frame_path = f"/static/crops/{frame_filename}"
                     
-                    # Save original frame (without bounding boxes)
+                    # Save crop image
                     absolute_frame_path = os.path.join(FRAMES_FOLDER, frame_filename)
                     
-                    # Use original frame instead of display_frame
-                    success = cv2.imwrite(absolute_frame_path, frame)
-                    if success:
-                        logger.info(f"Original frame saved to {absolute_frame_path}")
-                    else:
-                        logger.warning(f"Failed to save original frame to {absolute_frame_path}")
+                    # Get bbox coordinates for cropping
+                    bbox = track_info[track_id]['bbox']
+                    if isinstance(bbox, str):
+                        bbox = [int(x) for x in bbox.split(',')]
                     
-                    # Send plate data to server Node.js
-                    send_plate_to_server(track_id, track_info[track_id], frame_path, camera_id=camera_id)
+                    if len(bbox) >= 4:
+                        x1, y1, x2, y2 = bbox[:4]
+                        padding = 10
+                        x1_crop = max(x1-padding, 0)
+                        y1_crop = max(y1-padding, 0)
+                        x2_crop = min(x2+padding, frame.shape[1])
+                        y2_crop = min(y2+padding, frame.shape[0])
+                        crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
+                        
+                        if crop.size > 0:
+                            success = cv2.imwrite(absolute_frame_path, crop)
+                            if success:
+                                logger.info(f"Crop image saved to {absolute_frame_path}")
+                            else:
+                                logger.warning(f"Failed to save crop image to {absolute_frame_path}")
+                        else:
+                            logger.warning("Crop area is empty, saving original frame")
+                            success = cv2.imwrite(absolute_frame_path, frame)
+                    else:
+                        logger.warning("Invalid bbox, saving original frame")
+                        success = cv2.imwrite(absolute_frame_path, frame)
+                    
+                    # Gửi dữ liệu biển số tới server Node.js
+                    plate_data = {
+                        'plate': track_info[track_id]['plate'],
+                        'confidence': track_info[track_id]['confidence'],
+                        'bbox': [int(x) for x in track_info[track_id]['bbox'].split(',')]
+                    }
+                    send_plate_to_server(track_id, plate_data, frame_path, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location)
+                    logger.info(f"🎯 INACTIVE track '{track_info[track_id]['plate']}' - waiting for app.py to save")
                 
                 tracks_to_remove.append(track_id)
         
