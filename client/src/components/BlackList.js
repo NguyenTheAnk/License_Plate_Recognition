@@ -422,7 +422,26 @@ const BlackList = () => {
   const [selectedItems, setSelectedItems] = useState([]);
   const validFromDateRef = useRef(null);
   const validToDateRef = useRef(null);
-
+  const [hasCreateBlackList, setHasCreateBlackList] = useState(false);
+  const [hasUpdateBlackList, setHasUpdateBlackList] = useState(false);
+  const [hasViewBlackList, setHasViewBlackList] = useState(false);
+  const [hasDeleteBlackList, setHasDeleteBlackList] = useState(false);
+  useEffect(() => {
+            const storedUser = localStorage.getItem('user');
+            if (storedUser ) {
+                try {
+                    const user = JSON.parse(storedUser); // Parse dữ liệu user
+                    const permissions = user.permissions || [];
+                    setHasCreateBlackList(permissions.some(permission => permission.code === 'blacklist.create'));
+                    setHasUpdateBlackList(permissions.some(permission => permission.code === 'blacklist.update'));
+                    setHasViewBlackList(permissions.some(permission => permission.code === 'blacklist.view'));
+                    setHasDeleteBlackList(permissions.some(permission => permission.code === 'blacklist.delete'));
+  
+                } catch (error) {
+                    console.error('Error parsing permissions:', error);
+                }
+            }
+        }, []);
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -1257,8 +1276,8 @@ const handleFilterChange = (key, value) => {
                     icon={<ExpandMoreIcon fontSize="small" />}
                   />
                 </Breadcrumbs>
-                
-                <Button
+                {hasCreateBlackList && (
+<Button
                   variant="contained"
                   startIcon={<FaPlus />}
                   onClick={() => {
@@ -1283,6 +1302,8 @@ const handleFilterChange = (key, value) => {
                 >
                   Thêm mới
                 </Button>
+                )}
+                
               </Box>
             </Box>
           </Box>
@@ -1632,7 +1653,8 @@ const handleFilterChange = (key, value) => {
                           <TableCell align="center">
                             <Box display="flex" justifyContent="center" gap={1}>
                               <Tooltip title="Xem chi tiết">
-                              <IconButton
+                                {hasViewBlackList && (
+ <IconButton
                                 size="small"
                                 color="info"
                                 onClick={() => handleView(item.id)}
@@ -1645,9 +1667,12 @@ const handleFilterChange = (key, value) => {
                               >
                                 <VisibilityIcon />
                               </IconButton>
+                                )}
+                             
                               </Tooltip>
                               <Tooltip title="Chỉnh sửa">
-                              <IconButton
+                                {hasUpdateBlackList && (
+                                  <IconButton
                                 size="small"
                                 color="warning"
                                 onClick={() => handleEdit(item)}
@@ -1660,9 +1685,12 @@ const handleFilterChange = (key, value) => {
                               >
                                 <EditIcon />
                               </IconButton>
+                                )}
+                              
                               </Tooltip>
                               <Tooltip title="Xóa">
-                              <IconButton
+                                {hasDeleteBlackList && (
+<IconButton
                                 size="small"
                                 color="error"
                                   onClick={() => setDeleteDialog({ 
@@ -1679,6 +1707,8 @@ const handleFilterChange = (key, value) => {
                               >
                                 <DeleteIcon />
                               </IconButton>
+                                )}
+                              
                               </Tooltip>
                             </Box>
                           </TableCell>

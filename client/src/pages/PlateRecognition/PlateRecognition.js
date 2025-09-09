@@ -528,61 +528,41 @@ const PlateRecognition = () => {
               canvas.height = 540;
               const ctx = canvas.getContext('2d');
               
-              // Vẽ ROI (ghim phía dưới khung hình)
-              {
-                const roi = detectionData.detections[0].roi || [];
-                let rx1 = typeof roi[0] === 'number' ? roi[0] : Math.floor(canvas.width * 0.05);
-                let ry1 = typeof roi[1] === 'number' ? roi[1] : Math.floor(canvas.height * 0.55);
-                let rx2 = typeof roi[2] === 'number' ? roi[2] : Math.floor(canvas.width * 0.95);
-                let ry2 = typeof roi[3] === 'number' ? roi[3] : Math.floor(canvas.height * 0.98);
-                // Ghim đáy ROI vào đáy khung và giữ nguyên chiều cao ROI
-                const roiHeight = Math.max(1, ry2 - ry1);
-                ry2 = canvas.height - 1;
-                ry1 = Math.max(0, ry2 - roiHeight);
-                // Vẽ
+              // Vẽ ROI
+              if (detectionData.detections[0].roi) {
+                const roi = detectionData.detections[0].roi;
                 ctx.strokeStyle = '#ff0000';
                 ctx.lineWidth = 2;
-                ctx.strokeRect(rx1, ry1, Math.max(1, rx2 - rx1), Math.max(1, ry2 - ry1));
+                ctx.strokeRect(roi[0], roi[1], roi[2] - roi[0], roi[3] - roi[1]);
               }
               
-              // Vẽ bounding boxes từ server-aligned tracks với scale chính xác
-              const frameW = detectionData.frame_width || canvas.width;
-              const frameH = detectionData.frame_height || canvas.height;
-              const sx = canvas.width / frameW;
-              const sy = canvas.height / frameH;
-              const tracks = detectionData.tracks || [];
-              tracks.forEach((t) => {
-                if (!t || !t.bbox || t.bbox.length < 4) return;
-                const [x1, y1, x2, y2] = t.bbox;
-                const rx1 = Math.round(x1 * sx), ry1 = Math.round(y1 * sy);
-                const rx2 = Math.round(x2 * sx), ry2 = Math.round(y2 * sy);
-                ctx.strokeStyle = '#00ff00';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(rx1, ry1, Math.max(1, rx2 - rx1), Math.max(1, ry2 - ry1));
-                const vehicleName = ({2:'Car',3:'Motorbike',5:'Bus',7:'Truck'})[t.class_id] || 'Vehicle';
-                const ocrText = t.plate_text || '...';
-                const label = `${vehicleName}: T${t.track_id} | ${ocrText}`;
-                ctx.font = '16px Arial';
-                const tw = Math.ceil(ctx.measureText(label).width) + 10;
-                ctx.fillStyle = '#000000';
-                ctx.fillRect(rx1, ry1 - 25, tw, 22);
-                ctx.fillStyle = '#ffffff';
-                ctx.fillText(label, rx1 + 5, ry1 - 8);
-                if (t.plate_bbox && t.plate_bbox.length >= 4) {
-                  const [px1, py1, px2, py2] = t.plate_bbox;
-                  const rpx1 = Math.round(px1 * sx), rpy1 = Math.round(py1 * sy);
-                  const rpx2 = Math.round(px2 * sx), rpy2 = Math.round(py2 * sy);
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = 2;
-                  ctx.strokeRect(rpx1, rpy1, Math.max(1, rpx2 - rpx1), Math.max(1, rpy2 - rpy1));
-                  if (t.plate_text) {
-                    const plateLabel = `${t.plate_text} (${(t.confidence||0).toFixed(2)})`;
-                    const pw = Math.ceil(ctx.measureText(plateLabel).width) + 10;
-                    ctx.fillStyle = '#000000';
-                    ctx.fillRect(rpx1, rpy1 - 22, pw, 20);
-                    ctx.fillStyle = '#00ff00';
-                    ctx.fillText(plateLabel, rpx1 + 5, rpy1 - 7);
-                  }
+              // Vẽ bounding boxes và OCR text
+              detectionData.detections.forEach((detection) => {
+                if (detection.boxes && detection.ocr_results) {
+                  detection.boxes.forEach((box, boxIndex) => {
+                    if (box.length >= 4) {
+                      const [x1, y1, x2, y2] = box;
+                      
+                      // Vẽ bounding box (màu đỏ)
+                      ctx.strokeStyle = '#ff0000';
+                      ctx.lineWidth = 2;
+                      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+                      
+                      // Vẽ OCR text
+                      const ocrText = detection.ocr_results[boxIndex] || 'Unknown';
+                      const confidence = box.length >= 5 ? box[4] : 0;
+                      const label = `${ocrText} (${confidence.toFixed(2)})`;
+                      
+                      // Background trắng cho text
+                      ctx.fillStyle = '#ffffff';
+                      ctx.fillRect(x1, y1 - 25, ctx.measureText(label).width + 10, 25);
+                      
+                      // Text màu đen
+                      ctx.fillStyle = '#000000';
+                      ctx.font = '16px Arial';
+                      ctx.fillText(label, x1 + 5, y1 - 5);
+                    }
+                  });
                 }
               });
               
@@ -645,7 +625,7 @@ const PlateRecognition = () => {
       console.log(`Processing camera for recognition via frame streaming: ${stream.name}`);
 
       const detectHost = process.env.REACT_APP_DETECT_HOST || (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname);
-      const wsUrl = `ws://${detectHost}:5000/recognize-ws`;
+      const wsUrl = `ws://${detectHost}:5002/recognize-ws`;
       const ws = new WebSocket(wsUrl);
 
       ws.binaryType = 'blob';
@@ -653,11 +633,6 @@ const PlateRecognition = () => {
       ws.onopen = () => {
         console.log(`WebSocket connected for stream: ${stream.name}`);
         setRecognitionStatus(prev => ({ ...prev, [stream.id]: 'processing' }));
-
-        // Yêu cầu backend khởi động stream camera theo thời gian thực (fresh)
-        try {
-          ws.send(JSON.stringify({ type: 'start_stream', cameraId: stream.id, fresh: true }));
-        } catch (e) {}
 
         // Start sending frames from the <video> element for this stream
         const sendFrame = () => {
@@ -668,13 +643,8 @@ const PlateRecognition = () => {
           }
           try {
             const canvas = document.createElement('canvas');
-            // Use source video resolution up to a practical cap for better OCR
-            const srcW = videoEl.videoWidth || 960;
-            const srcH = videoEl.videoHeight || 540;
-            const maxW = 1280;
-            const scale = Math.min(1, maxW / (srcW || 1));
-            canvas.width = Math.max(640, Math.round(srcW * scale));
-            canvas.height = Math.max(360, Math.round(srcH * scale));
+            canvas.width = 960;
+            canvas.height = 540;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
             canvas.toBlob((blob) => {
@@ -683,8 +653,8 @@ const PlateRecognition = () => {
                   ws.send(buffer);
                 }).catch(() => {});
               }
-              sendTimersRef.current[stream.id] = setTimeout(sendFrame, 66);
-            }, 'image/jpeg', 0.8);
+              sendTimersRef.current[stream.id] = setTimeout(sendFrame, 33);
+            }, 'image/jpeg', 0.2);
           } catch (e) {
             sendTimersRef.current[stream.id] = setTimeout(sendFrame, 100);
           }
@@ -707,24 +677,17 @@ const PlateRecognition = () => {
             const meta = JSON.parse(event.data);
             const ocrList = meta.ocr_results || [];
             if (ocrList.length > 0) {
-              const newItems = ocrList.map((ocrResult, idx) => {
-                const text = typeof ocrResult === 'string' ? ocrResult : ocrResult.text || 'Unknown';
-                const confidence = typeof ocrResult === 'object' ? ocrResult.confidence || 0 : 0;
-                const cropFilename = typeof ocrResult === 'object' ? ocrResult.crop_filename || '' : '';
-                
-                return {
-                  id: `${stream.id}_${Date.now()}_${idx}`,
-                  text: text,
-                  confidence: confidence,
-                  streamId: stream.id,
-                  streamName: stream.name,
-                  streamType: stream.type,
-                  timestamp: new Date().toISOString(),
-                  bbox: (meta.boxes && meta.boxes[idx]) || [],
-                  vehicleType: 'unknown',
-                  crop_filename: cropFilename
-                };
-              });
+              const newItems = ocrList.map((text, idx) => ({
+                id: `${stream.id}_${Date.now()}_${idx}`,
+                text: text || 'Unknown',
+                confidence: 0,
+                streamId: stream.id,
+                streamName: stream.name,
+                streamType: stream.type,
+                timestamp: new Date().toISOString(),
+                bbox: (meta.boxes && meta.boxes[idx]) || [],
+                vehicleType: 'unknown'
+              }));
               setDetectedPlates(prev => [...newItems, ...prev]);
               setRecognitionStatus(prev => ({ ...prev, [stream.id]: 'detecting' }));
             }
@@ -830,7 +793,7 @@ const PlateRecognition = () => {
   // Clear detected plates
   const handleClearPlates = async () => {
     try {
-      const response = await fetch('http://localhost:5000/clear-detected-plates', {
+      const response = await fetch('http://localhost:5002/clear-detected-plates', {
         method: 'POST'
       });
       
@@ -1120,25 +1083,6 @@ const PlateRecognition = () => {
                             <Typography variant="body2" color="text.secondary">
                               {plate.crop_filename ? 'Có ảnh' : 'Không có ảnh'} • {plate.verification_status || 'Chờ xác minh'}
                             </Typography>
-                            {plate.crop_filename && (
-                              <Box sx={{ mt: 1 }}>
-                                <img
-                                  src={`http://localhost:5000/static/crops/${plate.crop_filename}`}
-                                  alt="Ảnh biển số"
-                                  style={{
-                                    width: '100%',
-                                    maxWidth: 200,
-                                    height: 'auto',
-                                    borderRadius: 4,
-                                    border: '1px solid #e0e0e0'
-                                  }}
-                                  onError={(e) => {
-                                    console.error('Error loading crop image:', e);
-                                    e.target.style.display = 'none';
-                                  }}
-                                />
-                              </Box>
-                            )}
                             <Typography variant="caption" color="text.secondary">
                               {plate.first_seen ? new Date(plate.first_seen * 1000).toLocaleString() : 'N/A'}
                             </Typography>
@@ -1147,7 +1091,7 @@ const PlateRecognition = () => {
                           <Box sx={{ textAlign: 'right' }}>
                             <Chip
                               label={`${((plate.confidence || 0) * 100).toFixed(1)}%`}
-                              color={plate.confidence > 0.8 ? "success" : plate.confidence > 0.5 ? "warning" : "error"}
+                              color="success"
                               size="small"
                             />
                             <Typography variant="caption" display="block" color="text.secondary">

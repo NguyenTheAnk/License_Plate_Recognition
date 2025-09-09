@@ -1,26 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Box, Grid, Paper, Typography, Avatar, CircularProgress, Alert, 
-  Card, CardContent, Chip, LinearProgress, Fade, Zoom, 
+  Chip, LinearProgress, Fade, 
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   List, ListItem, ListItemText, ListItemIcon, Divider
 } from '@mui/material';
 import { 
-  PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, 
-  ResponsiveContainer, LineChart, Line, AreaChart, Area, RadialBarChart, 
-  RadialBar, ScatterChart, Scatter, ComposedChart, CartesianGrid, 
-  ReferenceLine, Brush, Treemap, Sankey
+  Tooltip, Legend, Bar, XAxis, YAxis, 
+  ResponsiveContainer, Line, AreaChart, Area, ComposedChart, CartesianGrid
 } from 'recharts';
 import {
   Videocam, DirectionsCar, EventNote, CheckCircle,
-  Warning, TrendingUp, TrendingDown, Speed,
-  Security, LocationOn, Schedule, Assessment,
-  Timeline, BarChart as BarChartIcon, PieChart as PieChartIcon, ShowChart,
-  People, Settings, Notifications, Refresh
+  Speed, LocationOn, Assessment, Timeline, BarChart as BarChartIcon, Notifications
 } from '@mui/icons-material';
 
-const COLORS = ['#43a047', '#d32f2f', '#1976d2', '#ffa000', '#9c27b0', '#f44336', '#4caf50', '#ff9800'];
-const CHART_COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#d084d0', '#87d068', '#ffb347'];
 
 // API Base URL
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
@@ -30,7 +23,6 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [dashboardData, setDashboardData] = useState({
     summary: [],
-    cameraStats: [],
     eventStats: [],
     lineData: [],
     camBarData: [],
@@ -43,11 +35,80 @@ function Dashboard() {
     systemHealth: {},
     performanceMetrics: {},
     locationStats: [],
-    vehicleTypeStats: [],
-    confidenceDistribution: [],
-    alerts: [],
-    realTimeStats: {}
+    alerts: []
   });
+
+  // Process raw API data into dashboard format
+  const processDashboardData = React.useCallback((cameraData, detectionData, journeyData, accessData) => {
+    const cameraStats = cameraData.data?.overall || {};
+    const detections = detectionData.data?.detections || detectionData.detections || [];
+    const journeys = journeyData || [];
+
+    // Summary cards
+const summary = [
+      { 
+        label: 'Tổng số camera', 
+        value: cameraStats.total_cameras || 0, 
+        icon: <Videocam fontSize="large" />, 
+        color: '#1976d2' 
+      },
+      { 
+        label: 'Đang hoạt động', 
+        value: cameraStats.online_cameras || 0, 
+        icon: <CheckCircle fontSize="large" />, 
+        color: '#43a047' 
+      },
+      { 
+        label: 'Số lộ trình', 
+        value: journeys.length, 
+        icon: <EventNote fontSize="large" />, 
+        color: '#ffa000' 
+      },
+      { 
+        label: 'Xe nhận diện (7 ngày)', 
+        value: detections.length, 
+        icon: <DirectionsCar fontSize="large" />, 
+        color: '#d32f2f' 
+      },
+    ];
+
+
+    // Weekly detection data (last 7 days)
+    const eventStats = generateWeeklyStats(detections);
+
+    // Hourly detection data (today)
+    const lineData = generateHourlyStats(detections);
+
+    // Camera detection counts
+    const camBarData = generateCameraStats(detections, cameraData.data?.top_detection_cameras || []);
+
+    // Generate additional statistics
+    const hourlyStats = generateHourlyStats(detections);
+    const weeklyTrends = generateWeeklyTrends(detections);
+    const monthlyStats = generateMonthlyStats(detections);
+    const topPlates = generateTopPlates(detections);
+    const recentDetections = generateRecentDetections(detections);
+    const systemHealth = generateSystemHealth(cameraStats, detections);
+    const performanceMetrics = generatePerformanceMetrics(detections);
+    const locationStats = generateLocationStats(detections, cameraData.data?.by_location || []);
+    const alerts = generateAlerts(cameraStats, detections);
+
+    return {
+      summary,
+      eventStats,
+      lineData,
+      camBarData,
+      hourlyStats,
+      weeklyTrends,
+      monthlyStats,
+      topPlates,
+      recentDetections,
+      systemHealth,
+      performanceMetrics,
+      locationStats,
+      alerts
+    };
+  }, []);
 
   // Fetch dashboard data
   useEffect(() => {
@@ -131,13 +192,33 @@ function Dashboard() {
               { label: 'Số lộ trình', value: 0, icon: <EventNote fontSize="large" />, color: '#ffa000' },
               { label: 'Xe nhận diện (7 ngày)', value: 0, icon: <DirectionsCar fontSize="large" />, color: '#d32f2f' },
             ],
-            cameraStats: [
-              { name: 'Đang hoạt động', value: 0 },
-              { name: 'Không hoạt động', value: 0 },
-            ],
             eventStats: [],
             lineData: [],
-            camBarData: []
+            camBarData: [],
+            // Add missing properties for fallback data
+            hourlyStats: [],
+            weeklyTrends: [],
+            monthlyStats: [],
+            topPlates: [],
+            recentDetections: [],
+            systemHealth: {
+              healthScore: 0,
+              totalCameras: 0,
+              onlineCameras: 0,
+              offlineCameras: 0,
+              status: 'Unknown',
+              lastUpdate: 'N/A'
+            },
+            performanceMetrics: {
+              totalDetections: 0,
+              avgConfidence: 0,
+              highConfidence: 0,
+              mediumConfidence: 0,
+              lowConfidence: 0,
+              accuracyRate: 0
+            },
+            locationStats: [],
+            alerts: []
           });
         }
       } finally {
@@ -146,92 +227,7 @@ function Dashboard() {
     };
 
     fetchDashboardData();
-  }, []);
-
-  // Process raw API data into dashboard format
-  const processDashboardData = (cameraData, detectionData, journeyData, accessData) => {
-    const cameraStats = cameraData.data?.overall || {};
-    const detections = detectionData.data?.detections || detectionData.detections || [];
-    const journeys = journeyData || [];
-    const accessLists = accessData || [];
-
-    // Summary cards
-const summary = [
-      { 
-        label: 'Tổng số camera', 
-        value: cameraStats.total_cameras || 0, 
-        icon: <Videocam fontSize="large" />, 
-        color: '#1976d2' 
-      },
-      { 
-        label: 'Đang hoạt động', 
-        value: cameraStats.online_cameras || 0, 
-        icon: <CheckCircle fontSize="large" />, 
-        color: '#43a047' 
-      },
-      { 
-        label: 'Số lộ trình', 
-        value: journeys.length, 
-        icon: <EventNote fontSize="large" />, 
-        color: '#ffa000' 
-      },
-      { 
-        label: 'Xe nhận diện (7 ngày)', 
-        value: detections.length, 
-        icon: <DirectionsCar fontSize="large" />, 
-        color: '#d32f2f' 
-      },
-    ];
-
-    // Camera status pie chart
-    const cameraStatusData = [
-      { name: 'Đang hoạt động', value: cameraStats.online_cameras || 0 },
-      { name: 'Không hoạt động', value: (cameraStats.offline_cameras || 0) + (cameraStats.maintenance_cameras || 0) },
-    ];
-
-    // Weekly detection data (last 7 days)
-    const eventStats = generateWeeklyStats(detections);
-
-    // Hourly detection data (today)
-    const lineData = generateHourlyStats(detections);
-
-    // Camera detection counts
-    const camBarData = generateCameraStats(detections, cameraData.data?.top_detection_cameras || []);
-
-    // Generate additional statistics
-    const hourlyStats = generateHourlyStats(detections);
-    const weeklyTrends = generateWeeklyTrends(detections);
-    const monthlyStats = generateMonthlyStats(detections);
-    const topPlates = generateTopPlates(detections);
-    const recentDetections = generateRecentDetections(detections);
-    const systemHealth = generateSystemHealth(cameraStats, detections);
-    const performanceMetrics = generatePerformanceMetrics(detections);
-    const locationStats = generateLocationStats(detections, cameraData.data?.by_location || []);
-    const vehicleTypeStats = generateVehicleTypeStats(detections);
-    const confidenceDistribution = generateConfidenceDistribution(detections);
-    const alerts = generateAlerts(cameraStats, detections);
-    const realTimeStats = generateRealTimeStats(detections);
-
-    return {
-      summary,
-      cameraStats: cameraStatusData,
-      eventStats,
-      lineData,
-      camBarData,
-      hourlyStats,
-      weeklyTrends,
-      monthlyStats,
-      topPlates,
-      recentDetections,
-      systemHealth,
-      performanceMetrics,
-      locationStats,
-      vehicleTypeStats,
-      confidenceDistribution,
-      alerts,
-      realTimeStats
-    };
-  };
+  }, [processDashboardData]);
 
   // Generate weekly statistics
   const generateWeeklyStats = (detections) => {
@@ -441,40 +437,6 @@ const summary = [
     })).sort((a, b) => b.detections - a.detections);
   };
 
-  // Generate vehicle type statistics
-  const generateVehicleTypeStats = (detections) => {
-    const typeCounts = {};
-    
-    detections.forEach(detection => {
-      const type = detection.detected_vehicle_type || 'unknown';
-      typeCounts[type] = (typeCounts[type] || 0) + 1;
-    });
-
-    return Object.entries(typeCounts).map(([type, count]) => ({
-      type: type.charAt(0).toUpperCase() + type.slice(1),
-      count,
-      percentage: Math.round((count / detections.length) * 100)
-    }));
-  };
-
-  // Generate confidence distribution
-  const generateConfidenceDistribution = (detections) => {
-    const ranges = [
-      { range: '0-20%', min: 0, max: 0.2, count: 0 },
-      { range: '20-40%', min: 0.2, max: 0.4, count: 0 },
-      { range: '40-60%', min: 0.4, max: 0.6, count: 0 },
-      { range: '60-80%', min: 0.6, max: 0.8, count: 0 },
-      { range: '80-100%', min: 0.8, max: 1.0, count: 0 }
-    ];
-
-    detections.forEach(detection => {
-      const confidence = detection.confidence_score || 0;
-      const range = ranges.find(r => confidence >= r.min && confidence < r.max);
-      if (range) range.count++;
-    });
-
-    return ranges;
-  };
 
   // Generate alerts
   const generateAlerts = (cameraStats, detections) => {
@@ -520,24 +482,6 @@ const summary = [
     return alerts;
   };
 
-  // Generate real-time stats
-  const generateRealTimeStats = (detections) => {
-    const now = new Date();
-    const lastHour = new Date(now.getTime() - 60 * 60 * 1000);
-    
-    const recentDetections = detections.filter(d => 
-      d.detected_at && new Date(d.detected_at) > lastHour
-    );
-
-    return {
-      detectionsLastHour: recentDetections.length,
-      uniquePlatesLastHour: new Set(recentDetections.map(d => d.plate_number)).size,
-      avgConfidenceLastHour: recentDetections.length > 0 
-        ? Math.round((recentDetections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / recentDetections.length) * 100) / 100
-        : 0,
-      lastUpdate: now.toLocaleString('vi-VN')
-    };
-  };
 
   if (loading) {
     return (
@@ -648,67 +592,6 @@ const summary = [
           </Grid>
         ))}
 
-        {/* Real-time Stats */}
-        <Grid item xs={12}>
-          <Zoom in={true} timeout={800}>
-            <Card sx={{ 
-              mb: 3, 
-              background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)', 
-              color: 'white',
-              borderRadius: 3,
-              boxShadow: 4
-            }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                  <Typography variant="h6" fontWeight={700}>
-                    Thống Kê Real-time
-                  </Typography>
-                  <Chip 
-                    label="LIVE" 
-                    color="error" 
-                    size="small" 
-                    sx={{ 
-                      animation: 'pulse 2s infinite',
-                      fontWeight: 600
-                    }}
-                  />
-                </Box>
-                <Grid container spacing={3}>
-                  <Grid item xs={12} sm={4}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" fontWeight={700}>
-                        {dashboardData.realTimeStats.detectionsLastHour || 0}
-                      </Typography>
-                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                        Phát hiện trong giờ qua
-                      </Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" fontWeight={700}>
-                        {dashboardData.realTimeStats.uniquePlatesLastHour || 0}
-                      </Typography>
-                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                        Biển số duy nhất
-                      </Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" fontWeight={700}>
-                        {dashboardData.realTimeStats.avgConfidenceLastHour || 0}%
-                      </Typography>
-                      <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                        Độ tin cậy TB
-                      </Typography>
-                    </Box>
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
-          </Zoom>
-        </Grid>
         {/* System Health & Performance */}
         <Grid item xs={12} md={6}>
           <Fade in={true} timeout={1000}>
@@ -749,21 +632,21 @@ const summary = [
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="body2">Tổng thể</Typography>
                   <Typography variant="body2" fontWeight={700}>
-                    {dashboardData.systemHealth.healthScore || 0}%
+                    {dashboardData.systemHealth?.healthScore || 0}%
                   </Typography>
                 </Box>
                 <LinearProgress 
                   variant="determinate" 
-                  value={dashboardData.systemHealth.healthScore || 0}
+                  value={dashboardData.systemHealth?.healthScore || 0}
                   sx={{ 
                     height: 8, 
                     borderRadius: 4,
                     bgcolor: '#e0e0e0',
                     '& .MuiLinearProgress-bar': {
                       borderRadius: 4,
-                      background: dashboardData.systemHealth.healthScore >= 90 
+                      background: (dashboardData.systemHealth?.healthScore || 0) >= 90 
                         ? 'linear-gradient(90deg, #4caf50, #8bc34a)'
-                        : dashboardData.systemHealth.healthScore >= 70
+                        : (dashboardData.systemHealth?.healthScore || 0) >= 70
                         ? 'linear-gradient(90deg, #ff9800, #ffc107)'
                         : 'linear-gradient(90deg, #f44336, #ff5722)'
                     }
@@ -775,7 +658,7 @@ const summary = [
                 <Grid item xs={6}>
                   <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e8f5e8', borderRadius: 2 }}>
                     <Typography variant="h4" color="success.main" fontWeight={700}>
-                      {dashboardData.systemHealth.onlineCameras || 0}
+                      {dashboardData.systemHealth?.onlineCameras || 0}
                     </Typography>
                     <Typography variant="body2">Online</Typography>
                   </Box>
@@ -783,7 +666,7 @@ const summary = [
                 <Grid item xs={6}>
                   <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
                     <Typography variant="h4" color="error.main" fontWeight={700}>
-                      {dashboardData.systemHealth.offlineCameras || 0}
+                      {dashboardData.systemHealth?.offlineCameras || 0}
                     </Typography>
                     <Typography variant="body2">Offline</Typography>
                   </Box>
@@ -792,10 +675,10 @@ const summary = [
 
               <Box sx={{ mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
                 <Typography variant="body2" color="text.secondary">
-                  Trạng thái: <strong>{dashboardData.systemHealth.status || 'Unknown'}</strong>
+                  Trạng thái: <strong>{dashboardData.systemHealth?.status || 'Unknown'}</strong>
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Cập nhật: {dashboardData.systemHealth.lastUpdate || 'N/A'}
+                  Cập nhật: {dashboardData.systemHealth?.lastUpdate || 'N/A'}
                 </Typography>
               </Box>
             </Paper>
@@ -842,12 +725,12 @@ const summary = [
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="body2">Độ chính xác</Typography>
                   <Typography variant="body2" fontWeight={700}>
-                    {dashboardData.performanceMetrics.accuracyRate || 0}%
+                    {dashboardData.performanceMetrics?.accuracyRate || 0}%
                   </Typography>
                 </Box>
                 <LinearProgress 
                   variant="determinate" 
-                  value={dashboardData.performanceMetrics.accuracyRate || 0}
+                  value={dashboardData.performanceMetrics?.accuracyRate || 0}
                   sx={{ height: 8, borderRadius: 4 }}
                 />
               </Box>
@@ -856,7 +739,7 @@ const summary = [
                 <Grid item xs={4}>
                   <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e3f2fd', borderRadius: 2 }}>
                     <Typography variant="h5" color="info.main" fontWeight={700}>
-                      {dashboardData.performanceMetrics.highConfidence || 0}
+                      {dashboardData.performanceMetrics?.highConfidence || 0}
                     </Typography>
                     <Typography variant="caption">Cao (≥80%)</Typography>
                   </Box>
@@ -864,7 +747,7 @@ const summary = [
                 <Grid item xs={4}>
                   <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#fff3e0', borderRadius: 2 }}>
                     <Typography variant="h5" color="warning.main" fontWeight={700}>
-                      {dashboardData.performanceMetrics.mediumConfidence || 0}
+                      {dashboardData.performanceMetrics?.mediumConfidence || 0}
                     </Typography>
                     <Typography variant="caption">Trung bình</Typography>
                   </Box>
@@ -872,7 +755,7 @@ const summary = [
                 <Grid item xs={4}>
                   <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
                     <Typography variant="h5" color="error.main" fontWeight={700}>
-                      {dashboardData.performanceMetrics.lowConfidence || 0}
+                      {dashboardData.performanceMetrics?.lowConfidence || 0}
                     </Typography>
                     <Typography variant="caption">Thấp (&lt;50%)</Typography>
                   </Box>
@@ -881,80 +764,16 @@ const summary = [
 
               <Box sx={{ mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
                 <Typography variant="body2" color="text.secondary">
-                  Tổng phát hiện: <strong>{dashboardData.performanceMetrics.totalDetections || 0}</strong>
+                  Tổng phát hiện: <strong>{dashboardData.performanceMetrics?.totalDetections || 0}</strong>
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Độ tin cậy TB: <strong>{dashboardData.performanceMetrics.avgConfidence || 0}</strong>
+                  Độ tin cậy TB: <strong>{dashboardData.performanceMetrics?.avgConfidence || 0}</strong>
                 </Typography>
               </Box>
             </Paper>
           </Fade>
         </Grid>
 
-        {/* Enhanced Charts Row 1 */}
-        <Grid item xs={12} md={6}>
-          <Fade in={true} timeout={1400}>
-            <Paper sx={{ 
-              p: 3, 
-              borderRadius: 3, 
-              boxShadow: 4, 
-              height: 450,
-              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-              border: '1px solid #e3f2fd'
-            }}>
-              <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 3, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1,
-                color: '#1976d2'
-              }}>
-                <PieChartIcon color="primary" />
-                Tỉ Lệ Trạng Thái Camera
-              </Typography>
-              <ResponsiveContainer width="100%" height={350}>
-                <PieChart>
-                  <Pie 
-                    data={dashboardData.cameraStats} 
-                    dataKey="value" 
-                    nameKey="name" 
-                    cx="50%" 
-                    cy="50%" 
-                    outerRadius={120}
-                    innerRadius={50}
-                    paddingAngle={2}
-                    label={({ name, percent }) => `${name}\n${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {dashboardData.cameraStats.map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                        stroke="#ffffff"
-                        strokeWidth={2}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value, name) => [value, name]}
-                    labelStyle={{ fontWeight: 600 }}
-                    contentStyle={{ 
-                      borderRadius: 8, 
-                      border: '1px solid #e0e0e0',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                    }}
-                  />
-                  <Legend 
-                    verticalAlign="bottom" 
-                    height={36}
-                    iconType="circle"
-                    wrapperStyle={{ paddingTop: 20 }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </Paper>
-          </Fade>
-        </Grid>
 
         <Grid item xs={12} md={6}>
           <Fade in={true} timeout={1600}>
@@ -1108,69 +927,6 @@ const summary = [
           </Fade>
         </Grid>
 
-        <Grid item xs={12} md={6}>
-          <Fade in={true} timeout={2000}>
-            <Paper sx={{ 
-              p: 3, 
-              borderRadius: 3, 
-              boxShadow: 4, 
-              height: 450,
-              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-              border: '1px solid #e8f5e8'
-            }}>
-              <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 3, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1,
-                color: '#2e7d32'
-              }}>
-                <ShowChart color="primary" />
-                Top Camera Hoạt Động
-              </Typography>
-              <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={dashboardData.camBarData} layout="horizontal" margin={{ top: 20, right: 30, left: 80, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                  <XAxis 
-                    type="number" 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#666' }}
-                  />
-                  <YAxis 
-                    dataKey="camera" 
-                    type="category" 
-                    width={80}
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#666' }}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      borderRadius: 8, 
-                      border: '1px solid #e0e0e0',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                      backgroundColor: '#ffffff'
-                    }}
-                    labelStyle={{ fontWeight: 600 }}
-                  />
-                  <Bar 
-                    dataKey="xe" 
-                    fill="url(#horizontalBarGradient)" 
-                    radius={[0, 6, 6, 0]}
-                    maxBarSize={50}
-                  />
-                  <defs>
-                    <linearGradient id="horizontalBarGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="5%" stopColor="#43a047" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#43a047" stopOpacity={0.3}/>
-                    </linearGradient>
-                  </defs>
-                </BarChart>
-              </ResponsiveContainer>
-            </Paper>
-          </Fade>
-        </Grid>
 
         {/* Data Tables Row */}
         <Grid item xs={12} md={6}>
@@ -1211,11 +967,11 @@ const summary = [
                           </Typography>
                         </TableCell>
                         <TableCell align="right">
-                                                      <Typography variant="body2" color="text.secondary">
-                              {dashboardData.performanceMetrics.totalDetections > 0 
-                                ? Math.round((plate.count / dashboardData.performanceMetrics.totalDetections) * 100)
-                                : 0}%
-                            </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {(dashboardData.performanceMetrics?.totalDetections || 0) > 0 
+                              ? Math.round((plate.count / (dashboardData.performanceMetrics?.totalDetections || 1)) * 100)
+                              : 0}%
+                          </Typography>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1401,126 +1157,6 @@ const summary = [
           </Fade>
         </Grid>
 
-        <Grid item xs={12} md={4}>
-          <Fade in={true} timeout={3000}>
-            <Paper sx={{ 
-              p: 3, 
-              borderRadius: 3, 
-              boxShadow: 4, 
-              height: 350,
-              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-              border: '1px solid #e8f5e8'
-            }}>
-              <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 3, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1,
-                color: '#2e7d32'
-              }}>
-                <DirectionsCar color="primary" />
-                Loại Phương Tiện
-              </Typography>
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
-                  <Pie
-                    data={dashboardData.vehicleTypeStats}
-                    dataKey="count"
-                    nameKey="type"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    innerRadius={30}
-                    paddingAngle={2}
-                    label={({ type, percentage }) => `${type}\n${percentage}%`}
-                    labelLine={false}
-                  >
-                    {dashboardData.vehicleTypeStats.map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                        stroke="#ffffff"
-                        strokeWidth={2}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value, name) => [value, name]}
-                    contentStyle={{ 
-                      borderRadius: 8, 
-                      border: '1px solid #e0e0e0',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </Paper>
-          </Fade>
-        </Grid>
-
-        <Grid item xs={12} md={4}>
-          <Fade in={true} timeout={3200}>
-            <Paper sx={{ 
-              p: 3, 
-              borderRadius: 3, 
-              boxShadow: 4, 
-              height: 350,
-              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-              border: '1px solid #fff3e0'
-            }}>
-              <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 3, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1,
-                color: '#f57c00'
-              }}>
-                <Assessment color="primary" />
-                Phân Bố Độ Tin Cậy
-              </Typography>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={dashboardData.confidenceDistribution} layout="horizontal" margin={{ top: 20, right: 30, left: 60, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                  <XAxis 
-                    type="number" 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#666' }}
-                  />
-                  <YAxis 
-                    dataKey="range" 
-                    type="category" 
-                    width={60}
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#666' }}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      borderRadius: 8, 
-                      border: '1px solid #e0e0e0',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                      backgroundColor: '#ffffff'
-                    }}
-                    labelStyle={{ fontWeight: 600 }}
-                  />
-                  <Bar 
-                    dataKey="count" 
-                    fill="url(#confidenceGradient)" 
-                    radius={[0, 6, 6, 0]}
-                    maxBarSize={40}
-                  />
-                  <defs>
-                    <linearGradient id="confidenceGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#8884d8" stopOpacity={0.3}/>
-                    </linearGradient>
-                  </defs>
-                </BarChart>
-              </ResponsiveContainer>
-            </Paper>
-          </Fade>
-        </Grid>
       </Grid>
     </Box>
   );

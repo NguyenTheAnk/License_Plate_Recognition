@@ -364,7 +364,10 @@ const WhiteList = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-
+  const [hasCreateWhiteList, setHasCreateWhiteList] = useState(false);
+  const [hasUpdateWhiteList, setHasUpdateWhiteList] = useState(false);
+  const [hasViewWhiteList, setHasViewWhiteList] = useState(false);
+  const [hasDeleteWhiteList, setHasDeleteWhiteList] = useState(false);
   // Filters
   const [filters, setFilters] = useState({
     plate_number: '',
@@ -382,7 +385,22 @@ const WhiteList = () => {
     description: '',
     approval_status: 'approved'
   });
+  useEffect(() => {
+          const storedUser = localStorage.getItem('user');
+          if (storedUser ) {
+              try {
+                  const user = JSON.parse(storedUser); // Parse dữ liệu user
+                  const permissions = user.permissions || [];
+                  setHasCreateWhiteList(permissions.some(permission => permission.code === 'whitelist.create'));
+                  setHasUpdateWhiteList(permissions.some(permission => permission.code === 'whitelist.update'));
+                  setHasViewWhiteList(permissions.some(permission => permission.code === 'whitelist.view'));
+                  setHasDeleteWhiteList(permissions.some(permission => permission.code === 'whitelist.delete'));
 
+              } catch (error) {
+                  console.error('Error parsing permissions:', error);
+              }
+          }
+      }, []);
   // Image handling
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -1027,8 +1045,8 @@ const handleDateIconClickBackup = (field) => {
                     icon={<ExpandMoreIcon fontSize="small" />}
                   />
                 </Breadcrumbs>
-                
-                <Button
+                {hasCreateWhiteList && (
+                      <Button
                   variant="contained"
                   startIcon={<FaPlus />}
                   onClick={() => {
@@ -1053,6 +1071,9 @@ const handleDateIconClickBackup = (field) => {
                 >
                   Thêm mới
                 </Button>
+                )}
+
+                
               </Box>
             </Box>
           </Box>
@@ -1462,7 +1483,8 @@ const handleDateIconClickBackup = (field) => {
                           </TableCell>
                           <TableCell align="center">
                             <Box display="flex" justifyContent="center" gap={1}>
-                              <IconButton
+                              {hasViewWhiteList && (
+                                <IconButton
                                 size="small"
                                 onClick={() => handleView(item.id)}
                                 title="Xem chi tiết"
@@ -1475,7 +1497,9 @@ const handleDateIconClickBackup = (field) => {
                               >
                                 <FaEye size={14} />
                               </IconButton>
-                              <IconButton
+                              )}
+                              {hasUpdateWhiteList && (
+                                <IconButton
                                 size="small"
                                 onClick={() => handleEdit(item)}
                                 title="Chỉnh sửa"
@@ -1488,7 +1512,9 @@ const handleDateIconClickBackup = (field) => {
                               >
                                 <FaEdit size={14} />
                               </IconButton>
-                              <IconButton
+                              )}
+                              {hasDeleteWhiteList && (
+<IconButton
                                 size="small"
                                 onClick={() => setDeleteDialog({ 
                                   open: true, 
@@ -1505,6 +1531,8 @@ const handleDateIconClickBackup = (field) => {
                               >
                                 <FaTrash size={14} />
                               </IconButton>
+                              )}
+                              
                             </Box>
                           </TableCell>
                         </TableRow>

@@ -2,7 +2,7 @@
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 // Flask API configuration for license plate detection
-const FLASK_API_BASE_URL = process.env.REACT_APP_FLASK_API_URL || 'http://localhost:5000';
+const FLASK_API_BASE_URL = process.env.REACT_APP_FLASK_API_URL || 'http://localhost:5002';
 
 // Utility function to clean URL (remove extra slashes)
 const cleanUrl = (url) => {
@@ -251,23 +251,7 @@ export const editData = async (url, requestData, token = null) => {
         console.log('Response status:', response.status);
         console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
-        // Check if response is JSON
-        const contentType = response.headers.get('content-type');
-        let data;
-        
-        if (contentType && contentType.includes('application/json')) {
-            data = await response.json();
-        } else {
-            // If not JSON, get text
-            const textResponse = await response.text();
-            console.log('Non-JSON response:', textResponse);
-            data = { 
-                success: false, 
-                message: 'Server trả về response không phải JSON',
-                raw_response: textResponse 
-            };
-        }
-        
+        const data = await response.json();
         console.log('Response data:', data);
 
         if (!response.ok) {
@@ -285,14 +269,6 @@ export const editData = async (url, requestData, token = null) => {
         if (error.response) {
             console.error('Error response data:', error.response.data);
             console.error('Error response status:', error.response.status);
-        }
-        
-        // Handle JSON parsing errors
-        if (error.message && error.message.includes('Unexpected token')) {
-            console.error('JSON parsing error - server may have returned HTML instead of JSON');
-            const newError = new Error('Server trả về dữ liệu không đúng định dạng. Vui lòng kiểm tra server.');
-            newError.originalError = error;
-            throw newError;
         }
         
         throw error;

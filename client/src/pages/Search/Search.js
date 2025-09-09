@@ -18,10 +18,6 @@ function SearchPage() {
   // Danh sách camera lấy từ API
   const [cameras, setCameras] = useState([]);
 
-  // State cho modal chi tiết camera
-  const [cameraDetailOpen, setCameraDetailOpen] = useState(false);
-  const [selectedCamera, setSelectedCamera] = useState(null);
-
   const statusOptions = [
     { value: '', label: 'Tất cả trạng thái', color: 'default' },
     { value: 'whitelist', label: 'Whitelist', color: 'success' },
@@ -159,15 +155,6 @@ function SearchPage() {
   
   const [tab, setTab] = useState('all');
   const [loading, setLoading] = useState(false);
-  const [tabLoading, setTabLoading] = useState({
-    whitelist: false,
-    blacklist: false,
-    camera: false,
-    location: false,
-    journey: false,
-    plate: false,
-    access: false
-  });
   const [results, setResults] = useState([]);
   const [stats, setStats] = useState({});
   const [openDetail, setOpenDetail] = useState(false);
@@ -199,7 +186,7 @@ function SearchPage() {
     const fetchLocations = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetchDataFromAPI('/api/location', token, { params: { page: 1, limit: 1000 } });
+        const res = await fetchDataFromAPI('/api/location/active', token, { params: { page: 1, limit: 1000 } });
         if (res && (res.data?.locations || res.data)) {
           setLocations(res.data?.locations || res.data);
         }
@@ -220,15 +207,9 @@ function SearchPage() {
     const fetchCameras = async () => {
       try {
         const token = localStorage.getItem('token');
-        const data = await fetchDataFromAPI('/api/cameras/search/cameras', token);
-        // Lấy danh sách camera từ API với connection_status
+        const data = await fetchDataFromAPI('/api/cameras/streams/all', token);
+        // Lấy danh sách camera từ API (giống Sidebar)
         const cameraList = data.data?.cameras || [];
-        console.log('📹 Fetched cameras:', cameraList.map(c => ({ 
-          id: c.id, 
-          name: c.name, 
-          connection_status: c.connection_status,
-          status: c.status 
-        })));
         setCameras(cameraList);
       } catch (error) {
         console.error('Error fetching cameras:', error);
@@ -241,18 +222,6 @@ function SearchPage() {
     };
     fetchCameras();
   }, []);
-
-  // Handler cho việc mở modal chi tiết camera
-  const handleViewCameraDetail = (camera) => {
-    setSelectedCamera(camera);
-    setCameraDetailOpen(true);
-  };
-
-  // Handler cho việc đóng modal chi tiết camera
-  const handleCloseCameraDetail = () => {
-    setCameraDetailOpen(false);
-    setSelectedCamera(null);
-  };
 
  const handleSearch = async () => {
   setLoading(true);
@@ -274,39 +243,28 @@ function SearchPage() {
       severity: 'info'
     });
 
-    // Parallel API calls with improved error handling and correct endpoints
+    // Parallel API calls with improved error handling
     const [whitelistRes, blacklistRes, cameraRes, locationRes, journeyRes, plateRes, accessRes] = await Promise.allSettled([
-      fetchDataFromAPI(`/api/whitelist/search`, token, { params }),
-      fetchDataFromAPI(`/api/blacklist/search`, token, { params }),
-      fetchDataFromAPI(`/api/cameras/search/cameras`, token, { params }),
-      fetchDataFromAPI(`/api/location/search/locations`, token, { params }),
-      fetchDataFromAPI(`/api/journey/search`, token, { params }),
-      fetchDataFromAPI(`/api/plate-detections`, token, { params }),
-      fetchDataFromAPI(`/api/access-control/search`, token, { params })
+      fetchDataFromAPI(`/api/whitelist`, token, { params }),
+      fetchDataFromAPI(`/api/blacklist`, token, { params }),
+      fetchDataFromAPI(`/api/cameras/streams/all`, token, { params }),
+      fetchDataFromAPI(`/api/location/active`, token, { params }),
+      fetchDataFromAPI(`/api/journey`, token, { params }),
+      fetchDataFromAPI(`/api/plates`, token, { params }),
+      fetchDataFromAPI(`/api/access-control`, token, { params })
     ]);
 
-    // Process results with detailed error handling and loading states
-    const processResult = (result, apiName, tabKey) => {
-      if (result.status === 'fulfilled') {
-        const data = result.value?.data || result.value || [];
-        console.log(`✅ ${apiName} API success:`, data.length, 'items');
-        setTabLoading(prev => ({ ...prev, [tabKey]: false }));
-        return data;
-      } else {
-        console.error(`❌ ${apiName} API error:`, result.reason);
-        setTabLoading(prev => ({ ...prev, [tabKey]: false }));
-        return [];
-      }
-    };
+    // Process results
+    const processResult = (result) => result.status === 'fulfilled' ? result.value?.data || [] : [];
     
     const newResults = {
-      whitelist: processResult(whitelistRes, 'Whitelist', 'whitelist'),
-      blacklist: processResult(blacklistRes, 'Blacklist', 'blacklist'),
-      camera: processResult(cameraRes, 'Camera', 'camera'),
-      location: processResult(locationRes, 'Location', 'location')?.locations || processResult(locationRes, 'Location', 'location'),
-      journey: processResult(journeyRes, 'Journey', 'journey'),
-      plate: processResult(plateRes, 'Plate Detection', 'plate'),
-      access: processResult(accessRes, 'Access Control', 'access')
+      whitelist: processResult(whitelistRes),
+      blacklist: processResult(blacklistRes),
+      camera: processResult(cameraRes),
+      location: processResult(locationRes)?.locations || processResult(locationRes),
+      journey: processResult(journeyRes),
+      plate: processResult(plateRes),
+      access: processResult(accessRes)
     };
 
     setAllResults(newResults);
@@ -316,24 +274,17 @@ function SearchPage() {
     const totalBlacklist = newResults.blacklist.length;
     const totalResults = totalWhitelist + totalBlacklist;
     
-    // Enhanced pagination handling from API responses
+    // THÊM: Xử lý thông tin phân trang từ API response
     let apiTotalCount = 0;
     let apiTotalPages = 1;
     
-    // Check pagination from different API responses
-    const responses = [whitelistRes, blacklistRes, cameraRes, locationRes, journeyRes, plateRes, accessRes];
-    const responseNames = ['Whitelist', 'Blacklist', 'Camera', 'Location', 'Journey', 'Plate Detection', 'Access Control'];
-    
-    responses.forEach((res, index) => {
-      if (res.status === 'fulfilled' && res.value?.pagination) {
-        const pagination = res.value.pagination;
-        if (pagination.total > apiTotalCount) {
-          apiTotalCount = pagination.total;
-          apiTotalPages = pagination.total_pages || 1;
-          console.log(`📊 Using pagination from ${responseNames[index]}:`, pagination);
-        }
-      }
-    });
+    if (whitelistRes.status === 'fulfilled' && whitelistRes.value?.pagination) {
+      apiTotalCount = whitelistRes.value.pagination.total || 0;
+      apiTotalPages = whitelistRes.value.pagination.total_pages || 1;
+    } else if (blacklistRes.status === 'fulfilled' && blacklistRes.value?.pagination) {
+      apiTotalCount = blacklistRes.value.pagination.total || 0;
+      apiTotalPages = blacklistRes.value.pagination.total_pages || 1;
+    }
     
     setTotalItems(apiTotalCount || totalResults);
     setTotalPages(apiTotalPages || Math.ceil((apiTotalCount || totalResults) / itemsPerPage));
@@ -842,7 +793,7 @@ useEffect(() => {
           }
           break;
         case 'camera':
-          data = await fetchDataFromAPI(`/api/cameras`, token, { params });
+          data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
           // Đảm bảo setResults là mảng camera
           const cameraList = (data.data && Array.isArray(data.data.cameras)) ? data.data.cameras : [];
           setResults(cameraList);
@@ -850,7 +801,7 @@ useEffect(() => {
           totalPagesFromAPI = Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'location':
-          data = await fetchDataFromAPI(`/api/location`, token, { params });
+          data = await fetchDataFromAPI(`/api/location/active`, token, { params });
           console.log('Location API response:', data);
           console.log('Params sent:', params);
           if (data.data && data.data.locations) {
@@ -882,7 +833,7 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'plate':
-          data = await fetchDataFromAPI(`/api/plate-detections/list`, token, { params });
+          data = await fetchDataFromAPI(`/api/plates`, token, { params });
           setResults(data.data || []);
           totalCountFromAPI = data.total || data.pagination?.total || 0;
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
@@ -1004,7 +955,7 @@ useEffect(() => {
           }
           break;
         case 'camera':
-          data = await fetchDataFromAPI(`/api/cameras`, token, { params });
+          data = await fetchDataFromAPI(`/api/cameras/streams/all`, token, { params });
           // Đảm bảo setResults là mảng camera
           const cameraList = (data.data && Array.isArray(data.data.cameras)) ? data.data.cameras : [];
           setResults(cameraList);
@@ -1053,7 +1004,7 @@ useEffect(() => {
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'plate':
-          data = await fetchDataFromAPI(`/api/plate-detections/list`, token, { params });
+          data = await fetchDataFromAPI(`/api/plates`, token, { params });
           setResults(data.data || []);
           totalCountFromAPI = data.total || data.pagination?.total || 0;
           totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
@@ -1140,12 +1091,6 @@ useEffect(() => {
   // Helper functions from BlackList.js
   const getStatusChip = (status) => {
     const statusConfig = {
-      // Camera status
-      'online': { label: 'Trực tuyến', color: 'success' },
-      'offline': { label: 'Ngoại tuyến', color: 'error' },
-      'warning': { label: 'Cảnh báo', color: 'warning' },
-      'never': { label: 'Chưa kết nối', color: 'default' },
-      // General status
       'valid': { label: 'Còn hiệu lực', color: 'success' },
       'expired': { label: 'Hết hạn', color: 'error' },
       'future': { label: 'Chưa hiệu lực', color: 'warning' },
@@ -1588,10 +1533,7 @@ useEffect(() => {
                             </TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Mã camera</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Vị trí</TableCell>
-                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Độ phân giải</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Trạng thái</TableCell>
-                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Kết nối</TableCell>
-                            <TableCell sx={{ color: 'white', fontWeight: 700 }}>Phát hiện 24h</TableCell>
                             <TableCell sx={{ color: 'white', fontWeight: 700 }}>Thao tác</TableCell>
                           </>
                         ) : tab === 'location' ? (
@@ -1669,7 +1611,7 @@ useEffect(() => {
                       {tab === 'camera' ? (
                         cameras.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={9} align="center">
+                            <TableCell colSpan={6} align="center">
                               <Typography color="text.secondary" sx={{ py: 4 }}>
                                 Không có camera nào
                               </Typography>
@@ -1678,69 +1620,18 @@ useEffect(() => {
                         ) : (
                           cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
                             <TableRow key={item.id || index} hover>
+                              <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
+                              <TableCell>{item.name}</TableCell>
+                              <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
+                              <TableCell>{item.location_name || item.location || ''}</TableCell>
                               <TableCell>
-                                <Typography variant="body2" fontWeight={500}>
-                                  {((currentPage - 1) * itemsPerPage) + index + 1}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Box display="flex" alignItems="center" gap={1}>
-                                  <CameraAlt sx={{ fontSize: 16, color: '#1976d2' }} />
-                                  <Typography variant="body2" fontWeight={600}>
-                                    {item.name}
-                                  </Typography>
-                                </Box>
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="body2" color="text.secondary">
-                                  {item.code || item.camera_key || item.camera_id || item.id}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Box>
-                                  <Typography variant="body2" fontWeight={500}>
-                                    {item.location_name || item.location || ''}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {item.location_address || ''}
-                                  </Typography>
-                                </Box>
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="body2" fontWeight={500}>
-                                  {item.resolution || `${item.width}x${item.height}`}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {item.fps} FPS
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Chip 
-                                  label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
-                                  color={item.is_active ? 'success' : 'default'} 
-                                  size="small" 
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Chip 
-                                  label={item.connection_status === 'online' ? 'Online' : 
-                                         item.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
-                                  color={item.connection_status === 'online' ? 'success' : 
-                                         item.connection_status === 'warning' ? 'warning' : 'error'} 
-                                  size="small" 
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="body2" fontWeight={500} color="primary">
-                                  {item.detections_24h || 0}
-                                </Typography>
+                                {getStatusChip(item.connection_status || item.status)}
                               </TableCell>
                               <TableCell>
                                 <Button 
                                   variant="outlined" 
                                   size="small" 
                                   startIcon={<Visibility />} 
-                                  onClick={() => handleViewCameraDetail(item)}
                                   sx={{ borderRadius: 2, textTransform: 'none' }}
                                 >
                                   Xem chi tiết
@@ -1773,80 +1664,29 @@ useEffect(() => {
 
                                 {/* Dynamic table rows based on tab */}
                                 {tab === 'camera' ? (
-                                  allResults.camera.length === 0 ? (
+                                  cameras.length === 0 ? (
                                     <TableRow>
-                                      <TableCell colSpan={9} align="center">
+                                      <TableCell colSpan={6} align="center">
                                         <Typography color="text.secondary" sx={{ py: 4 }}>
                                           Không có camera nào
                                         </Typography>
                                       </TableCell>
                                     </TableRow>
                                   ) : (
-                                    allResults.camera.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
+                                    cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
                                       <TableRow key={item.id || index} hover>
+                                        <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
+                                        <TableCell>{item.name}</TableCell>
+                                        <TableCell>{item.camera_key || item.camera_id || item.id}</TableCell>
+                                        <TableCell>{item.location_name || item.location || ''}</TableCell>
                                         <TableCell>
-                                          <Typography variant="body2" fontWeight={500}>
-                                            {((currentPage - 1) * itemsPerPage) + index + 1}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Box display="flex" alignItems="center" gap={1}>
-                                            <CameraAlt sx={{ fontSize: 16, color: '#1976d2' }} />
-                                            <Typography variant="body2" fontWeight={600}>
-                                              {item.name}
-                                            </Typography>
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Typography variant="body2" color="text.secondary">
-                                            {item.code || item.camera_key || item.camera_id || item.id}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Box>
-                                            <Typography variant="body2" fontWeight={500}>
-                                              {item.location_name || item.location || ''}
-                                            </Typography>
-                                            <Typography variant="caption" color="text.secondary">
-                                              {item.location_address || ''}
-                                            </Typography>
-                                          </Box>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Typography variant="body2" fontWeight={500}>
-                                            {item.resolution || `${item.width}x${item.height}`}
-                                          </Typography>
-                                          <Typography variant="caption" color="text.secondary">
-                                            {item.fps} FPS
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Chip 
-                                            label={item.is_active ? 'Hoạt động' : 'Tạm dừng'} 
-                                            color={item.is_active ? 'success' : 'default'} 
-                                            size="small" 
-                                          />
-                                        </TableCell>
-                                        <TableCell>
-                                          <Chip 
-                                            label={item.connection_status === 'online' ? 'Online' : 
-                                                   item.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
-                                            color={item.connection_status === 'online' ? 'success' : 
-                                                   item.connection_status === 'warning' ? 'warning' : 'error'} 
-                                            size="small" 
-                                          />
-                                        </TableCell>
-                                        <TableCell>
-                                          <Typography variant="body2" fontWeight={500} color="primary">
-                                            {item.detections_24h || 0}
-                                          </Typography>
+                                          {getStatusChip(item.connection_status || item.status)}
                                         </TableCell>
                                         <TableCell>
                                           <Button 
                                             variant="outlined" 
                                             size="small" 
                                             startIcon={<Visibility />} 
-                                            onClick={() => handleViewCameraDetail(item)}
                                             sx={{ borderRadius: 2, textTransform: 'none' }}
                                           >
                                             Xem chi tiết
@@ -2510,211 +2350,6 @@ useEffect(() => {
             }}
           >
             Xem lịch sử
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Modal chi tiết camera */}
-      <Dialog 
-        open={cameraDetailOpen} 
-        onClose={handleCloseCameraDetail} 
-        maxWidth="md" 
-        fullWidth
-      >
-        <DialogTitle sx={{ 
-          background: 'linear-gradient(90deg, #1976d2 60%, #42a5f5 100%)', 
-          color: 'white', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 2 
-        }}>
-          <CameraAlt sx={{ mr: 1 }} /> 
-          Chi tiết camera
-          <IconButton onClick={handleCloseCameraDetail} sx={{ ml: 'auto', color: 'white' }}>
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers>
-          {selectedCamera && (
-            <Grid container spacing={3}>
-              {/* Thông tin cơ bản */}
-              <Grid item xs={12} md={4}>
-                <Avatar variant="rounded" sx={{ width: 120, height: 70, bgcolor: '#e0e0e0', mb: 2 }}>
-                  <CameraAlt sx={{ fontSize: 40 }} />
-                </Avatar>
-                <Typography variant="h5" fontWeight={700} sx={{ mb: 1 }}>
-                  {selectedCamera.name}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Mã: {selectedCamera.code || selectedCamera.camera_key || selectedCamera.camera_id}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Vị trí: {selectedCamera.location_name}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Địa chỉ: {selectedCamera.location_address}
-                </Typography>
-                <Box sx={{ mt: 2 }}>
-                  <Chip 
-                    label={selectedCamera.is_active ? 'Hoạt động' : 'Tạm dừng'} 
-                    color={selectedCamera.is_active ? 'success' : 'default'} 
-                    size="small" 
-                    sx={{ mr: 1 }}
-                  />
-                  <Chip 
-                    label={selectedCamera.connection_status === 'online' ? 'Online' : 
-                           selectedCamera.connection_status === 'warning' ? 'Cảnh báo' : 'Offline'} 
-                    color={selectedCamera.connection_status === 'online' ? 'success' : 
-                           selectedCamera.connection_status === 'warning' ? 'warning' : 'error'} 
-                    size="small" 
-                  />
-                </Box>
-              </Grid>
-              
-              {/* Thông tin kỹ thuật */}
-              <Grid item xs={12} md={8}>
-                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
-                  Thông tin kỹ thuật
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Giao thức:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.protocol?.toUpperCase()}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Host:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.host}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Port:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.port}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Độ phân giải:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.resolution || `${selectedCamera.width}x${selectedCamera.height}`}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">FPS:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.fps}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Loại camera:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.camera_type}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Vai trò:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.camera_role}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Hướng:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.direction}
-                    </Typography>
-                  </Grid>
-                </Grid>
-                
-                <Divider sx={{ my: 2 }} />
-                
-                {/* Thông tin cài đặt & bảo trì */}
-                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
-                  Cài đặt & Bảo trì
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Ngày lắp đặt:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.installation_date_formatted || selectedCamera.installation_date || 'Chưa có'}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Số ngày hoạt động:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.days_since_installation ? `${selectedCamera.days_since_installation} ngày` : 'Chưa có'}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Lịch bảo trì:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.maintenance_schedule || 'Chưa có'}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Khoảng cách bảo trì:</Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {selectedCamera.maintenance_interval_days ? `${selectedCamera.maintenance_interval_days} ngày` : 'Chưa có'}
-                    </Typography>
-                  </Grid>
-                </Grid>
-                
-                <Divider sx={{ my: 2 }} />
-                
-                {/* Thông tin phát hiện */}
-                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
-                  Thông tin phát hiện
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Phát hiện 24h:</Typography>
-                    <Typography variant="body2" fontWeight={500} color="primary">
-                      {selectedCamera.detections_24h || 0} lần
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="body2" color="text.secondary">Bật phát hiện:</Typography>
-                    <Chip 
-                      label={selectedCamera.is_detect ? 'Có' : 'Không'} 
-                      color={selectedCamera.is_detect ? 'success' : 'default'} 
-                      size="small" 
-                    />
-                  </Grid>
-                </Grid>
-                
-                <Divider sx={{ my: 2 }} />
-                
-                {/* Thông tin kết nối */}
-                <Typography variant="h6" fontWeight={600} mb={2} color="primary">
-                  Thông tin kết nối
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Typography variant="body2" color="text.secondary">RTSP URL:</Typography>
-                    <Typography variant="body2" fontWeight={500} sx={{ 
-                      wordBreak: 'break-all', 
-                      bgcolor: '#f5f5f5', 
-                      p: 1, 
-                      borderRadius: 1,
-                      fontFamily: 'monospace'
-                    }}>
-                      {selectedCamera.rtsp_url || 'Chưa có'}
-                    </Typography>
-                  </Grid>
-                </Grid>
-              </Grid>
-            </Grid>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={handleCloseCameraDetail} 
-            variant="outlined" 
-            startIcon={<CloseIcon />} 
-            sx={{ borderRadius: 2 }}
-          >
-            Đóng
           </Button>
         </DialogActions>
       </Dialog>

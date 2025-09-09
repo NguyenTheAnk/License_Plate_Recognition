@@ -228,9 +228,9 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated, setAle
         </Box>
       </DialogTitle>
       
-      <DialogContent sx={{ pt: 3, px: 3, pb: 2, zIndex: 1301, background: 'white' }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} sm={6} sx={{ pt: 5 }}>
+      <DialogContent sx={{ pt: 6, px: 3, pb: 2, background: 'white' }}>
+        <Grid container spacing={3}>
+          <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
               label="Module"
@@ -473,7 +473,7 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
         </Box>
       </DialogTitle>
       
-      <DialogContent sx={{ pt: 3 }}>
+      <DialogContent sx={{ pt: 6 }}>
         <Grid container spacing={3}>
           <Grid item xs={12} sm={6}>
             <TextField

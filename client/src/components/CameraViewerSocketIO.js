@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
 import Hls from "hls.js";
-import io from "socket.io-client";
 
 const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
   const [loading, setLoading] = useState(true);
@@ -10,6 +9,7 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
   const [recognitionResults, setRecognitionResults] = useState([]);
   const [fps, setFps] = useState(0);
   const [isUploadedVideo, setIsUploadedVideo] = useState(false);
+  const [detectedPlates, setDetectedPlates] = useState([]);
 
   const videoRef = useRef(null);
   const imgRef = useRef(null);
@@ -181,56 +181,96 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
     setIsUploadedVideo(camera.id.startsWith("upload-"));
   }, [camera.id]);
 
-  // Socket.IO connection
+  // WebSocket connection for real-time processing
   useEffect(() => {
     if (isRecognizing) {
-      console.log("Connecting to Socket.IO server...");
-      socketRef.current = io("http://localhost:5000");
+      console.log("Connecting to WebSocket server...");
+      socketRef.current = new WebSocket("ws://localhost:5000/recognize-ws");
 
-      socketRef.current.on("connect", () => {
-        console.log("Connected to Socket.IO server");
-      });
-
-      socketRef.current.on("connected", (data) => {
-        console.log("Server confirmed connection:", data);
+      socketRef.current.onopen = () => {
+        console.log("Connected to WebSocket server");
         if (isRecognizing) sendFrames();
-      });
+      };
 
-      socketRef.current.on("result", (data) => {
-        console.log("Received result from server:", data);
-        if (data.frame) {
-          setFrameData(data.frame);
+      socketRef.current.onmessage = (event) => {
+        console.log("Received data from server:", event.data);
+        
+        // Check if it's binary data (processed frame)
+        if (event.data instanceof Blob) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result;
+            setFrameData(dataUrl);
+            console.log("Processed frame received and displayed");
+            
+            // Extract plate information from frame if possible
+            // This is a simple approach - in real implementation, you might want to send metadata separately
+            const currentTime = new Date().toLocaleTimeString();
+            setRecognitionResults(prev => [...prev, {
+              timestamp: currentTime,
+              message: "Frame processed with detection overlay",
+              hasDetection: true
+            }].slice(-10));
+          };
+          reader.readAsDataURL(event.data);
+        } else if (event.data instanceof ArrayBuffer) {
+          // Handle ArrayBuffer data
+          const blob = new Blob([event.data], { type: 'image/jpeg' });
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result;
+            setFrameData(dataUrl);
+            console.log("Processed frame received and displayed");
+            
+            // Extract plate information from frame if possible
+            const currentTime = new Date().toLocaleTimeString();
+            setRecognitionResults(prev => [...prev, {
+              timestamp: currentTime,
+              message: "Frame processed with detection overlay",
+              hasDetection: true
+            }].slice(-10));
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          // Handle text/JSON data
+          try {
+            const data = JSON.parse(event.data);
+            console.log("Received JSON data:", data);
+            
+            if (data.metadata) {
+              setRecognitionResults((prev) => {
+                const newResult = {
+                  timestamp: new Date().toLocaleTimeString(),
+                  boxes: data.metadata.boxes || [],
+                  labels: data.metadata.labels || [],
+                  ocr_results: data.metadata.ocr_results || [],
+                };
+                return [...prev, newResult].slice(-5);
+              });
+            }
+          } catch (e) {
+            console.log("Non-JSON text data:", event.data);
+          }
         }
-        if (data.metadata) {
-          setRecognitionResults((prev) => {
-            const newResult = {
-              timestamp: new Date().toLocaleTimeString(),
-              boxes: data.metadata.boxes || [],
-              labels: data.metadata.labels || [],
-              ocr_results: data.metadata.ocr_results || [],
-            };
-            return [...prev, newResult].slice(-5);
-          });
-        }
-      });
+      };
 
-      socketRef.current.on("error", (data) => {
-        console.error("Server error:", data);
-      });
+      socketRef.current.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
 
-      socketRef.current.on("disconnect", () => {
-        console.log("Disconnected from Socket.IO server");
-      });
+      socketRef.current.onclose = () => {
+        console.log("Disconnected from WebSocket server");
+      };
     } else {
       if (socketRef.current) {
-        socketRef.current.disconnect();
+        socketRef.current.close();
         socketRef.current = null;
       }
     }
 
     return () => {
       if (socketRef.current) {
-        socketRef.current.disconnect();
+        socketRef.current.close();
         socketRef.current = null;
       }
     };
@@ -238,8 +278,8 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
 
   const sendFrames = () => {
     const frameStartTime = performance.now();
-    if (!isRecognizing || !socketRef.current || !socketRef.current.connected) {
-      console.log("Socket.IO not ready, skipping frame");
+    if (!isRecognizing || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      console.log("WebSocket not ready, skipping frame");
       return;
     }
 
@@ -259,16 +299,13 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
     console.log(`Canvas draw time: ${canvasDrawTime - frameStartTime}ms`);
 
     canvas.toBlob((blob) => {
-      if (blob && socketRef.current && socketRef.current.connected) {
+      if (blob && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         const blobStartTime = performance.now();
-        const reader = new FileReader();
-        reader.onload = () => {
-          socketRef.current.emit("frame", { frame: reader.result });
-          console.log(`Blob to base64 and send time: ${performance.now() - blobStartTime}ms, size: ${reader.result.length} chars`);
-        };
-        reader.readAsDataURL(blob);
+        // Send binary data directly to WebSocket
+        socketRef.current.send(blob);
+        console.log(`Blob sent via WebSocket: ${performance.now() - blobStartTime}ms, size: ${blob.size} bytes`);
       } else {
-        console.log("Blob or Socket.IO not ready:", { blob: !!blob, socketConnected: socketRef.current?.connected });
+        console.log("Blob or WebSocket not ready:", { blob: !!blob, socketState: socketRef.current?.readyState });
       }
     }, "image/jpeg", 0.2);
 
@@ -298,13 +335,13 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
       return;
     }
     setIsProcessing(true);
-    console.log("Stopping recognition, closing Socket.IO");
+    console.log("Stopping recognition, closing WebSocket");
     setIsRecognizing(false);
     setFrameData(null);
     setRecognitionResults([]);
 
     if (socketRef.current) {
-      socketRef.current.disconnect();
+      socketRef.current.close();
       socketRef.current = null;
     }
 
@@ -363,12 +400,12 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
             
             {frameData && (
               <div className="mt-4">
-                <h3 className="text-lg font-semibold mb-2">Kết quả nhận diện:</h3>
+                <h3 className="text-lg font-semibold mb-2 text-green-600">Kết quả nhận diện (có bounding box):</h3>
                 <img
                   ref={imgRef}
                   src={frameData}
-                  alt="Processed frame"
-                  className="w-full max-h-64 object-contain border"
+                  alt="Processed frame with bounding boxes"
+                  className="w-full max-h-64 object-contain border-2 border-green-500 rounded"
                 />
               </div>
             )}
@@ -402,11 +439,18 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
                   <div key={index} className="bg-white p-3 rounded border">
                     <p className="text-sm text-gray-600">{result.timestamp}</p>
                     <p className="font-medium">
-                      Biển số: {result.ocr_results.join(", ") || "Không nhận diện được"}
+                      {result.ocr_results ? (
+                        `Biển số: ${result.ocr_results.join(", ") || "Không nhận diện được"}`
+                      ) : (
+                        result.message || "Frame được xử lý"
+                      )}
                     </p>
                     <p className="text-sm text-gray-500">
-                      Số lượng: {result.boxes.length}
+                      {result.boxes ? `Số lượng: ${result.boxes.length}` : "Đang xử lý..."}
                     </p>
+                    {result.hasDetection && (
+                      <p className="text-xs text-green-600">✓ Có detection</p>
+                    )}
                   </div>
                 ))
               )}

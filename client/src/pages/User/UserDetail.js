@@ -186,31 +186,27 @@ const UserDetail = () => {
 
   const firstLoadRef = useRef(true);
 
-  useEffect(() => {
-    if (userId) {
-      fetchUserDetailData(userId);
-    } else {
-      // Redirect if no user ID
-      navigate('/user');
-    }
-  }, [userId, navigate]);
-
-  // useEffect gọi lại API khi phân trang thay đổi, nhưng tránh lặp vô hạn khi set lại state từ response
+  // Initial load when component mounts or userId changes
   useEffect(() => {
     if (userId) {
       if (firstLoadRef.current) {
         fetchUserDetailData(userId, loginPagination.page, loginPagination.limit, accessPagination.page, accessPagination.limit);
         firstLoadRef.current = false;
       }
+    } else {
+      // Redirect if no user ID
+      navigate('/user');
     }
     // eslint-disable-next-line
-  }, [userId]);
+  }, [userId, navigate]);
 
   // Chỉ gọi lại khi người dùng thực sự đổi trang hoặc đổi số dòng/trang
   const prevLogin = useRef({ page: 1, limit: 10 });
   const prevAccess = useRef({ page: 1, limit: 10 });
+  const isUpdatingFromAPI = useRef(false);
+  
   useEffect(() => {
-    if (!firstLoadRef.current && userId) {
+    if (!firstLoadRef.current && userId && !isUpdatingFromAPI.current) {
       if (
         loginPagination.page !== prevLogin.current.page ||
         loginPagination.limit !== prevLogin.current.limit ||
@@ -235,6 +231,7 @@ const UserDetail = () => {
 
   // Sửa fetchUserDetailData để nhận các tham số phân trang
   const fetchUserDetailData = async (id, loginPage = 1, loginLimit = 10, accessPage = 1, accessLimit = 15) => {
+    isUpdatingFromAPI.current = true;
     setLoading(true);
     context.setProgress?.(20);
     
@@ -282,9 +279,24 @@ const UserDetail = () => {
         setActionLabels(labelMap);
         
         setLoginHistory(response.data.loginHistory || []);
-        setLoginPagination(response.data.loginPagination || { page: 1, limit: 10, total: 0, totalPages: 1 });
+        // Only update pagination if it's different to avoid infinite loop
+        const newLoginPagination = response.data.loginPagination || { page: 1, limit: 10, total: 0, totalPages: 1 };
+        const newAccessPagination = response.data.accessPagination || { page: 1, limit: 10, total: 0, totalPages: 1 };
+        
+        setLoginPagination(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(newLoginPagination)) {
+            return newLoginPagination;
+          }
+          return prev;
+        });
+        
         setAccessLogs(response.data.accessLogs || []);
-        setAccessPagination(response.data.accessPagination || { page: 1, limit: 10, total: 0, totalPages: 1 });
+        setAccessPagination(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(newAccessPagination)) {
+            return newAccessPagination;
+          }
+          return prev;
+        });
         
         context.setProgress?.(100);
       } else {
@@ -306,6 +318,7 @@ const UserDetail = () => {
       navigate('/user');
     } finally {
       setLoading(false);
+      isUpdatingFromAPI.current = false;
     }
   };
 

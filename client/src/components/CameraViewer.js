@@ -349,7 +349,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           const isVideoUpload = camera.id && camera.id.startsWith('upload-');
           const sourceInfo = {
             type: 'source_info',
-            source_type: isVideoUpload ? 'video_upload' : 'camera',  // Database expects 'camera' not 'CameraLive'
+            source_type: isVideoUpload ? 'video_upload' : 'camera',
             video_filename: isVideoUpload ? camera.name : null,
             camera_id: isVideoUpload ? null : camera.id,
             camera_name: isVideoUpload ? null : camera.name
