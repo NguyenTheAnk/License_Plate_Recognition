@@ -329,7 +329,7 @@ const getLicensePlateRecognitions = async (req, res) => {
         
         const total = countResults && countResults.length > 0 ? countResults[0].total : 0;
 
-        // FIXED: Get data with pagination - using parameterized query for LIMIT/OFFSET
+        // FIXED: Get data with pagination - using string interpolation for LIMIT/OFFSET
         // Optimized query with proper indexing hints
         const dataQuery = `
             SELECT 
@@ -350,10 +350,15 @@ const getLicensePlateRecognitions = async (req, res) => {
             LEFT JOIN locations loc ON lpd.location_id = loc.id
             ${whereClause}
             ORDER BY lpd.${sortBy} ${sortOrder}
-            LIMIT ? OFFSET ?`;
+            LIMIT ${parsedLimit} OFFSET ${offset}`;
 
-        // FIXED: Add LIMIT and OFFSET as parameters
-        const dataParams = [...queryParams, parsedLimit, offset];
+        // FIXED: Use only queryParams for WHERE conditions, not LIMIT/OFFSET
+        const dataParams = [...queryParams];
+
+        // Debug logging for data query
+        console.log('Data query:', dataQuery);
+        console.log('Data params:', dataParams);
+        console.log('Pagination:', { parsedLimit, offset, page: parsedPage });
 
         const detections = await new Promise((resolve, reject) => {
             db.query(dataQuery, dataParams, (error, results) => {
@@ -923,10 +928,213 @@ const updateRecognitionVerification = async (req, res) => {
     }
 };
 
+// Tạo mới license plate recognition (cho real-time detection)
+const createLicensePlateRecognition = async (req, res) => {
+    try {
+        let {
+            detection_uuid,
+            plate_number,
+            raw_plate_text,
+            camera_id,
+            location_id,
+            detected_at,
+            confidence_score,
+            ocr_confidence,
+            detection_confidence,
+            bbox,
+            frame_path,
+            detected_vehicle_type,
+            source_type,
+            camera_name,
+            is_whitelist_match,
+            is_blacklist_match
+        } = req.body;
+
+        // Validate required fields
+        if (!plate_number) {
+            return res.status(400).json({
+                success: false,
+                message: 'Thiếu thông tin bắt buộc: plate_number'
+            });
+        }
+        
+        // Set default camera_id if not provided or invalid
+        if (!camera_id || camera_id === 'default' || camera_id === 'null' || camera_id === 'test') {
+            camera_id = 1; // Default camera ID
+            console.log('⚠️ Using default camera_id: 1');
+        }
+        
+        // Ensure camera_id is a valid integer
+        const parsedCameraId = parseInt(camera_id);
+        if (isNaN(parsedCameraId) || parsedCameraId <= 0) {
+            camera_id = 1; // Default camera ID
+            console.log('⚠️ Invalid camera_id, using default: 1');
+        } else {
+            camera_id = parsedCameraId;
+        }
+
+        // Process video_filename and camera_name based on source_type
+        let video_filename = req.body.video_filename || null;
+        
+        if (!camera_name) {
+            if (source_type === 'video_upload') {
+                // For video upload, use video filename
+                video_filename = video_filename || 'Unknown Video';
+                camera_name = `Video Upload: ${video_filename}`;
+                console.log(`📹 Video upload detected: ${camera_name}`);
+            } else if (source_type === 'camera' || !source_type) {
+                // For camera live, use camera location or default
+                const camera_location = req.body.camera_location || 'Unknown Location';
+                camera_name = `Camera Live: ${camera_location}`;
+                console.log(`📷 Camera live detected: ${camera_name}`);
+            } else {
+                // Default fallback
+                camera_name = `Source: ${source_type || 'Unknown'}`;
+                console.log(`🔍 Other source detected: ${camera_name}`);
+            }
+        }
+
+        // Validate plate format
+        const plateValidation = validateVietnamesePlateFormat(plate_number);
+        if (!plateValidation.isValid) {
+            return res.status(400).json({
+                success: false,
+                message: `Biển số không hợp lệ: ${plateValidation.reason}`,
+                plate_number: plate_number
+            });
+        }
+
+        // Generate UUID if not provided
+        const detectionUuid = detection_uuid || require('crypto').randomUUID();
+        
+        // Parse bbox if provided
+        let bbox_x1 = null, bbox_y1 = null, bbox_x2 = null, bbox_y2 = null;
+        if (bbox && Array.isArray(bbox) && bbox.length >= 4) {
+            [bbox_x1, bbox_y1, bbox_x2, bbox_y2] = bbox;
+        }
+        
+        // Enhanced logging for debugging
+        console.log('🔍 Received plate detection data:', {
+            detection_uuid: detectionUuid,
+            plate_number: plate_number,
+            camera_id: camera_id,
+            location_id: location_id,
+            confidence_score: confidence_score,
+            bbox: bbox
+        });
+
+        // Prepare data for insertion
+        const insertData = {
+            detection_uuid: detectionUuid,
+            plate_number: plateValidation.normalized,
+            raw_plate_text: raw_plate_text || plate_number,
+            camera_id: camera_id,
+            location_id: parseInt(location_id) || 1,
+            detected_at: detected_at ? new Date(detected_at * 1000) : new Date(),
+            confidence_score: parseFloat(confidence_score) || 0.0,
+            ocr_confidence: parseFloat(ocr_confidence) || 0.0,
+            detection_confidence: parseFloat(detection_confidence) || 0.0,
+            bbox_x1: bbox_x1,
+            bbox_y1: bbox_y1,
+            bbox_x2: bbox_x2,
+            bbox_y2: bbox_y2,
+            cropped_plate_image_path: frame_path || null,
+            detected_vehicle_type: detected_vehicle_type || 'other',
+            source_type: source_type || 'camera',
+            video_filename: video_filename,
+            camera_name: camera_name || null,
+            is_whitelist_match: is_whitelist_match ? 1 : 0,
+            is_blacklist_match: is_blacklist_match ? 1 : 0,
+            is_verified: 0,
+            alert_triggered: 0
+        };
+
+        // Insert into database
+        const insertQuery = `
+            INSERT INTO license_plate_detections (
+                detection_uuid, plate_number, raw_plate_text, camera_id, location_id,
+                detected_at, confidence_score, ocr_confidence, detection_confidence,
+                bbox_x1, bbox_y1, bbox_x2, bbox_y2, cropped_plate_image_path,
+                detected_vehicle_type, source_type, video_filename, camera_name, is_whitelist_match, is_blacklist_match,
+                is_verified, alert_triggered
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        const insertParams = [
+            insertData.detection_uuid,
+            insertData.plate_number,
+            insertData.raw_plate_text,
+            insertData.camera_id,
+            insertData.location_id,
+            insertData.detected_at,
+            insertData.confidence_score,
+            insertData.ocr_confidence,
+            insertData.detection_confidence,
+            insertData.bbox_x1,
+            insertData.bbox_y1,
+            insertData.bbox_x2,
+            insertData.bbox_y2,
+            insertData.cropped_plate_image_path,
+            insertData.detected_vehicle_type,
+            insertData.source_type,
+            insertData.video_filename,
+            insertData.camera_name,
+            insertData.is_whitelist_match,
+            insertData.is_blacklist_match,
+            insertData.is_verified,
+            insertData.alert_triggered
+        ];
+
+        const result = await new Promise((resolve, reject) => {
+            db.query(insertQuery, insertParams, (error, results) => {
+                if (error) {
+                    // Xử lý duplicate entry - không coi là lỗi nghiêm trọng
+                    if (error.code === 'ER_DUP_ENTRY') {
+                        console.log(`⚠️ Duplicate entry detected for ${insertData.detection_uuid}, skipping...`);
+                        resolve({ duplicate: true });
+                    } else {
+                        console.error('Insert query error:', error);
+                        reject(error);
+                    }
+                } else {
+                    resolve(results);
+                }
+            });
+        });
+
+        if (result.duplicate) {
+            console.log(`⏭️ Skipped duplicate plate detection: ${insertData.plate_number} (BL:${insertData.is_blacklist_match}, WL:${insertData.is_whitelist_match})`);
+        } else {
+            console.log(`✅ Saved plate detection: ${insertData.plate_number} (BL:${insertData.is_blacklist_match}, WL:${insertData.is_whitelist_match})`);
+        }
+
+        res.status(201).json({
+            success: true,
+            message: result.duplicate ? 'Duplicate entry skipped' : 'Lưu kết quả nhận diện thành công',
+            data: {
+                id: result.insertId,
+                detection_uuid: insertData.detection_uuid,
+                plate_number: insertData.plate_number,
+                is_whitelist_match: insertData.is_whitelist_match,
+                is_blacklist_match: insertData.is_blacklist_match
+            }
+        });
+
+    } catch (error) {
+        console.error('Error creating license plate recognition:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lưu kết quả nhận diện',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     getLicensePlateRecognitions,
     getLicensePlateRecognitionById,
     getLicensePlateRecognitionStats,
     deleteLicensePlateRecognition,
-    updateRecognitionVerification
+    updateRecognitionVerification,
+    createLicensePlateRecognition
 };
