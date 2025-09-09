@@ -27,7 +27,7 @@ import WhiteList from './components/WhiteList';
 import BlackList from './components/BlackList';
 import SamplePage from './pages/ViewCamera/SamplePage';
 import CameraConfigurationPage from './pages/ViewCamera/CameraConfigurationPage';
-
+import RouteMonitoring from './pages/Journey/RouteMonitoring';
 
 export const MyContext = React.createContext();
 
@@ -199,7 +199,7 @@ function AppContent() {
                   <Route path="/search/journey" element={<SearchJourney />} />
                   <Route path="/search/plates" element={<SearchPlates />} />
                   <Route path="/search/access-control" element={<SearchAccessControl />} />
-                  <Route path="/route-monitoring" element={<PlateRecognition/>} />
+                  <Route path="/route-monitoring" element={<RouteMonitoring/>} />
                   <Route path="/plate-recognition" element={<SamplePage />} />
                   <Route path="/camera-config/:id" element={<CameraConfigurationPage />} />
                   <Route path="/permissions" element={<Permissions />} />

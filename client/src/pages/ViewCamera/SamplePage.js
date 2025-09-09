@@ -47,7 +47,8 @@ import {
   Search as SearchIcon,
   LocationOn as LocationIcon,
   FilterList,
-  Refresh
+  Refresh,
+  Description
 } from '@mui/icons-material';
 
 const SamplePage = () => {
@@ -75,7 +76,27 @@ const SamplePage = () => {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [gotoPage, setGotoPage] = useState('');
   const [isLoadingDetections, setIsLoadingDetections] = useState(false);
+  const [hasViewPlate, setHasViewPlate] = useState(false);
+  const [hasVerifyPlate, setHasVerifyPlate] = useState(false);
+  const [hasDeletePlate, setHasDeletePlate] = useState(false);
+  const [hasSearchPlate, setHasSearchPlate] = useState(false);
+
+    useEffect(() => {
+            const storedUser = localStorage.getItem('user');
+            if (storedUser ) {
+                try {
+                    const user = JSON.parse(storedUser); // Parse dữ liệu user
+                    const permissions = user.permissions || [];
+                    setHasViewPlate(permissions.some(permission => permission.code === 'recognition_plate.view_detail'));
+                    setHasVerifyPlate(permissions.some(permission => permission.code === 'recognition_plate.verify'));
+                    setHasDeletePlate(permissions.some(permission => permission.code === 'recognition_plate.delete'));
+                    setHasSearchPlate(permissions.some(permission => permission.code === 'recognition_plate.search'));
   
+                } catch (error) {
+                    console.error('Error parsing permissions:', error);
+                }
+            }
+        }, []);
   // States cho tìm kiếm nâng cao (dựa trên WhiteList)
   const [searchFilters, setSearchFilters] = useState({
     plate_number: '',
@@ -1444,7 +1465,8 @@ useEffect(() => {
                 >
                   Reset tất cả
                 </Button>
-                <Button
+                {hasSearchPlate && (
+                  <Button
                   variant="contained"
                   startIcon={<SearchIcon />}
                   onClick={applySearch}
@@ -1467,6 +1489,8 @@ useEffect(() => {
                 >
                   {searchLoading ? 'Đang tìm kiếm...' : 'Tìm kiếm'}
                 </Button>
+                )}
+                
               </Box>
             </Box>
 
@@ -1963,17 +1987,34 @@ useEffect(() => {
                         ) : result.source_type === 'video_upload' ? (
                           <Box sx={{ 
                             display: 'flex', 
-                            alignItems: 'center', 
+                            flexDirection: 'column',
+                            alignItems: 'flex-start', 
                             gap: 0.5,
                             padding: '4px 8px',
                             backgroundColor: '#f3e5f5',
                             borderRadius: '12px',
                             border: '1px solid #e1bee7'
                           }}>
-                            <VideoLibrary sx={{ fontSize: 14, color: '#7b1fa2' }} />
-                            <Typography variant="caption" fontWeight={600} color="#6a1b9a">
-                              Video Upload
-                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <VideoLibrary sx={{ fontSize: 14, color: '#7b1fa2' }} />
+                              <Typography variant="caption" fontWeight={600} color="#6a1b9a">
+                                Video Upload
+                              </Typography>
+                            </Box>
+                            {result.camera_name && result.camera_name.includes(':') && (
+                              <Box sx={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center',
+                                gap: 0.5, 
+                                mt: 0.5
+                              }}>
+                                <Description sx={{ fontSize: 12, color: '#9c27b0' }} />
+                                <Typography variant="caption" color="#8e24aa" sx={{ fontSize: '0.7rem' }}>
+                                  {result.camera_name.split(': ')[1]}
+                                </Typography>
+                              </Box>
+                            )}
                           </Box>
                         ) : (
                           <Box sx={{ 
@@ -2223,7 +2264,8 @@ useEffect(() => {
                         {/* Nút Xem chi tiết */}
                         <Tooltip title="Xem chi tiết">
                           <span>
-                            <IconButton 
+                            {hasViewPlate && (
+<IconButton 
                               size="small" 
                               color="primary"
                               onClick={() => handleViewDetails(result)}
@@ -2252,6 +2294,8 @@ useEffect(() => {
                                 <ViewIcon fontSize="small" />
                               )}
                             </IconButton>
+                            )}
+                            
                           </span>
                         </Tooltip>
                         
@@ -2259,7 +2303,8 @@ useEffect(() => {
                         {!result.is_verified && (
                           <Tooltip title="Xác minh biển số">
                             <span>
-                              <IconButton 
+                              {hasVerifyPlate && (
+<IconButton 
                                 size="small" 
                                 color="success"
                                 onClick={() => handleVerify(result.id)}
@@ -2292,6 +2337,8 @@ useEffect(() => {
                                   <UploadIcon fontSize="small" />
                                 )}
                               </IconButton>
+                              )}
+                              
                             </span>
                           </Tooltip>
                         )}
@@ -2299,7 +2346,8 @@ useEffect(() => {
                         {/* Nút Xóa */}
                         <Tooltip title="Xóa kết quả">
                           <span>
-                            <IconButton 
+                            {hasDeletePlate && (
+<IconButton 
                               size="small" 
                               color="error"
                               onClick={() => handleDelete(result.id)}
@@ -2332,6 +2380,8 @@ useEffect(() => {
                                 <ClearIcon fontSize="small" />
                               )}
                             </IconButton>
+                            )}
+                            
                           </span>
                         </Tooltip>
                       </Box>

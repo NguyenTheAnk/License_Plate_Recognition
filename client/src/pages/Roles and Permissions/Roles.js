@@ -99,39 +99,7 @@ import {
 } from '../../utils/auth';
 
 // Modern Header Component
-const RoleHeader = ({ onAdd }) => (
-  <StyledHeaderCard
-    icon={<FaUserShield size={44} color="#1976d2" />}
-    title="Quản lý Vai trò"
-    subtitle="Quản lý vai trò và quyền hạn trong hệ thống"
-  >
-    <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" justifyContent="flex-end">
-      {/* Breadcrumbs for consistency with User.js */}
-      <Breadcrumbs sx={{ '& .MuiBreadcrumbs-ol': { flexWrap: 'nowrap', overflow: 'hidden' } }}>
-        <Chip
-          label="Trang chủ"
-          icon={<HomeIcon fontSize="small" />}
-          onClick={() => window.location.href = '/'}
-          sx={{ backgroundColor: 'grey.100', height: 24, color: 'text.primary', fontWeight: 'fontWeightRegular', cursor: 'pointer' }}
-        />
-        <Chip
-          label="Quản lý vai trò"
-          icon={<ExpandMoreIcon fontSize="small" />}
-          sx={{ backgroundColor: 'grey.100', height: 24, color: 'text.primary', fontWeight: 'fontWeightRegular' }}
-        />
-      </Breadcrumbs>
-      <Button
-        variant="contained"
-        size="large"
-        startIcon={<AddIcon />}
-        onClick={onAdd}
-        sx={{ fontWeight: 'bold', fontSize: '1rem', bgcolor: 'primary.main', color: 'white', '&:hover': { bgcolor: 'primary.dark' } }}
-      >
-        Thêm vai trò
-      </Button>
-    </Box>
-  </StyledHeaderCard>
-);
+
 
 // Styled Header Card giống User.js
 const StyledHeaderCard = ({ icon, title, subtitle, children }) => (
@@ -182,7 +150,63 @@ const RoleManagement = () => {
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [expandedModule, setExpandedModule] = useState(null);
   const [gotoPage, setGotoPage] = useState('');
+  const [hasViewRole, sethasViewRole] = useState(false);
+  const [hasCreateRole, sethasCreateRole] = useState(false);
+  const [hasDeleteRole, setHasDeleteRole] = useState(false);
+  const [hasUpdateRole, setHasUpdateRole] = useState(false);
 
+    useEffect(() => {
+            const storedUser = localStorage.getItem('user');
+            if (storedUser ) {
+                try {
+                    const user = JSON.parse(storedUser); // Parse dữ liệu user
+                    const permissions = user.permissions || [];
+                    sethasViewRole(permissions.some(permission => permission.code === 'role.view_detail'));
+                    sethasCreateRole(permissions.some(permission => permission.code === 'role.create'));
+                    setHasDeleteRole(permissions.some(permission => permission.code === 'role.delete'));
+                    setHasUpdateRole(permissions.some(permission => permission.code === 'role.update'));
+  
+                } catch (error) {
+                    console.error('Error parsing permissions:', error);
+                }
+            }
+        }, []);
+  const RoleHeader = ({ onAdd }) => (
+  <StyledHeaderCard
+    icon={<FaUserShield size={44} color="#1976d2" />}
+    title="Quản lý Vai trò"
+    subtitle="Quản lý vai trò và quyền hạn trong hệ thống"
+  >
+    <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" justifyContent="flex-end">
+      {/* Breadcrumbs for consistency with User.js */}
+      <Breadcrumbs sx={{ '& .MuiBreadcrumbs-ol': { flexWrap: 'nowrap', overflow: 'hidden' } }}>
+        <Chip
+          label="Trang chủ"
+          icon={<HomeIcon fontSize="small" />}
+          onClick={() => window.location.href = '/'}
+          sx={{ backgroundColor: 'grey.100', height: 24, color: 'text.primary', fontWeight: 'fontWeightRegular', cursor: 'pointer' }}
+        />
+        <Chip
+          label="Quản lý vai trò"
+          icon={<ExpandMoreIcon fontSize="small" />}
+          sx={{ backgroundColor: 'grey.100', height: 24, color: 'text.primary', fontWeight: 'fontWeightRegular' }}
+        />
+      </Breadcrumbs>
+      {hasCreateRole && (
+      <Button
+        variant="contained"
+        size="large"
+        startIcon={<AddIcon />}
+        onClick={onAdd}
+        sx={{ fontWeight: 'bold', fontSize: '1rem', bgcolor: 'primary.main', color: 'white', '&:hover': { bgcolor: 'primary.dark' } }}
+      >
+        Thêm vai trò
+      </Button>
+      )}
+      
+    </Box>
+  </StyledHeaderCard>
+);
   // Form state
   const [formData, setFormData] = useState({
     name: '',
@@ -194,30 +218,6 @@ const RoleManagement = () => {
     permissionIds: []
   });
 
-  // Permission hierarchy definitions
-  const permissionHierarchy = {
-    'roles': {
-      'view': [],
-      'search': [],
-      'create': ['view', 'search'],
-      'edit': ['view', 'search'],
-      'delete': ['view', 'search', 'edit']
-    },
-    'users': {
-      'view': [],
-      'search': [],
-      'create': ['view', 'search'],
-      'edit': ['view', 'search'],
-      'delete': ['view', 'search', 'edit']
-    },
-    'permissions': {
-      'view': [],
-      'search': [],
-      'create': ['view', 'search'],
-      'edit': ['view', 'search'],
-      'delete': ['view', 'search', 'edit']
-    }
-  };
 
   // Get token from localStorage
   const getToken = () => {
@@ -322,23 +322,41 @@ const RoleManagement = () => {
     setGotoPage('');
   }, [currentPage]);
 
-  // Auto-select dependent permissions
+  // Auto-select dependent permissions based on action type
   const getRequiredPermissions = (module, action, selectedPermissions) => {
-    const hierarchy = permissionHierarchy[module];
-    if (!hierarchy || !hierarchy[action]) return selectedPermissions;
-
-    const requiredActions = hierarchy[action];
     const modulePermissions = permissionsByModule[module] || [];
-    
     const newPermissions = [...selectedPermissions];
+    
+    console.log('getRequiredPermissions called:', { module, action, modulePermissions: modulePermissions.map(p => ({ id: p.id, action: p.action })) });
+    
+    // Define action dependencies dynamically
+    const actionDependencies = {
+      'create': ['view'],
+      'update': ['view'],
+      'edit': ['view'],
+      'delete': ['view'],
+      'verify': ['view'],
+      'export': ['view'],
+      'acknowledge': ['view'],
+      'resolve': ['view'],
+      'assign': ['view'],
+      'update_permission': ['view'],
+      'delete_all': ['view']
+    };
+    
+    const requiredActions = actionDependencies[action] || [];
+    console.log('Required actions for', action, ':', requiredActions);
     
     requiredActions.forEach(requiredAction => {
       const requiredPermission = modulePermissions.find(p => p.action === requiredAction);
+      console.log('Looking for required action:', requiredAction, 'Found:', requiredPermission);
       if (requiredPermission && !newPermissions.includes(requiredPermission.id)) {
+        console.log('Adding required permission:', requiredPermission.id, requiredPermission.action);
         newPermissions.push(requiredPermission.id);
       }
     });
 
+    console.log('Final permissions:', newPermissions);
     return newPermissions;
   };
 
@@ -346,6 +364,8 @@ const RoleManagement = () => {
   const handlePermissionChange = (permissionId, checked) => {
     const permission = permissions.find(p => p.id === permissionId);
     if (!permission) return;
+
+    console.log('Permission change:', { permissionId, checked, permission: permission.action, module: permission.module });
 
     let newPermissions = [...formData.permissionIds];
 
@@ -356,27 +376,36 @@ const RoleManagement = () => {
       }
       
       // Auto-select required permissions
+      console.log('Before auto-select:', newPermissions);
       newPermissions = getRequiredPermissions(permission.module, permission.action, newPermissions);
+      console.log('After auto-select:', newPermissions);
     } else {
       // Remove permission and check if any other permissions depend on it
       newPermissions = newPermissions.filter(id => id !== permissionId);
       
-      // Remove dependent permissions that are no longer valid
-      const remainingPermissions = permissions.filter(p => newPermissions.includes(p.id));
-      const validPermissions = [];
-      
-      remainingPermissions.forEach(p => {
-        const required = getRequiredPermissions(p.module, p.action, [p.id]);
-        const hasAllRequired = required.every(reqId => 
-          reqId === p.id || newPermissions.includes(reqId)
-        );
+      // If removing 'view' permission, remove all other permissions in the same module
+      if (permission.action === 'view') {
+        const modulePermissions = permissionsByModule[permission.module] || [];
+        const modulePermissionIds = modulePermissions.map(p => p.id);
+        newPermissions = newPermissions.filter(id => !modulePermissionIds.includes(id));
+      } else {
+        // Remove dependent permissions that are no longer valid
+        const remainingPermissions = permissions.filter(p => newPermissions.includes(p.id));
+        const validPermissions = [];
         
-        if (hasAllRequired) {
-          validPermissions.push(p.id);
-        }
-      });
-      
-      newPermissions = validPermissions;
+        remainingPermissions.forEach(p => {
+          const required = getRequiredPermissions(p.module, p.action, [p.id]);
+          const hasAllRequired = required.every(reqId => 
+            reqId === p.id || newPermissions.includes(reqId)
+          );
+          
+          if (hasAllRequired) {
+            validPermissions.push(p.id);
+          }
+        });
+        
+        newPermissions = validPermissions;
+      }
     }
 
     setFormData(prev => ({ ...prev, permissionIds: newPermissions }));
@@ -732,8 +761,8 @@ const RoleManagement = () => {
 
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={3}>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={4}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
@@ -752,8 +781,8 @@ const RoleManagement = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={3}>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={4}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
@@ -772,8 +801,8 @@ const RoleManagement = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={3}>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card elevation={4}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
@@ -792,25 +821,7 @@ const RoleManagement = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={3}>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box>
-                  <Typography color="textSecondary" gutterBottom variant="h6">
-                    Cấp độ cao nhất
-                  </Typography>
-                  <Typography variant="h4" fontWeight="bold" color="warning.main">
-                    {stats.maxLevel}
-                  </Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: 'warning.main' }}>
-                  <FaChartLine />
-                </Avatar>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
+        
       </Grid>
 
       {/* Search and Filters */}
@@ -944,7 +955,6 @@ const RoleManagement = () => {
                 <TableCell align="center" sx={{ width: 60 }}>STT</TableCell>
                 <TableCell>Vai trò</TableCell>
                 <TableCell>Mô tả</TableCell>
-                <TableCell align="center">Cấp độ</TableCell>
                 <TableCell align="center">Người dùng</TableCell>
                 <TableCell align="center">Quyền hạn</TableCell>
                 <TableCell align="center">Trạng thái</TableCell>
@@ -997,14 +1007,6 @@ const RoleManagement = () => {
                     </TableCell>
                     <TableCell align="center">
                       <Chip
-                        label={`Level ${role.level || 0}`}
-                        size="small"
-                        variant="outlined"
-                        color="primary"
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      <Chip
                         icon={<PeopleIcon />}
                         label={role.users_count || 0}
                         size="small"
@@ -1032,7 +1034,8 @@ const RoleManagement = () => {
                         enterDelay={300}
                         leaveDelay={200}
                       >
-                        <IconButton 
+                        {hasViewRole && (
+<IconButton 
                           onClick={() => openDialog('view', role)} 
                           size="small"
                           sx={{
@@ -1046,6 +1049,8 @@ const RoleManagement = () => {
                         >
                           <VisibilityIcon />
                         </IconButton>
+                        )}
+                        
                       </Tooltip>
                       
                       <Tooltip 
@@ -1055,7 +1060,8 @@ const RoleManagement = () => {
                         enterDelay={300}
                         leaveDelay={200}
                       >
-                        <IconButton 
+                        {hasUpdateRole && (
+<IconButton 
                           onClick={() => openDialog('edit', role)} 
                           size="small"
                           sx={{
@@ -1069,6 +1075,8 @@ const RoleManagement = () => {
                         >
                           <EditIcon />
                         </IconButton>
+                        )}
+                        
                       </Tooltip>
                       
                       {!role.is_default_role && (
@@ -1079,7 +1087,8 @@ const RoleManagement = () => {
                           enterDelay={300}
                           leaveDelay={200}
                         >
-                          <IconButton 
+                          {hasDeleteRole && (
+<IconButton 
                             onClick={() => openDialog('delete', role)} 
                             size="small"
                             sx={{
@@ -1093,6 +1102,8 @@ const RoleManagement = () => {
                           >
                             <DeleteIcon />
                           </IconButton>
+                          )}
+                          
                         </Tooltip>
                       )}
                     </Box>

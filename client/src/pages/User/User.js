@@ -1013,23 +1013,36 @@ const UsersManagement = () => {
   const [userToUpdate, setUserToUpdate] = useState(null);
   // Dialog states
   const [resetPasswordDialog, setResetPasswordDialog] = useState({ open: false, user: null });
-  
-  // Permissions
-  const [permissions, setPermissions] = useState({
-    canCreate: false,
-    canView: false,
-    canUpdate: false,
-    canDelete: false
-  });
+  const [hasViewUser, setHasViewUser] = useState(false);
+  const [hasCreatUser, sethasCreatUser] = useState(false);
+  const [hasUpdateUser, sethasUpdateUser] = useState(false);
+  const [hasDeleteUser, sethasDeleteUser] = useState(false);
+  const [hasBlockUser, sethasBlockUser] = useState(false);
+  const [hasResetPassword, sethasResetPassword] = useState(false);
+  const [hasSearchUser, sethasSearchUser] = useState(false);
+
+  useEffect(() => {
+              const storedUser = localStorage.getItem('user');
+              if (storedUser ) {
+                  try {
+                      const user = JSON.parse(storedUser); // Parse dữ liệu user
+                      const permissions = user.permissions || [];
+                      setHasViewUser(permissions.some(permission => permission.code === 'user.view_detail'));
+                      sethasCreatUser(permissions.some(permission => permission.code === 'user.create'));
+                      sethasUpdateUser(permissions.some(permission => permission.code === 'user.update'));
+                      sethasDeleteUser(permissions.some(permission => permission.code === 'user.delete'));
+                      sethasBlockUser(permissions.some(permission => permission.code === 'user.block'));
+                      sethasResetPassword(permissions.some(permission => permission.code === 'user.reset_password'));
+                      sethasSearchUser(permissions.some(permission => permission.code === 'user.search'));
+    
+                  } catch (error) {
+                      console.error('Error parsing permissions:', error);
+                  }
+              }
+          }, []);
 
   const context = useContext(MyContext);
   const navigate = useNavigate();
-
-  // useEffect for initial load and page changes
-  useEffect(() => {
-    checkPermissions();
-    fetchUsersWithFilters();
-  }, [currentPage, pageSize]);
 
   // useEffect for search and filters with debounce
   useEffect(() => {
@@ -1043,24 +1056,6 @@ const UsersManagement = () => {
 
     return () => clearTimeout(timeoutId);
   }, [searchTerm, statusFilter, roleFilter]);
-
-  const checkPermissions = () => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        const userPermissions = user.permissions || [];
-        setPermissions({
-          canCreate: userPermissions.some(p => p.code === 'user.create'),
-          canView: userPermissions.some(p => p.code === 'user.view'),
-          canUpdate: userPermissions.some(p => p.code === 'user.update'),
-          canDelete: userPermissions.some(p => p.code === 'user.delete')
-        });
-      } catch (error) {
-        console.error('Error parsing user permissions:', error);
-      }
-    }
-  };
 
   const fetchUsers = async () => {
     await fetchUsersWithFilters();
@@ -1363,7 +1358,7 @@ const UsersManagement = () => {
                   />
                 </Breadcrumbs>
                 
-                {permissions.canCreate && (
+                {hasCreatUser && (
                   <Button
                     variant="contained"
                     startIcon={<FaUserPlus />}
@@ -1506,7 +1501,7 @@ const UsersManagement = () => {
               </Grid>
               
               <Grid item xs={12} sm={6} md={3}>
-                {selectedUsers.length > 0 && permissions.canDelete && (
+                {selectedUsers.length > 0 && (
                   <Button
                     fullWidth
                     variant="outlined"
@@ -1732,7 +1727,7 @@ const UsersManagement = () => {
                       </TableCell>
                       <TableCell align="center">
                         <Box display="flex" justifyContent="center" gap={1}>
-                        {permissions.canView && (
+                        {hasViewUser && (
                           <IconButton
                             size="small"
                             onClick={() => {
@@ -1751,7 +1746,7 @@ const UsersManagement = () => {
                             <FaEye size={14} />
                           </IconButton>
                         )}
-                          {permissions.canUpdate && (
+                          {hasUpdateUser && (
                             <IconButton
                               size="small"
                               onClick={() => {
@@ -1771,7 +1766,7 @@ const UsersManagement = () => {
                               <FaPencilAlt size={14} />
                             </IconButton>
                           )}
-                          {permissions.canDelete && (
+                          {hasDeleteUser && (
                             <IconButton
                               size="small"
                               onClick={() => handleDeleteUser(user.id, user.name)}
@@ -1788,7 +1783,7 @@ const UsersManagement = () => {
                               <BiSolidTrashAlt size={14} />
                             </IconButton>
                           )}
-                          {permissions.canUpdate && (
+                          {hasBlockUser && (
                             <IconButton
                               size="small"
                               onClick={() => handleLockUnlockUser(user)}
@@ -1805,7 +1800,7 @@ const UsersManagement = () => {
                               {user.status === 'suspended' ? <FaLockOpen size={14} /> : <FaLock size={14} />}
                             </IconButton>
                           )}
-                          {permissions.canUpdate && (
+                          {hasResetPassword && (
                             <IconButton
                               size="small"
                               onClick={() => handleResetPassword(user)}
@@ -1994,7 +1989,7 @@ const UserManagementDemo = () => {
   const [progress, setProgress] = useState(0);
   const [alertBox, setAlertBox] = useState({ open: false, error: false, msg: '' });
   const [isHideSidebarAndHeader, setIsHideSidebarAndHeader] = useState(false);
-
+  
   // Auto close alert after 5 seconds
   useEffect(() => {
     if (alertBox.open) {

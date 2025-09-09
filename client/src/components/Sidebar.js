@@ -39,29 +39,7 @@ import { fetchDataFromAPI } from '../utils/auth';
 
 const SIDEBAR_WIDTH = 260;
 
-const menuGroups = [
-  {
-    label: '',
-    items: [
-      { text: 'Trang chủ', icon: <HomeIcon />, path: '/' },
-      { text: 'Nhận diện biển số xe', icon: <LicensePlateIcon />, path: '/plate-recognition' },
-      { text: 'Giám sát theo lộ trình', icon: <RouteIcon />, path: '/route-monitoring' },
-      { text: 'Tra cứu', icon: <SearchIcon />, path: '/search' },
-      { text: 'WhiteList', icon: <WhiteListIcon />, path: '/whitelist' },
-      { text: 'BlackList', icon: <BlackListIcon />, path: '/blacklist' },
-      {
-        text: 'Quản lý người dùng và phân quyền',
-        icon: <UserManagementIcon />,
-        path: '/user-management',
-        children: [
-          { text: 'Quản lý người dùng', icon: <UsersIcon />, path: '/user' },
-          { text: 'Quản lý quyền', icon: <PermissionIcon />, path: '/permissions' },
-          { text: 'Quản lý vai trò', icon: <RoleIcon />, path: '/roles' },
-        ]
-      },
-    ]
-  }
-];
+
 
 function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   // Debug: Log user object
@@ -88,7 +66,62 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   const [isVideoListOpen, setIsVideoListOpen] = useState(false);
   const [cameras, setCameras] = useState([]);
   const [videos, setVideos] = useState([]);
-
+  const [hasViewDashboard, setasViewDashboard] = useState(false);
+  const [hasRecognition, sethasRecognition] = useState(false);
+  const [hasMonitorJourney, sethasMonitorJourney] = useState(false);
+  const [hasSearchModule, sethasSearchModule] = useState(false);
+  const [hasViewWhitelist, sethasViewWhitelist] = useState(false);
+  const [hasViewBlacklist, sethasViewBlacklist] = useState(false);
+  const [hasViewUser, sethasViewUser] = useState(false);
+  const [hasViewRole, sethasViewRole] = useState(false);
+  const [hasViewPermission, sethasViewPermission] = useState(false);
+  useEffect(() => {
+              const storedUser = localStorage.getItem('user');
+              if (storedUser ) {
+                  try {
+                      const user = JSON.parse(storedUser); // Parse dữ liệu user
+                      const permissions = user.permissions || [];
+                      setasViewDashboard(permissions.some(permission => permission.code === 'dashboard.view'));
+                      sethasRecognition(permissions.some(permission => permission.code === 'recognition_plate.view'));
+                      sethasMonitorJourney(permissions.some(permission => permission.code === 'monitor_journey.view'));
+                      sethasSearchModule(permissions.some(permission => permission.code === 'search_module.view'));
+                      sethasViewWhitelist(permissions.some(permission => permission.code === 'whitelist.view'));
+                      sethasViewBlacklist(permissions.some(permission => permission.code === 'blacklist.view'));
+                      sethasViewUser(permissions.some(permission => permission.code === 'user.view'));
+                      sethasViewRole(permissions.some(permission => permission.code === 'role.view'));
+                      sethasViewPermission(permissions.some(permission => permission.code === 'permission.view'));
+    
+                  } catch (error) {
+                      console.error('Error parsing permissions:', error);
+                  }
+              }
+          }, []);
+  const menuGroups = [
+  {
+    label: '',
+    items: [
+      // Sử dụng spread operator với conditional
+      ...(hasViewDashboard ? [{ text: 'Trang chủ', icon: <HomeIcon />, path: '/' }] : []),
+      ...(hasRecognition ? [{ text: 'Nhận diện biển số xe', icon: <LicensePlateIcon />, path: '/plate-recognition' }] : []),
+      ...(hasMonitorJourney ? [{ text: 'Giám sát theo lộ trình', icon: <RouteIcon />, path: '/route-monitoring' }] : []),
+      ...(hasSearchModule ? [{ text: 'Tra cứu', icon: <SearchIcon />, path: '/search' }] : []),
+      ...(hasViewWhitelist ? [{ text: 'WhiteList', icon: <WhiteListIcon />, path: '/whitelist' }] : []),
+      ...(hasViewBlacklist ? [{ text: 'BlackList', icon: <BlackListIcon />, path: '/blacklist' }] : []),
+      
+      // Cho menu có children, kiểm tra permission cho cả parent và children
+      ...(hasViewUser || hasViewRole || hasViewPermission ? [{
+        text: 'Quản lý người dùng và phân quyền',
+        icon: <UserManagementIcon />,
+        path: '/user-management',
+        children: [
+          ...(hasViewUser ? [{ text: 'Quản lý người dùng', icon: <UsersIcon />, path: '/user' }] : []),
+          ...(hasViewPermission ? [{ text: 'Quản lý quyền', icon: <PermissionIcon />, path: '/permissions' }] : []),
+          ...(hasViewRole ? [{ text: 'Quản lý vai trò', icon: <RoleIcon />, path: '/roles' }] : []),
+        ]
+      }] : [])
+    ]
+  }
+];
   // Camera state
   const totalCameras = 46;
 

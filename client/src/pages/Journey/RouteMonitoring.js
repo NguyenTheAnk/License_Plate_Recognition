@@ -13,7 +13,6 @@ const RouteMonitoring = () => {
   const allPathsRef = useRef([]);
   const pathLengthsRef = useRef([]);
   const selectedPathIndexRef = useRef(-1);
-
   useEffect(() => {
     // Khởi tạo scene
     const scene = new THREE.Scene();

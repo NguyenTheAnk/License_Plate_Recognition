@@ -663,7 +663,25 @@ const Permissions = () => {
   const [alertBox, setAlertBox] = useState({ open: false, error: false, msg: '' });
   const token = localStorage.getItem('token');
   const [gotoPage, setGotoPage] = useState('');
+  const [hasCreatePermission, sethasCreatePermission] = useState(false);
+  const [hasUpdatePermission, sethasUpdatePermission] = useState(false);
+  const [hasDeletePermission, sethasDeletePermission] = useState(false);
 
+    useEffect(() => {
+            const storedUser = localStorage.getItem('user');
+            if (storedUser ) {
+                try {
+                    const user = JSON.parse(storedUser); // Parse dữ liệu user
+                    const permissions = user.permissions || [];
+                    sethasCreatePermission(permissions.some(permission => permission.code === 'permission.create'));
+                    sethasUpdatePermission(permissions.some(permission => permission.code === 'permission.update'));
+                    sethasDeletePermission(permissions.some(permission => permission.code === 'permission.delete'));
+  
+                } catch (error) {
+                    console.error('Error parsing permissions:', error);
+                }
+            }
+        }, []);
   useEffect(() => { setGotoPage(''); }, [filters.page]);
 
   // Fetch permissions and filter options from API
@@ -753,10 +771,13 @@ const Permissions = () => {
     }
     if (!window.confirm(`Bạn có chắc muốn xóa ${selectedPermissions.size} quyền?`)) return;
     
+    console.log('Selected permissions:', Array.from(selectedPermissions));
+    console.log('Token:', token);
+    
     try {
-      await deleteData('/api/permissions/bulk/delete', token, { 
-        data: { ids: Array.from(selectedPermissions) } 
-      });
+      await deleteData('/api/permissions/bulk/delete', { 
+        ids: Array.from(selectedPermissions) 
+      }, token);
       setAlertBox({
         open: true,
         error: false,
@@ -917,7 +938,8 @@ const Permissions = () => {
                     icon={<ExpandMoreIcon fontSize="small" />}
                   />
                 </Breadcrumbs>
-                <Button
+                {hasCreatePermission && (
+                  <Button
                   variant="contained"
                   startIcon={<AddIcon />}
                   onClick={() => openModal('create')}
@@ -939,6 +961,8 @@ const Permissions = () => {
                 >
                   Thêm quyền
                 </Button>
+                )}
+                
               </Box>
             </Box>
           </Box>
@@ -1246,7 +1270,8 @@ const Permissions = () => {
                         )}
                         <TableCell align="center">
                           <Box display="flex" justifyContent="center" gap={1}>
-                            <IconButton
+                            {hasUpdatePermission && (
+                               <IconButton
                               size="small"
                               title="Chỉnh sửa quyền"
                               onClick={() => openModal('update', permission)}
@@ -1254,6 +1279,8 @@ const Permissions = () => {
                             >
                               <EditIcon fontSize="small" />
                             </IconButton>
+                            )}
+                           {hasDeletePermission && (
                             <IconButton
                               size="small"
                               title="Xóa quyền"
@@ -1262,6 +1289,8 @@ const Permissions = () => {
                             >
                               <DeleteIcon fontSize="small" />
                             </IconButton>
+                           )}
+                            
                           </Box>
                         </TableCell>
                       </TableRow>
@@ -1310,7 +1339,8 @@ const Permissions = () => {
       </Box>
 
       {/* Floating Action Button */}
-      <Fab
+      {hasCreatePermission && (
+        <Fab
         color="primary"
         aria-label="add"
         onClick={() => openModal('create')}
@@ -1328,6 +1358,8 @@ const Permissions = () => {
       >
         <AddIcon />
       </Fab>
+      )}
+      
 
       {/* Create Permission Dialog */}
       <CreatePermissionDialog
