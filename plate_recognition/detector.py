@@ -603,21 +603,17 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
         # Overall confidence: average of both
         overall_confidence = (ocr_confidence + detection_confidence) / 2
         
-        # Check BlackList and WhiteList matches
+        # Check BlackList and WhiteList matches - DISABLED for now
+        # In production, this should query the actual database
         is_whitelist_match = False
         is_blacklist_match = False
         
-        # Simple pattern matching for demo (in production, query database)
-        if plate_text:
-            # Check for common whitelist patterns (demo)
-            whitelist_patterns = ['30A', '29A', '28A']  # Common patterns
-            if any(pattern in plate_text for pattern in whitelist_patterns):
-                is_whitelist_match = True
-            
-            # Check for common blacklist patterns (demo)
-            blacklist_patterns = ['99A', '88A', '77A']  # Common patterns
-            if any(pattern in plate_text for pattern in blacklist_patterns):
-                is_blacklist_match = True
+        # TODO: Implement proper database query for BlackList/WhiteList
+        # For now, we'll set both to False to avoid false positives
+        # This should be replaced with actual database queries:
+        # - Query whitelist table for exact plate number match
+        # - Query blacklist table for exact plate number match
+        # - Set is_whitelist_match and is_blacklist_match accordingly
         
         # Tạo hash ngắn từ unique_string
         unique_hash = hashlib.md5(unique_string.encode()).hexdigest()[:8]
