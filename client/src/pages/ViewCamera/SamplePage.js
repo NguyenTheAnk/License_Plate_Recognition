@@ -31,13 +31,7 @@ import {
   FormControl,
   InputLabel,
   InputAdornment,
-  Divider,
-  Collapse,
-  Snackbar,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions
+  Snackbar
 } from '@mui/material';
 import {
   Visibility as ViewIcon,
@@ -52,8 +46,6 @@ import {
   VideoLibrary,
   Search as SearchIcon,
   LocationOn as LocationIcon,
-  ExpandMore,
-  ExpandLess,
   FilterList,
   Refresh
 } from '@mui/icons-material';
@@ -98,8 +90,6 @@ const SamplePage = () => {
     is_verified: '',
     is_whitelist_match: '',
     is_blacklist_match: '',
-    direction: '',
-    vehicle_type: '',
     source_type: '',
     detection_status: '',
     alert_triggered: '',
@@ -124,8 +114,7 @@ const SamplePage = () => {
   const verificationStatusOptions = [
     { value: '', label: 'Tất cả', color: 'default' },
     { value: 'verified', label: 'Đã xác minh', color: 'success' },
-    { value: 'unverified', label: 'Chưa xác minh', color: 'warning' },
-    { value: 'rejected', label: 'Từ chối', color: 'error' }
+    { value: 'unverified', label: 'Chưa xác minh', color: 'warning' }
   ];
 
   const whitelistMatchOptions = [
@@ -140,21 +129,6 @@ const SamplePage = () => {
     { value: 'no_match', label: 'Không có trong Blacklist', color: 'success' }
   ];
 
-  const directionOptions = [
-    { value: '', label: 'Tất cả hướng', color: 'default' },
-    { value: 'inbound', label: 'Vào', color: 'info' },
-    { value: 'outbound', label: 'Ra', color: 'warning' },
-    { value: 'unknown', label: 'Không xác định', color: 'default' }
-  ];
-
-  const vehicleTypeOptions = [
-    { value: '', label: 'Tất cả loại xe', color: 'default' },
-    { value: 'motorcycle', label: 'Xe máy', color: 'info' },
-    { value: 'car', label: 'Ô tô', color: 'primary' },
-    { value: 'truck', label: 'Xe tải', color: 'warning' },
-    { value: 'bus', label: 'Xe buýt', color: 'secondary' },
-    { value: 'other', label: 'Khác', color: 'default' }
-  ];
 
   const sourceTypeOptions = [
     { value: '', label: 'Tất cả nguồn', color: 'default' },
@@ -164,8 +138,8 @@ const SamplePage = () => {
 
   const alertOptions = [
     { value: '', label: 'Tất cả', color: 'default' },
-    { value: 'triggered', label: 'Có cảnh báo', color: 'error' },
-    { value: 'no_alert', label: 'Không có cảnh báo', color: 'success' }
+    { value: 'true', label: 'Có cảnh báo', color: 'error' },
+    { value: 'false', label: 'Không có cảnh báo', color: 'success' }
   ];
   
   // State cho modal xem chi tiết
@@ -254,13 +228,25 @@ const SamplePage = () => {
   const loadDetectionResults = useCallback(async () => {
     try {
       setIsLoadingDetections(true);
+      
+      // Validate filters before sending request
+      if (!validateConfidenceRange(searchFilters.confidence_min, searchFilters.confidence_max)) {
+        setSearchError('Giá trị độ tin cậy tối thiểu phải nhỏ hơn hoặc bằng giá trị tối đa');
+        return;
+      }
+      
+      if (!validateDateRange(searchFilters.start_date, searchFilters.end_date)) {
+        setSearchError('Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc');
+        return;
+      }
+      
       const token = localStorage.getItem("token");
       const params = new URLSearchParams({
         page: currentPage.toString(),
         limit: itemsPerPage.toString()
       });
       
-      // Thêm các tham số tìm kiếm với xử lý đặc biệt cho ngày
+      // Thêm các tham số tìm kiếm với xử lý đặc biệt cho ngày và confidence
       Object.keys(searchFilters).forEach(key => {
         if (searchFilters[key] && searchFilters[key] !== '') {
           let value = searchFilters[key];
@@ -270,6 +256,10 @@ const SamplePage = () => {
             value = convertDateFormat(searchFilters[key]);
           } else if (key === 'end_date') {
             value = convertEndDateFormat(searchFilters[key]);
+          }
+          // Xử lý đặc biệt cho confidence (chuyển từ % sang decimal)
+          else if (key === 'confidence_min' || key === 'confidence_max') {
+            value = (parseFloat(searchFilters[key]) / 100).toString();
           }
           
           if (value) {
@@ -304,8 +294,12 @@ const SamplePage = () => {
           setTotalItems(response.pagination.total || 0);
         }
       }
+      
+      // Clear any previous errors
+      setSearchError(null);
     } catch (error) {
       console.error("Error loading detection results:", error);
+      setSearchError('Có lỗi xảy ra khi tải dữ liệu. Vui lòng thử lại.');
     } finally {
       setIsLoadingDetections(false);
     }
@@ -343,6 +337,7 @@ const SamplePage = () => {
       [field]: value
     }));
     setCurrentPage(1); // Reset về trang đầu khi thay đổi filter
+    setSearchError(null);
   };
 
   // Hàm reset tất cả filters
@@ -373,6 +368,7 @@ const SamplePage = () => {
   // Hàm apply search
   const applySearch = () => {
     setCurrentPage(1);
+    setSearchError(null);
     loadDetectionResults();
   };
 
@@ -437,6 +433,26 @@ const SamplePage = () => {
     }
     
     return dateString;
+  };
+
+  // Hàm validate confidence range
+  const validateConfidenceRange = (min, max) => {
+    if (min && max) {
+      const minVal = parseFloat(min);
+      const maxVal = parseFloat(max);
+      return minVal <= maxVal;
+    }
+    return true;
+  };
+
+  // Hàm validate date range
+  const validateDateRange = (startDate, endDate) => {
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      return start <= end;
+    }
+    return true;
   };
 
   // Hàm để ẩn/hiện placeholder text
@@ -900,6 +916,7 @@ useEffect(() => {
   const handleItemsPerPageChange = (event) => {
     setItemsPerPage(parseInt(event.target.value));
     setCurrentPage(1);
+    setSearchError(null);
   };
 
   // Pagination helper function (giống WhiteList)
@@ -1398,12 +1415,59 @@ useEffect(() => {
         {/* ===== Giao diện tìm kiếm nâng cao (dựa trên WhiteList) ===== */}
         <Card sx={{ mt: 2, mb: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
           <CardContent>
-            {/* Header với icon và title */}
+            {/* Header với icon, title và buttons */}
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
               <FilterList sx={{ fontSize: 28, color: '#1976d2', mr: 2 }} />
               <Typography variant="h5" sx={{ fontWeight: 700, color: '#1976d2', flexGrow: 1 }}>
                 Tìm kiếm kết quả nhận diện biển số
               </Typography>
+              
+              {/* Action buttons ở góc trên bên phải */}
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<Refresh />}
+                  onClick={resetFilters}
+                  sx={{ 
+                    borderColor: '#f44336',
+                    color: '#f44336',
+                    fontWeight: 600,
+                    borderRadius: 2,
+                    px: 3,
+                    py: 1,
+                    '&:hover': { 
+                      borderColor: '#d32f2f', 
+                      backgroundColor: '#ffebee',
+                      transform: 'translateY(-1px)'
+                    }
+                  }}
+                >
+                  Reset tất cả
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<SearchIcon />}
+                  onClick={applySearch}
+                  disabled={searchLoading}
+                  sx={{ 
+                    backgroundColor: '#1976d2',
+                    fontWeight: 600,
+                    borderRadius: 2,
+                    px: 4,
+                    py: 1,
+                    '&:hover': { 
+                      backgroundColor: '#1565c0',
+                      transform: 'translateY(-1px)'
+                    },
+                    '&:disabled': {
+                      backgroundColor: '#e0e0e0',
+                      color: '#9e9e9e'
+                    }
+                  }}
+                >
+                  {searchLoading ? 'Đang tìm kiếm...' : 'Tìm kiếm'}
+                </Button>
+              </Box>
             </Box>
 
             {/* Tất cả bộ lọc hiển thị luôn */}
@@ -1636,47 +1700,14 @@ useEffect(() => {
                   </FormControl>
                 </Grid>
 
-                {/* Hướng di chuyển */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Hướng di chuyển</InputLabel>
-                    <Select
-                      value={searchFilters.direction}
-                      label="Hướng di chuyển"
-                      onChange={e => handleFilterChange('direction', e.target.value)}
-                      sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
-                    >
-                      {directionOptions.map(opt => (
-                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                {/* Loại phương tiện */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Loại phương tiện</InputLabel>
-                    <Select
-                      value={searchFilters.vehicle_type}
-                      label="Loại phương tiện"
-                      onChange={e => handleFilterChange('vehicle_type', e.target.value)}
-                      sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
-                    >
-                      {vehicleTypeOptions.map(opt => (
-                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
 
                 {/* Nguồn video */}
                 <Grid item xs={12} md={3}>
                   <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Nguồn video</InputLabel>
+                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Nguồn</InputLabel>
                     <Select
                       value={searchFilters.source_type}
-                      label="Nguồn video"
+                      label="Nguồn"
                       onChange={e => handleFilterChange('source_type', e.target.value)}
                       sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
                     >
@@ -1709,52 +1740,6 @@ useEffect(() => {
 
             </Grid>
 
-            {/* Action buttons */}
-            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
-              <Button
-                variant="outlined"
-                startIcon={<Refresh />}
-                onClick={resetFilters}
-                sx={{ 
-                  borderColor: '#f44336',
-                  color: '#f44336',
-                  fontWeight: 600,
-                  borderRadius: 2,
-                  px: 3,
-                  py: 1,
-                  '&:hover': { 
-                    borderColor: '#d32f2f', 
-                    backgroundColor: '#ffebee',
-                    transform: 'translateY(-1px)'
-                  }
-                }}
-              >
-                Reset tất cả
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<SearchIcon />}
-                onClick={applySearch}
-                disabled={searchLoading}
-                sx={{ 
-                  backgroundColor: '#1976d2',
-                  fontWeight: 600,
-                  borderRadius: 2,
-                  px: 4,
-                  py: 1,
-                  '&:hover': { 
-                    backgroundColor: '#1565c0',
-                    transform: 'translateY(-1px)'
-                  },
-                  '&:disabled': {
-                    backgroundColor: '#e0e0e0',
-                    color: '#9e9e9e'
-                  }
-                }}
-              >
-                {searchLoading ? 'Đang tìm kiếm...' : 'Tìm kiếm'}
-              </Button>
-            </Box>
 
             {/* Error display */}
             {searchError && (
@@ -1762,6 +1747,7 @@ useEffect(() => {
                 {searchError}
               </Alert>
             )}
+
           </CardContent>
         </Card>
 
@@ -1953,69 +1939,85 @@ useEffect(() => {
                     <TableCell>
                       <Box>
                         <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                          {result.source_type === 'camera' ? (
+                        {result.source_type === 'camera' ? (
+                          <Box sx={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 0.5,
+                            padding: '4px 8px',
+                            backgroundColor: '#e3f2fd',
+                            borderRadius: '12px',
+                            border: '1px solid #bbdefb'
+                          }}>
                             <Box sx={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              gap: 0.5,
-                              padding: '4px 8px',
-                              backgroundColor: '#e3f2fd',
-                              borderRadius: '12px',
-                              border: '1px solid #bbdefb'
-                            }}>
-                              <Box sx={{ 
-                                width: 8, 
-                                height: 8, 
-                                borderRadius: '50%', 
-                                backgroundColor: '#2196f3',
-                                animation: 'pulse 2s infinite'
-                              }} />
-                              <Typography variant="caption" fontWeight={600} color="#1565c0">
-                                Camera Live
-                              </Typography>
-                            </Box>
-                          ) : (
-                            <Box sx={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              gap: 0.5,
-                              padding: '4px 8px',
-                              backgroundColor: '#f3e5f5',
-                              borderRadius: '12px',
-                              border: '1px solid #e1bee7'
-                            }}>
-                              <VideoLibrary sx={{ fontSize: 14, color: '#7b1fa2' }} />
-                              <Typography variant="caption" fontWeight={600} color="#6a1b9a">
-                                Video Upload
-                              </Typography>
-                            </Box>
-                          )}
-                        </Box>
-                        
-                        {result.source_type === 'video_upload' ? (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                              🎬 {result.video_filename || 'Video Upload'}
+                              width: 8, 
+                              height: 8, 
+                              borderRadius: '50%', 
+                              backgroundColor: '#2196f3',
+                              animation: 'pulse 2s infinite'
+                            }} />
+                            <Typography variant="caption" fontWeight={600} color="#1565c0">
+                              Camera Live
+                            </Typography>
+                          </Box>
+                        ) : result.source_type === 'video_upload' ? (
+                          <Box sx={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 0.5,
+                            padding: '4px 8px',
+                            backgroundColor: '#f3e5f5',
+                            borderRadius: '12px',
+                            border: '1px solid #e1bee7'
+                          }}>
+                            <VideoLibrary sx={{ fontSize: 14, color: '#7b1fa2' }} />
+                            <Typography variant="caption" fontWeight={600} color="#6a1b9a">
+                              Video Upload
                             </Typography>
                           </Box>
                         ) : (
-                          <>
-                            {result.camera_name && (
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                📹 {result.camera_name}
-                              </Typography>
-                            )}
-                            {result.location_name && (
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                📍 {result.location_name}
-                              </Typography>
-                            )}
-                            {result.direction && result.direction !== 'unknown' && (
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                🔄 {result.direction === 'inbound' ? 'Vào' : result.direction === 'outbound' ? 'Ra' : result.direction}
-                              </Typography>
-                            )}
-                          </>
+                          <Box sx={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 0.5,
+                            padding: '4px 8px',
+                            backgroundColor: '#f5f5f5',
+                            borderRadius: '12px',
+                            border: '1px solid #e0e0e0'
+                          }}>
+                            <Typography variant="caption" fontWeight={600} color="#666">
+                              {result.source_type || 'Unknown'}
+                            </Typography>
+                          </Box>
+                        )}
+                        </Box>
+                        
+                        {result.source_type === 'video_upload' && result.video_filename && (
+                          <Box>
+                            <Typography variant="caption" color="text.secondary" display="block" sx={{ 
+                              mb: 0.5, 
+                              fontSize: '0.7rem',
+                              fontWeight: 500,
+                              color: '#666',
+                              wordBreak: 'break-word'
+                            }}>
+                              {result.video_filename}
+                            </Typography>
+                          </Box>
+                        )}
+                        
+                        {result.source_type === 'camera' && result.camera_name && (
+                          <Box>
+                            <Typography variant="caption" color="text.secondary" display="block" sx={{ 
+                              mb: 0.5, 
+                              fontSize: '0.7rem',
+                              fontWeight: 500,
+                              color: '#666',
+                              wordBreak: 'break-word'
+                            }}>
+                              {result.camera_name}
+                            </Typography>
+                          </Box>
                         )}
                       </Box>
                     </TableCell>
@@ -2040,22 +2042,6 @@ useEffect(() => {
                     {/* Độ tin cậy */}
                     <TableCell>
                       <Box>
-                        {/* Confidence Score chính */}
-                        {parseFloat(result.confidence_score) > 0 && (
-                          <Chip 
-                            label={`Tổng: ${(parseFloat(result.confidence_score) * 100).toFixed(1)}%`}
-                            size="small"
-                            sx={{ 
-                              fontWeight: 600,
-                              backgroundColor: parseFloat(result.confidence_score) > 0.8 ? '#4caf50' : 
-                                              parseFloat(result.confidence_score) > 0.6 ? '#ff9800' : '#f44336',
-                              color: 'white',
-                              mb: 0.5,
-                              fontSize: '0.75rem'
-                            }}
-                          />
-                        )}
-                        
                         {/* Chi tiết OCR và Detection confidence */}
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                           {parseFloat(result.ocr_confidence) > 0 && (
@@ -2136,7 +2122,7 @@ useEffect(() => {
                         )}
                         {Boolean(result.is_blacklist_match) && (
                           <Chip 
-                            label="⚠ Blacklist" 
+                            label="▲ Blacklist" 
                             size="small" 
                             sx={{ 
                               height: 24, 
@@ -2152,7 +2138,7 @@ useEffect(() => {
                         )}
                         {Boolean(result.alert_triggered) && (
                           <Chip 
-                            label="🚨 Alert" 
+                            label="▲ Alert" 
                             size="small" 
                             sx={{ 
                               height: 24, 
@@ -2393,7 +2379,10 @@ useEffect(() => {
               <Button 
                 size="small" 
                 variant="outlined" 
-                onClick={() => setCurrentPage(1)} 
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSearchError(null);
+                }} 
                 disabled={currentPage === 1} 
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
@@ -2403,7 +2392,10 @@ useEffect(() => {
               <Button 
                 size="small" 
                 variant="outlined" 
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} 
+                onClick={() => {
+                  setCurrentPage(prev => Math.max(1, prev - 1));
+                  setSearchError(null);
+                }} 
                 disabled={currentPage === 1} 
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
@@ -2417,7 +2409,10 @@ useEffect(() => {
                       key={item} 
                       variant={item === currentPage ? 'contained' : 'outlined'} 
                       size="small" 
-                      onClick={() => setCurrentPage(item)} 
+                      onClick={() => {
+                        setCurrentPage(item);
+                        setSearchError(null);
+                      }} 
                       sx={{ 
                         minWidth: 32, 
                         width: 32, 
@@ -2447,7 +2442,10 @@ useEffect(() => {
               <Button 
                 size="small" 
                 variant="outlined" 
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} 
+                onClick={() => {
+                  setCurrentPage(prev => Math.min(totalPages, prev + 1));
+                  setSearchError(null);
+                }} 
                 disabled={currentPage === totalPages || totalPages === 0} 
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
@@ -2457,7 +2455,10 @@ useEffect(() => {
               <Button 
                 size="small" 
                 variant="outlined" 
-                onClick={() => setCurrentPage(totalPages)} 
+                onClick={() => {
+                  setCurrentPage(totalPages);
+                  setSearchError(null);
+                }} 
                 disabled={currentPage === totalPages || totalPages === 0} 
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
@@ -2476,6 +2477,7 @@ useEffect(() => {
                     if (page && page >= 1 && page <= totalPages) { 
                       setCurrentPage(page); 
                       setGotoPage(''); 
+                      setSearchError(null);
                     } 
                   } 
                 }} 
@@ -2498,6 +2500,7 @@ useEffect(() => {
                   if (page && page >= 1 && page <= totalPages) { 
                     setCurrentPage(page); 
                     setGotoPage(''); 
+                    setSearchError(null);
                   } 
                 }} 
                 disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > totalPages} 
