@@ -8,13 +8,13 @@ import json
 import logging
 import time
 from urllib.parse import urlparse
-import requests
 from tempfile import NamedTemporaryFile
 import os
 from queue import Queue
 import subprocess
 import uuid
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 sock = Sock(app)
-# frame_queue = Queue(maxsize=100)
-
+# Khởi tạo thread pool
+executor = ThreadPoolExecutor(max_workers=4)
 
 # Trong hàm recognize_ws, thêm xử lý cho HLS stream nếu RTSP không khả dụng
 @sock.route('/recognize-ws')
@@ -203,73 +203,124 @@ def processed_video_ws(ws, video_id):
     temp_video_path = os.path.join('temp_videos', video_id)
     if not os.path.exists(temp_video_path):
         logger.error(f"Video không tồn tại: {video_id}")
-        ws.close()
+        try:
+            ws.close()
+        except:
+            pass
         return
 
     cap = None
+    executor = None
     try:
         cap = cv2.VideoCapture(temp_video_path)
         if not cap.isOpened():
             logger.error("Không thể mở video file")
-            ws.close()
+            try:
+                ws.close()
+            except:
+                pass
             return
 
-        # Lấy FPS của video gốc, nhưng giới hạn max 15fps để tránh overload
-        fps = min(cap.get(cv2.CAP_PROP_FPS), 15)
+        # Lấy FPS của video gốc, nhưng giới hạn max 20fps
+        original_fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = min(original_fps, 20)  # Giới hạn tối đa 20 FPS
         if fps <= 0:
-            fps = 15
+            fps = 20
         frame_delay = 1.0 / fps
+        
+        # Khởi tạo thread pool
+        executor = ThreadPoolExecutor(max_workers=2)
+        future = None
+        
+        # Hàm xử lý frame
+        def process_frame(frame):
+            return detect_and_ocr(frame, camera_id="1")
 
         frame_count = 0
         last_cleanup_time = time.time()
 
         while cap.isOpened():
+            # Kiểm tra kết nối WebSocket trước khi xử lý
+            try:
+                # Kiểm tra ping để đảm bảo kết nối vẫn hoạt động
+                ws.send("ping")  # Gửi tin nhắn ping nhỏ
+            except:
+                logger.info("WebSocket connection closed, stopping video processing")
+                break
+
             start_time = time.time()
             ret, frame = cap.read()
             if not ret:
                 break
 
-            # Xử lý frame với detection/OCR
-            processed_frame = detect_and_ocr(frame, camera_id="1")
+            # Nếu có kết quả từ frame trước, gửi nó
+            if future is not None:
+                try:
+                    processed_frame = future.result(timeout=2.0)
+                    _, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    frame_bytes = buffer.tobytes()
+                    
+                    # Kiểm tra kết nối trước khi gửi
+                    try:
+                        ws.send(frame_bytes)
+                    except Exception as e:
+                        logger.info(f"WebSocket closed during send: {str(e)}")
+                        break
+                except Exception as e:
+                    logger.error(f"Lỗi khi xử lý frame: {str(e)}")
+                    # Tiếp tục xử lý frame tiếp theo ngay cả khi có lỗi
 
-            # Mã hóa frame đã xử lý thành JPEG
-            _, buffer = cv2.imencode('.jpg', processed_frame, [
-                                     cv2.IMWRITE_JPEG_QUALITY, 70])
-            frame_bytes = buffer.tobytes()
-
-            # Gửi frame qua WebSocket
-            ws.send(frame_bytes)
+            # Xử lý frame hiện tại trong thread
+            future = executor.submit(process_frame, frame)
 
             # Tính toán thời gian xử lý và điều chỉnh delay
             processing_time = time.time() - start_time
             sleep_time = max(0, frame_delay - processing_time)
             time.sleep(sleep_time)
 
-            # Cleanup định kỳ: Mỗi 100 frame hoặc 30 giây, dọn crop files cũ
+            # Cleanup định kỳ
             frame_count += 1
             current_time = time.time()
             if frame_count % 100 == 0 or (current_time - last_cleanup_time > 30):
-                cleanup_crops()  # Hàm mới để xóa crop cũ
+                cleanup_crops()
                 last_cleanup_time = current_time
+
+        # Xử lý frame cuối cùng nếu kết nối vẫn mở
+        if future is not None:
+            try:
+                processed_frame = future.result(timeout=2.0)
+                _, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_bytes = buffer.tobytes()
+                
+                # Kiểm tra kết nối trước khi gửi frame cuối
+                try:
+                    ws.send(frame_bytes)
+                except:
+                    logger.info("WebSocket closed, skipping final frame")
+            except Exception as e:
+                logger.error(f"Lỗi khi xử lý frame cuối: {str(e)}")
 
     except Exception as e:
         logger.error(f"Lỗi trong xử lý video WebSocket: {str(e)}")
     finally:
         if cap is not None:
             cap.release()
+        if executor is not None:
+            executor.shutdown(wait=False)
         logger.info(f"Kết thúc stream video: {video_id}")
-        # Xóa file tạm ngay lập tức
+        # Xóa file tạm
         try:
             os.remove(temp_video_path)
             logger.info(f"Đã xóa file tạm: {temp_video_path}")
         except Exception as e:
             logger.error(f"Lỗi khi xóa file tạm: {str(e)}")
-        # Đóng WS nếu còn mở
-        ws.close()
+        # Đóng WebSocket nếu chưa đóng
+        try:
+            ws.close()
+        except:
+            pass
 
 # Thêm hàm cleanup_crops để xóa crop cũ (giữ chỉ 50 crop mới nhất)
-
-
 def cleanup_crops():
     crops_dir = 'static/crops'
     if not os.path.exists(crops_dir):
