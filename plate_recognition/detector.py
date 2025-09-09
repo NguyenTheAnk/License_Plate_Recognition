@@ -1,1567 +1,437 @@
 import cv2
 import numpy as np
-from ultralytics import YOLO
-import torch
+from fast_alpr import ALPR
 import logging
 import time
 import os
-import urllib.request
-import ssl
-from typing import Optional, List, Dict, Any
-import re
-# DeepSort removed - using direct plate detection only
-
-# DISABLE AUTO-DOWNLOAD COMPLETELY
-os.environ['ULTRALYTICS_DISABLE_DOWNLOAD'] = '1'  # Disable auto-download
-os.environ['ULTRALYTICS_DISABLE_TELEMETRY'] = '1'  # Disable telemetry
-os.environ['ULTRALYTICS_HOME'] = os.path.dirname(os.path.abspath(__file__))  # Set home to current directory
-# Fix PaddlePaddle imports - try GPU version first, fall back to CPU
 try:
-    import paddle
-    # Try to initialize CUDA if available
-    if paddle.is_compiled_with_cuda():
-        paddle.device.set_device("gpu:0")
-        print("PaddlePaddle GPU initialized successfully")
-    else:
-        print("PaddlePaddle CPU mode (CUDA not available)")
+    import redis
+    REDIS_AVAILABLE = True
 except ImportError:
-    print("PaddlePaddle not found, trying alternative import")
-    paddle = None
+    REDIS_AVAILABLE = False
+from statistics import mean
+from cjm_byte_track.core import BYTETracker 
+from collections import defaultdict
+import requests
+import re
 
-# Import PaddleOCR with proper error handling
-try:
-    from paddleocr import PaddleOCR
-    print("PaddleOCR imported successfully")
-except ImportError as e:
-    print(f"PaddleOCR import failed: {e}")
-    print("Please install: pip install paddleocr paddlepaddle-gpu")
-    # Create dummy class to prevent crashes
-    class PaddleOCR:
-        def __init__(self, *args, **kwargs):
-            raise ImportError("PaddleOCR not available")
-        def ocr(self, *args, **kwargs):
-            return None
-# Fix PyTorch version compatibility for weights_only issue
-import torch
-TORCH_VERSION = torch.__version__
-print(f"PyTorch version: {TORCH_VERSION}")
+# Cấu hình môi trường cho FastALPR GPU
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['ORT_LOGGING_LEVEL'] = '3'  # ERROR level only
+os.environ['OMP_NUM_THREADS'] = '4'
+# Cho phép GPU nhưng fallback về CPU nếu có lỗi
 
-# Setup logging first
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-try:
-    import cv2 as _cv2_internal
-    try:
-        _cv2_internal.setNumThreads(1)
-    except Exception:
-        pass
-except Exception:
-    pass
-os.environ.setdefault('OMP_NUM_THREADS', '1')
-os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
-os.environ.setdefault('MKL_NUM_THREADS', '1')
-os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '1')
-os.environ.setdefault('NUMEXPR_NUM_THREADS', '1')
+# Tắt cảnh báo GPU/CUDA
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*TensorRT.*")
+warnings.filterwarnings("ignore", message=".*CUDA.*")
 
-# Reduce per-frame log noise unless explicitly enabled
-if os.environ.get('LPR_VERBOSE', '0') != '1':
-    try:
-        logger.setLevel(logging.WARNING)
-    except Exception:
-        pass
-
-def setup_torch_environment():
-    """Setup PyTorch environment for YOLO loading"""
-    try:
-        import os
-        import torch
-        
-        # CRITICAL FIX: Disable weights_only globally for all torch.load calls
-        os.environ['TORCH_WEIGHTS_ONLY'] = 'false'
-        os.environ['ULTRALYTICS_DISABLE_DOWNLOAD'] = '1'
-        
-        # Also set PyTorch's internal setting if available
-        try:
-            torch._C._set_print_file(None)  # Suppress some warnings
-        except:
-            pass
-        
-        logger.info("✅ PyTorch environment setup completed")
-        return True
-        
-    except Exception as e:
-        logger.warning(f"PyTorch environment setup failed: {e}")
-        return False
-
-def check_pytorch_compatibility():
-    """Check PyTorch version and compatibility issues"""
-    try:
-        logger.info("🔍 CHECKING PYTORCH COMPATIBILITY...")
-        
-        # Check PyTorch version
-        major, minor, patch = map(int, TORCH_VERSION.split('+')[0].split('.'))
-        logger.info(f"PyTorch version: {major}.{minor}.{patch}")
-        
-        # Basic compatibility check
-        logger.info(f"PyTorch {major}.{minor}.{patch} detected")
-        
-        # Check CUDA availability
-        import torch
-        cuda_available = torch.cuda.is_available()
-        logger.info(f"CUDA available: {cuda_available}")
-        
-        if cuda_available:
-            cuda_version = torch.version.cuda
-            logger.info(f"CUDA version: {cuda_version}")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error checking PyTorch compatibility: {e}")
-        return False
-
-
-def safe_torch_load(path, **kwargs):
-    """Safe torch.load with comprehensive PyTorch version compatibility"""
-    try:
-        logger.info(f"Loading model with torch.load: {path}")
-        
-        # Check PyTorch version
-        try:
-            version_parts = torch.__version__.split('+')[0].split('.')
-            major = int(version_parts[0])
-            minor = int(version_parts[1]) if len(version_parts) > 1 else 0
-        except:
-            major, minor = 2, 0  # Default fallback
-        
-        logger.info(f"PyTorch version detected: {major}.{minor}")
-        
-        # For PyTorch 2.6+ or any version with weights_only parameter
-        # Always try weights_only=False first for YOLO models
-        try:
-            # Add safe globals for YOLO models - FIXED version
-            import torch.serialization
-            safe_global_names = [
-                'ultralytics.nn.tasks.DetectionModel',
-                'ultralytics.nn.modules.Conv',
-                'ultralytics.nn.modules.C2f',
-                'ultralytics.nn.modules.SPPF',
-                'ultralytics.nn.modules.Detect',
-                # Add explicit Conv submodules used by newer checkpoints
-                'ultralytics.nn.modules.conv.Conv',
-                'ultralytics.nn.modules.conv.Concat',
-                # Add missing DFL block used by newer Ultralytics models
-                'ultralytics.nn.modules.block.DFL'
-            ]
-            
-            # Import and add actual module objects
-            safe_modules = []
-            for module_name in safe_global_names:
-                try:
-                    parts = module_name.split('.')
-                    module = __import__(parts[0])
-                    for part in parts[1:]:
-                        module = getattr(module, part)
-                    safe_modules.append(module)
-                except (ImportError, AttributeError):
-                    continue
-            
-            if safe_modules:
-                torch.serialization.add_safe_globals(safe_modules)
-                logger.info(f"Added {len(safe_modules)} safe globals")
-                
-        except Exception as e:
-            logger.info(f"Could not add safe globals: {e}")
-        
-        # Try different loading strategies
-        loading_strategies = [
-            # Strategy 1: weights_only=False (most permissive)
-            {'weights_only': False, 'map_location': 'cpu'},
-            # Strategy 2: No weights_only parameter (older PyTorch)
-            {'map_location': 'cpu'},
-            # Strategy 3: weights_only=True with safe globals
-            {'weights_only': True, 'map_location': 'cpu'},
-        ]
-        
-        for i, strategy in enumerate(loading_strategies):
-            try:
-                logger.info(f"Trying loading strategy {i+1}: {strategy}")
-                result = torch.load(path, **strategy, **kwargs)
-                logger.info(f"✅ Successfully loaded with strategy {i+1}")
-                return result
-            except Exception as e:
-                logger.warning(f"Strategy {i+1} failed: {e}")
-                continue
-        
-        # If all strategies fail, raise the last error
-        raise Exception("All torch.load strategies failed")
-                
-    except Exception as e:
-        logger.error(f"Critical error in safe_torch_load: {e}")
-        raise e
-
-def safe_yolo_load(model_path):
-    """COMPLETELY FIXED Safe YOLO model loading with context manager approach"""
-    try:
-        import os
-        from ultralytics import YOLO
-        import torch.serialization
-        
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        logger.info(f"🔄 COMPLETELY FIXED Loading: {model_path}")
-        logger.info(f"Current dir: {current_dir}")
-        
-        # FIXED: Direct path resolution
-        if not os.path.isabs(model_path):
-            # Check in current directory
-            full_path = os.path.join(current_dir, model_path)
-            logger.info(f"Checking: {full_path}")
-            
-            if os.path.exists(full_path):
-                model_path = full_path
-                logger.info(f"✅ Found local file: {model_path}")
-            else:
-                # If it's yolov9s.pt, allow download
-                if os.path.basename(model_path) == 'yolov9s.pt':
-                    logger.info("📥 yolov9s.pt not found locally, will try download")
-                    model_path = 'yolov9s.pt'  # Let YOLO download
-                else:
-                    logger.error(f"❌ File not found: {full_path}")
-                    return None
-        
-        # FIXED: Enable download for yolov9s.pt
-        original_setting = os.environ.get('ULTRALYTICS_DISABLE_DOWNLOAD', '1')
-        if 'yolov9s.pt' in model_path:
-            os.environ['ULTRALYTICS_DISABLE_DOWNLOAD'] = '0'
-            logger.info("Enabled download for yolov9s.pt")
-        
-        try:
-            # CRITICAL FIX: Use safe_globals context manager to allow ALL globals
-            logger.info(f"Loading with YOLO using safe_globals context manager: {model_path}")
-            
-            # Create a comprehensive list of all possible modules that YOLO might need
-            safe_globals_list = []
-            
-            # Add all torch.nn modules
-            import torch.nn as nn
-            torch_nn_modules = [
-                nn.Module, nn.Sequential, nn.ModuleList, nn.ModuleDict,
-                nn.Conv2d, nn.BatchNorm2d, nn.ReLU, nn.SiLU, nn.GELU,
-                nn.MaxPool2d, nn.AdaptiveAvgPool2d, nn.Linear,
-                nn.Dropout, nn.Identity, nn.Upsample
-            ]
-            safe_globals_list.extend(torch_nn_modules)
-            
-            # Add torch container modules
-            import torch.nn.modules.container as container
-            safe_globals_list.extend([
-                container.Sequential, container.ModuleList, container.ModuleDict
-            ])
-            
-            # Add ultralytics modules dynamically
-            ultralytics_module_paths = [
-                'ultralytics.nn.tasks.DetectionModel',
-                'ultralytics.nn.modules.Conv',
-                'ultralytics.nn.modules.C2f',
-                'ultralytics.nn.modules.SPPF',
-                'ultralytics.nn.modules.Detect',
-                'ultralytics.nn.modules.block.Bottleneck',
-                'ultralytics.nn.modules.block.C2f',
-                'ultralytics.nn.modules.block.C3',
-                'ultralytics.nn.modules.head.Detect',
-                'ultralytics.nn.modules.conv.Conv',
-                # Ensure DFL is allowlisted for weights_only=True
-                'ultralytics.nn.modules.block.DFL',
-                # Add YOLOv9 specific modules
-                'ultralytics.nn.modules.block.RepNCSPELAN4',
-                'ultralytics.nn.modules.block.RepCSP',
-                'ultralytics.nn.modules.block.RepConv',
-                'ultralytics.nn.modules.block.RepBottleneck',
-                'ultralytics.nn.modules.block.RepC3',
-                'ultralytics.nn.modules.block.ELAN1',
-                'ultralytics.nn.modules.block.SPPELAN',
-            ]
-            
-            for module_path in ultralytics_module_paths:
-                try:
-                    parts = module_path.split('.')
-                    module = __import__(parts[0])
-                    for part in parts[1:]:
-                        module = getattr(module, part)
-                    safe_globals_list.append(module)
-                except (ImportError, AttributeError):
-                    continue
-            
-            # ULTIMATE FIX: Use context manager with comprehensive globals (+Concat + YOLOv9 modules)
-            try:
-                from ultralytics.nn.modules import conv as _ultra_conv
-                if hasattr(_ultra_conv, 'Concat'):
-                    safe_globals_list.append(_ultra_conv.Concat)
-            except Exception:
-                pass
-            
-            # Add YOLOv9 modules directly (only if available in current ultralytics version)
-            try:
-                from ultralytics.nn.modules import block as _ultra_block
-                yolo_v9_modules = ['RepNCSPELAN4', 'RepCSP', 'RepConv', 'RepBottleneck', 'RepC3', 'ELAN1', 'SPPELAN']
-                for module_name in yolo_v9_modules:
-                    if hasattr(_ultra_block, module_name):
-                        safe_globals_list.append(getattr(_ultra_block, module_name))
-                        logger.info(f"Added {module_name} to safe globals")
-                    else:
-                        logger.debug(f"Module {module_name} not available in current ultralytics version")
-            except Exception as e:
-                logger.warning(f"Could not add YOLOv9 modules directly: {e}")
-            
-            # Check PyTorch version compatibility and try different approaches
-            model = None
-            
-            # Try direct loading first (most reliable for YOLOv9)
-            try:
-                logger.info("Trying direct YOLO loading (recommended for YOLOv9)")
-                model = YOLO(model_path)
-                logger.info("✅ YOLO loading successful with direct loading")
-            except Exception as e:
-                logger.warning(f"Direct YOLO loading failed: {e}")
-                model = None
-            
-            # Try with trust_remote_code=True if direct loading failed
-            if model is None:
-                try:
-                    logger.info("Trying YOLO loading with trust_remote_code=True")
-                    model = YOLO(model_path, trust_remote_code=True)
-                    logger.info("✅ YOLO loading successful with trust_remote_code=True")
-                except Exception as e:
-                    logger.warning(f"YOLO loading with trust_remote_code=True failed: {e}")
-                    model = None
-            
-            # Try with weights_only=False if direct loading failed
-            if model is None:
-                try:
-                    logger.info("Trying YOLO loading with weights_only=False")
-                    # Temporarily patch torch.load to use weights_only=False
-                    original_torch_load = torch.load
-                    def patched_torch_load(*args, **kwargs):
-                        kwargs['weights_only'] = False
-                        kwargs['map_location'] = 'cpu'
-                        return original_torch_load(*args, **kwargs)
-                    torch.load = patched_torch_load
-                    
-                    try:
-                        model = YOLO(model_path)
-                        logger.info("✅ YOLO loading successful with weights_only=False")
-                    finally:
-                        torch.load = original_torch_load
-                except Exception as e:
-                    logger.warning(f"YOLO loading with weights_only=False failed: {e}")
-                    model = None
-            
-            # Try safe_globals context manager if direct loading failed
-            if model is None and hasattr(torch.serialization, 'safe_globals'):
-                try:
-                    logger.info("Trying safe_globals context manager with comprehensive module list")
-                    with torch.serialization.safe_globals(safe_globals_list):
-                        model = YOLO(model_path)
-                        logger.info("✅ YOLO loading successful with safe_globals context manager")
-                except Exception as e:
-                    logger.warning(f"safe_globals context manager failed: {e}")
-                    model = None
-            
-            # Try add_safe_globals if context manager failed
-            if model is None and hasattr(torch.serialization, 'add_safe_globals'):
-                try:
-                    logger.info("Trying add_safe_globals with comprehensive module list")
-                    torch.serialization.add_safe_globals(safe_globals_list)
-                    model = YOLO(model_path)
-                    logger.info("✅ YOLO loading successful with add_safe_globals")
-                except Exception as e:
-                    logger.warning(f"add_safe_globals failed: {e}")
-                    model = None
-            
-            if model is None:
-                logger.error("Model loading failed")
-                return None
-            
-            # Quick test with error handling
-            try:
-                test_img = np.ones((320, 320, 3), dtype=np.uint8) * 128
-                _ = model(test_img, verbose=False, conf=0.9, imgsz=320)
-                logger.info("✅ Model test successful")
-            except Exception as test_error:
-                logger.warning(f"Model test failed: {test_error}")
-                # Don't fail completely if test fails, the model might still work
-            
-            logger.info(f"✅ SUCCESS: {os.path.basename(model_path)}")
-            return model
-            
-        except Exception as e:
-            logger.warning(f"Safe globals context manager failed: {e}")
-            
-            # FALLBACK: Try with weights_only=False by patching torch.load
-            try:
-                logger.info("Trying fallback with torch.load patching...")
-                
-                # Temporarily patch torch.load to use weights_only=False
-                original_torch_load = torch.load
-                
-                def patched_torch_load(*args, **kwargs):
-                    kwargs['weights_only'] = False
-                    kwargs['map_location'] = 'cpu'
-                    return original_torch_load(*args, **kwargs)
-                
-                torch.load = patched_torch_load
-                
-                try:
-                    model = YOLO(model_path)
-                    logger.info("✅ YOLO loading successful with patched torch.load")
-                finally:
-                    # Restore original torch.load
-                    torch.load = original_torch_load
-                
-                return model
-                
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
-                try:
-                    # FINAL FALLBACK: explicitly set weights_only=False with allowlisted globals
-                    import torch.serialization
-                    allow = []
-                    try:
-                        from ultralytics.nn.modules import conv as _ultra_conv
-                        if hasattr(_ultra_conv, 'Concat'):
-                            allow.append(_ultra_conv.Concat)
-                    except Exception:
-                        pass
-                    # Also allow DFL block and YOLOv9 modules explicitly (only if available)
-                    try:
-                        from ultralytics.nn.modules import block as _ultra_block
-                        yolo_modules = ['DFL', 'RepNCSPELAN4', 'RepCSP', 'RepConv', 'RepBottleneck', 'RepC3', 'ELAN1', 'SPPELAN']
-                        for module_name in yolo_modules:
-                            if hasattr(_ultra_block, module_name):
-                                allow.append(getattr(_ultra_block, module_name))
-                                logger.debug(f"Added {module_name} to fallback allow list")
-                    except Exception:
-                        pass
-                    if allow:
-                        try:
-                            torch.serialization.add_safe_globals(allow)
-                            logger.info(f"Added {len(allow)} safe globals for fallback")
-                        except Exception as e:
-                            logger.warning(f"Could not add safe globals in fallback: {e}")
-                    def patched_torch_load_final(*args, **kwargs):
-                        kwargs['weights_only'] = False
-                        kwargs['map_location'] = 'cpu'
-                        return original_torch_load(*args, **kwargs)
-                    torch.load = patched_torch_load_final
-                    try:
-                        model = YOLO(model_path)
-                        logger.info("✅ YOLO loading successful with final explicit weights_only=False")
-                        return model
-                    finally:
-                        torch.load = original_torch_load
-                except Exception as e3:
-                    logger.error(f"Final fallback failed: {e3}")
-                    return None
-        
-        finally:
-            # Restore setting
-            os.environ['ULTRALYTICS_DISABLE_DOWNLOAD'] = original_setting
-            
-    except Exception as e:
-        logger.error(f"Critical error: {e}")
-        return None
-def check_model_availability():
-    """Check which model files are available and their status"""
-    try:
-        logger.info("🔍 CHECKING MODEL AVAILABILITY...")
-        
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        available_models = []
-        missing_models = []
-        
-        # Check only yolov9s.pt
-        model_files = [
-            'yolov9s.pt'
-        ]
-        
-        for model_file in model_files:
-            model_path = os.path.join(current_dir, model_file)
-            if os.path.exists(model_path):
-                file_size = os.path.getsize(model_path) / (1024 * 1024)  # MB
-                available_models.append({
-                    'name': model_file,
-                    'path': model_path,
-                    'size_mb': round(file_size, 2),
-                    'exists': True
-                })
-                logger.info(f"✅ {model_file}: {file_size:.2f} MB")
-            else:
-                missing_models.append({
-                    'name': model_file,
-                    'path': model_path,
-                    'exists': False
-                })
-                logger.warning(f"❌ {model_file}: NOT FOUND")
-        
-        # Check ultralytics cache
-        try:
-            cache_path = os.path.expanduser('~/.ultralytics')
-            if os.path.exists(cache_path):
-                cache_models = [f for f in os.listdir(cache_path) if f.endswith('.pt')]
-                if cache_models:
-                    logger.info(f"📁 Ultralytics cache contains: {cache_models}")
-                    for cache_model in cache_models:
-                        cache_model_path = os.path.join(cache_path, cache_model)
-                        file_size = os.path.getsize(cache_model_path) / (1024 * 1024)
-                        available_models.append({
-                            'name': f"cache_{cache_model}",
-                            'path': cache_model_path,
-                            'size_mb': round(file_size, 2),
-                            'exists': True
-                        })
-        except Exception as e:
-            logger.warning(f"Could not check ultralytics cache: {e}")
-        
-        logger.info(f"📊 MODEL AVAILABILITY SUMMARY:")
-        logger.info(f"   Available: {len(available_models)} models")
-        logger.info(f"   Missing: {len(missing_models)} models")
-        
-        return {
-            'available': available_models,
-            'missing': missing_models,
-            'total_available': len(available_models)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error checking model availability: {e}")
-        return {'available': [], 'missing': [], 'total_available': 0}
-
-def verify_model_files():
-    """Verify all model files exist and are valid"""
-    try:
-        logger.info("🔍 VERIFYING MODEL FILES...")
-        
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        model_files = [
-            'yolov9s.pt'
-        ]
-        
-        valid_models = []
-        for model_file in model_files:
-            model_path = os.path.join(current_dir, model_file)
-            if os.path.exists(model_path):
-                file_size = os.path.getsize(model_path)
-                size_mb = file_size / (1024 * 1024)
-                
-                if file_size > 1024 * 1024:  # More than 1MB
-                    valid_models.append({
-                        'name': model_file,
-                        'path': model_path,
-                        'size_mb': round(size_mb, 2),
-                        'status': 'VALID'
-                    })
-                    logger.info(f"✅ {model_file}: {size_mb:.2f} MB - VALID")
-                else:
-                    logger.warning(f"⚠️ {model_file}: {size_mb:.2f} MB - TOO SMALL (likely corrupted)")
-            else:
-                logger.error(f"❌ {model_file}: NOT FOUND")
-        
-        logger.info(f" MODEL VERIFICATION SUMMARY:")
-        logger.info(f"   Valid models: {len(valid_models)}")
-        logger.info(f"   Total checked: {len(model_files)}")
-        
-        return valid_models
-        
-    except Exception as e:
-        logger.error(f"Error verifying model files: {e}")
-        return []
-
+# Import onnxruntime và force CPU-only
+import onnxruntime as ort
+ort.set_default_logger_severity(3)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def refine_plate_crop(plate_img: np.ndarray) -> np.ndarray:
-    """Enhance a plate crop to a high-quality, OCR-friendly image.
-    Steps: denoise, contrast (CLAHE), unsharp mask, aspect-consistent resize, padding.
-    Returns BGR uint8 image.
-    """
-    try:
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-        img = plate_img.copy()
-        # Ensure BGR uint8
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        elif len(img.shape) == 3 and img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-        if img.dtype != np.uint8:
-            img = np.clip(img, 0, 255).astype(np.uint8)
-
-        h, w = img.shape[:2]
-        # 1) Exposure normalization without bệt trắng (clip by percentile)
-        try:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            lo, hi = np.percentile(gray, (2.0, 98.0))
-            if hi > lo + 1:
-                scale = 255.0 / (hi - lo)
-                img = np.clip((img.astype(np.float32) - lo) * scale, 0, 255).astype(np.uint8)
-        except Exception:
-            pass
-
-        # 2) Gentle denoise while preserving edges
-        try:
-            img = cv2.fastNlMeansDenoisingColored(img, None, 3, 3, 7, 21)
-        except Exception:
-            pass
-
-        # 3) Local contrast (CLAHE) on L channel with conservative clip
-        try:
-            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            l = clahe.apply(l)
-            lab = cv2.merge([l, a, b])
-            img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-        except Exception:
-            pass
-
-        # 4) Mild sharpening (avoid thổi sáng)
-        try:
-            blur = cv2.GaussianBlur(img, (0, 0), 0.8)
-            img = cv2.addWeighted(img, 1.3, blur, -0.3, 0)
-        except Exception:
-            pass
-
-        # Normalize final target size while keeping aspect; aim height ~180
-        target_h = 180
-        scale = max(1.0, target_h / max(1, float(h)))
-        new_w, new_h = int(round(w * scale)), int(round(h * scale))
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-
-        # Add white padding to avoid text touching borders
-        pad = max(12, int(min(new_w, new_h) * 0.06))
-        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-
-        return img
-    except Exception as e:
-        logger.debug(f"refine_plate_crop error: {e}")
-        return plate_img
-
-def enhance_plate_crop_highres(plate_img: np.ndarray) -> np.ndarray:
-    """Aggressively enhance and upscale plate crop to high-res, OCR-friendly image.
-    Pipeline: denoise -> CLAHE -> unsharp -> mild deblur -> upscale to min width 600 -> white padding.
-    Returns BGR uint8 image.
-    """
-    try:
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-        img = plate_img.copy()
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        elif len(img.shape) == 3 and img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-        if img.dtype != np.uint8:
-            img = np.clip(img, 0, 255).astype(np.uint8)
-
-        # Denoise while preserving edges
-        try:
-            img = cv2.fastNlMeansDenoisingColored(img, None, 5, 5, 7, 21)
-        except Exception:
-            pass
-
-        # CLAHE on L channel
-        try:
-            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            l = clahe.apply(l)
-            lab = cv2.merge([l, a, b])
-            img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-        except Exception:
-            pass
-
-        # Unsharp mask
-        try:
-            blur = cv2.GaussianBlur(img, (0, 0), 1.0)
-            img = cv2.addWeighted(img, 1.6, blur, -0.6, 0)
-        except Exception:
-            pass
-
-        # Mild deblur via bilateral
-        try:
-            img = cv2.bilateralFilter(img, 5, 75, 75)
-        except Exception:
-            pass
-
-        # Upscale to minimum width (stronger)
-        h, w = img.shape[:2]
-        target_w = max(800, int(w * 3))
-        scale = target_w / max(1, w)
-        target_h = int(h * scale)
-        if target_w > w:
-            img = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
-
-        # White padding
-        pad = max(12, int(min(img.shape[0], img.shape[1]) * 0.04))
-        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-
-        return img
-    except Exception as e:
-        logger.debug(f"enhance_plate_crop_highres error: {e}")
-        return plate_img
-
-def _order_points_clockwise(pts):
-    try:
-        rect = np.zeros((4, 2), dtype="float32")
-        s = pts.sum(axis=1)
-        rect[0] = pts[np.argmin(s)]  # top-left
-        rect[2] = pts[np.argmax(s)]  # bottom-right
-        diff = np.diff(pts, axis=1)
-        rect[1] = pts[np.argmin(diff)]  # top-right
-        rect[3] = pts[np.argmax(diff)]  # bottom-left
-        return rect
-    except Exception:
-        return pts.astype("float32")
-
-def rectify_plate_geometry(img: np.ndarray) -> np.ndarray:
-    """Deskew and rectify plate by detecting a 4-point contour and warping."""
-    try:
-        if img is None or img.size == 0:
-            return img
-        src = img.copy()
-        gray = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY) if len(src.shape) == 3 else src
-        gray = cv2.bilateralFilter(gray, 5, 75, 75)
-        edges = cv2.Canny(gray, 50, 150)
-        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        h, w = gray.shape[:2]
-        best = None
-        best_area = 0
-        for cnt in contours:
-            peri = cv2.arcLength(cnt, True)
-            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
-            if len(approx) == 4:
-                area = cv2.contourArea(approx)
-                if area > best_area and area > 0.1 * h * w:
-                    best = approx.reshape(-1, 2)
-                    best_area = area
-        if best is None:
-            return src
-        rect = _order_points_clockwise(best)
-        (tl, tr, br, bl) = rect
-        widthA = np.linalg.norm(br - bl)
-        widthB = np.linalg.norm(tr - tl)
-        maxWidth = int(max(widthA, widthB))
-        heightA = np.linalg.norm(tr - br)
-        heightB = np.linalg.norm(tl - bl)
-        maxHeight = int(max(heightA, heightB))
-        if maxWidth < 20 or maxHeight < 10:
-            return src
-        dst = np.array([
-            [0, 0],
-            [maxWidth - 1, 0],
-            [maxWidth - 1, maxHeight - 1],
-            [0, maxHeight - 1]
-        ], dtype="float32")
-        M = cv2.getPerspectiveTransform(rect.astype("float32"), dst)
-        warped = cv2.warpPerspective(src, M, (maxWidth, maxHeight))
-        return warped
-    except Exception:
-        return img
-
-def select_best_plate_variant(plate_img: np.ndarray) -> np.ndarray:
-    """Generate multiple enhanced variants and pick the highest-quality crop.
-    Uses sharpness high, low saturated-white ratio, and entropy to rank.
-    """
-    try:
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-        variants: List[np.ndarray] = []
-        # Base
-        base = enhance_plate_crop_highres(plate_img)
-        variants.append(base)
-        # Extra variants
-        try:
-            tight = tighten_text_bbox(base)
-            variants.append(enhance_plate_crop_highres(tight))
-        except Exception:
-            pass
-        # Rectified variant
-        try:
-            rect = rectify_plate_geometry(plate_img)
-            variants.append(enhance_plate_crop_highres(rect))
-        except Exception:
-            pass
-        try:
-            for v in generate_ocr_variants(plate_img)[:3]:
-                variants.append(enhance_plate_crop_highres(v))
-        except Exception:
-            pass
-        # Score
-        best_img = base
-        best_score = -1e9
-        for v in variants:
-            try:
-                q = evaluate_crop_quality(v)
-                # Score: prioritize sharpness, penalize saturated white, reward entropy
-                score = q['sharpness'] - 150.0 * q['sat_white'] + 3.0 * q['entropy']
-                if score > best_score:
-                    best_score = score
-                    best_img = v
-            except Exception:
-                continue
-        return best_img
-    except Exception:
-        return plate_img
-
-def tighten_text_bbox(crop_img: np.ndarray) -> np.ndarray:
-    """Thu nhỏ crop bám sát vùng ký tự bằng MSER hai cực (đen trên trắng và ngược lại)."""
-    try:
-        if crop_img is None or crop_img.size == 0:
-            return crop_img
-        img = crop_img.copy()
-        if len(img.shape) == 3:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = img
-        h, w = gray.shape[:2]
-        mser = cv2.MSER_create(_delta=5, _min_area=30, _max_area=max(200, h*w//2))
-        regions = []
-        try:
-            regs1, _ = mser.detectRegions(gray)
-            regions.extend(regs1)
-        except Exception:
-            pass
-        try:
-            regs2, _ = mser.detectRegions(255 - gray)
-            regions.extend(regs2)
-        except Exception:
-            pass
-        if not regions:
-            return crop_img
-        # Collect character-like boxes
-        xs, ys, xe, ye = [], [], [], []
-        for p in regions[:500]:
-            x, y, ww, hh = cv2.boundingRect(p)
-            if ww < 5 or hh < 8:
-                continue
-            aspect = ww / float(hh)
-            if 0.2 <= aspect <= 2.5 and 0.01*h <= hh <= 0.8*h:
-                xs.append(x); ys.append(y); xe.append(x+ww); ye.append(y+hh)
-        if not xs:
-            return crop_img
-        x1, y1, x2, y2 = max(0, min(xs)), max(0, min(ys)), min(w, max(xe)), min(h, max(ye))
-        if x2 - x1 >= 10 and y2 - y1 >= 10:
-            return img[y1:y2, x1:x2] if len(img.shape)==3 else img[y1:y2, x1:x2]
-        return crop_img
-    except Exception as e:
-        logger.debug(f"tighten_text_bbox error: {e}")
-        return crop_img
-
-def evaluate_crop_quality(img: np.ndarray) -> Dict[str, float]:
-    """Đánh giá chất lượng crop: độ nét, tỷ lệ vùng trắng bệt, entropy."""
-    try:
-        if img is None or img.size == 0:
-            return {'sharpness': 0.0, 'sat_white': 1.0, 'entropy': 0.0}
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape)==3 else img
-        # Sharpness via Laplacian variance
-        sharp = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        # Saturated white ratio
-        sat = float(np.mean(gray > 245))
-        # Entropy approximation
-        hist = cv2.calcHist([gray],[0],None,[256],[0,256]).ravel()
-        p = hist / max(1.0, hist.sum())
-        p = p[p>0]
-        ent = float(-(p*np.log2(p)).sum())
-        return {'sharpness': sharp, 'sat_white': sat, 'entropy': ent}
-    except Exception:
-        return {'sharpness': 0.0, 'sat_white': 1.0, 'entropy': 0.0}
-
-def debug_ocr_result_structure(ocr_result):
-    """Debug OCR result to understand its exact structure"""
-    try:
-        logger.info("=== OCR RESULT STRUCTURE DEBUG ===")
-        logger.info(f"Type: {type(ocr_result)}")
-        logger.info(f"Length: {len(ocr_result) if hasattr(ocr_result, '__len__') else 'N/A'}")
-        
-        if isinstance(ocr_result, list):
-            for i, item in enumerate(ocr_result[:3]):  # Only first 3 items
-                logger.info(f"Item[{i}]: type={type(item)}")
-                if hasattr(item, '__len__'):
-                    logger.info(f"Item[{i}]: len={len(item)}")
-                
-                if isinstance(item, list):
-                    for j, subitem in enumerate(item[:2]):  # Only first 2 subitems
-                        logger.info(f"  SubItem[{i}][{j}]: type={type(subitem)}")
-                        if isinstance(subitem, (list, tuple)) and len(subitem) >= 2:
-                            logger.info(f"    Text candidate: '{subitem[0]}', Conf: {subitem[1]}")
-                        elif isinstance(subitem, str):
-                            logger.info(f"    String: '{subitem}'")
-                else:
-                    logger.info(f"Item[{i}]: {str(item)[:100]}")
-        
-        logger.info("=== END DEBUG ===")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Debug structure error: {e}")
-        return False
-def debug_ocr_step_by_step(reader, image, save_debug=True):
-    """Enhanced debug OCR with detailed result analysis"""
-    try:
-        if reader is None or image is None or image.size == 0:
-            return None, "Invalid input"
-            
-        logger.info("=== ENHANCED OCR DEBUG MODE ===")
-        
-        # Step 1: Image preprocessing
-        h, w = image.shape[:2]
-        logger.info(f"Original image: {w}x{h}")
-        
-        processed = image.copy()
-        
-        # Aggressive upscaling
-        if w < 300 or h < 80:
-            scale = max(300/w, 80/h, 4.0)
-            new_w, new_h = int(w * scale), int(h * scale)
-            processed = cv2.resize(processed, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-            logger.info(f"Upscaled to: {new_w}x{new_h}")
-        
-        # Convert to grayscale and enhance
-        if len(processed.shape) == 3:
-            gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = processed
-            
-        # Multiple enhancement techniques
-        enhanced = cv2.equalizeHist(gray)
-        enhanced = cv2.convertScaleAbs(enhanced, alpha=1.5, beta=20)
-
-        # Prepare multiple variants for OCR robustness
-        variants = []
-        base_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-        variants.append(("base", base_bgr))
-
-        # Binary (Otsu) and inverted
-        try:
-            _, th_otsu = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            variants.append(("otsu", cv2.cvtColor(th_otsu, cv2.COLOR_GRAY2BGR)))
-            variants.append(("otsu_inv", cv2.cvtColor(255 - th_otsu, cv2.COLOR_GRAY2BGR)))
-        except Exception:
-            pass
-
-        # Adaptive threshold
-        try:
-            th_adp = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                           cv2.THRESH_BINARY, 31, 5)
-            variants.append(("adaptive", cv2.cvtColor(th_adp, cv2.COLOR_GRAY2BGR)))
-            variants.append(("adaptive_inv", cv2.cvtColor(255 - th_adp, cv2.COLOR_GRAY2BGR)))
-        except Exception:
-            pass
-
-        # Morphological operations
-        try:
-            kernel = np.ones((3, 3), np.uint8)
-            morphed = cv2.morphologyEx(enhanced, cv2.MORPH_OPEN, kernel, iterations=1)
-            variants.append(("morph_open", cv2.cvtColor(morphed, cv2.COLOR_GRAY2BGR)))
-        except Exception:
-            pass
-
-        # Add substantial padding to each variant
-        padded_variants = []
-        pad_size = 50
-        for name, var in variants:
-            padded = cv2.copyMakeBorder(var, pad_size, pad_size, pad_size, pad_size,
-                                        cv2.BORDER_CONSTANT, value=[255, 255, 255])
-            padded_variants.append((name, padded))
-        
-        logger.info(f"Final processed size: {processed.shape}")
-        
-        # Step 2: Multiple OCR attempts with detailed logging
-        attempts = [
-            {"name": "det+rec", "det": True, "rec": True, "cls": False},
-            {"name": "rec_only", "det": False, "rec": True, "cls": False},
-        ]
-        
-        for attempt in attempts:
-            for vname, vimg in padded_variants:
-                try:
-                    logger.info(f"Trying OCR mode: {attempt['name']} on variant: {vname}")
-                    result = reader.ocr(vimg, det=attempt['det'], rec=attempt['rec'], cls=attempt['cls'])
-                    
-                    logger.info(f"OCR result type: {type(result)}")
-                    logger.info(f"OCR result length: {len(result) if hasattr(result, '__len__') else 'N/A'}")
-                    
-                    if result is not None:
-                        # Try to extract text
-                        text, conf = safe_extract_ocr_text(result)
-                        if text and conf > 0.01:
-                            logger.info(f"SUCCESS with {attempt['name']} on {vname}: '{text}' (conf: {conf:.3f})")
-                            return result, f"Success with {attempt['name']}:{vname} -> {text}"
-                        else:
-                            logger.warning(f"{attempt['name']} on {vname} returned result but no extractable text")
-                            # Continue to next attempt
-                    else:
-                        logger.warning(f"{attempt['name']} on {vname} returned None")
-                        
-                except Exception as e:
-                    logger.warning(f"{attempt['name']} on {vname} failed with error: {e}")
-                    continue
-
-        # Final fallback: raw grayscale without padding, rec-only
-        try:
-            if len(image.shape) == 3:
-                gray_raw = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            else:
-                gray_raw = image
-            gray_raw = cv2.cvtColor(gray_raw, cv2.COLOR_GRAY2BGR)
-            result = reader.ocr(gray_raw, det=False, rec=True, cls=False)
-            if result is not None:
-                text, conf = safe_extract_ocr_text(result)
-                if text and conf > 0.01:
-                    logger.info(f"SUCCESS with final fallback rec_only on raw: '{text}' (conf: {conf:.3f})")
-                    return result, f"Success final_fallback: {text}"
-        except Exception as e:
-            logger.warning(f"Final fallback failed: {e}")
-        
-        logger.warning("All OCR attempts failed")
-        return None, "All OCR attempts failed"
-        
-    except Exception as e:
-        logger.error(f"Debug OCR critical error: {e}")
-        import traceback
-        logger.error(f"Debug traceback: {traceback.format_exc()}")
-        return None, f"Critical error: {e}"
-# ---- GPU/CUDA environment logging ----
-def _log_gpu_env_once():
-    try:
-        if hasattr(_log_gpu_env_once, 'done') and _log_gpu_env_once.done:
-            return
-        cuda_avail = torch.cuda.is_available()
-        cuda_version = getattr(torch.version, 'cuda', None)
-        device_count = torch.cuda.device_count() if cuda_avail else 0
-        current_idx = torch.cuda.current_device() if cuda_avail else None
-        device_name = torch.cuda.get_device_name(current_idx) if cuda_avail else None
-        logger.info(f"CUDA available: {cuda_avail}")
-        logger.info(f"PyTorch CUDA version: {cuda_version}")
-        logger.info(f"CUDA device count: {device_count}")
-        if cuda_avail:
-            logger.info(f"Using CUDA device {current_idx}: {device_name}")
-        # Also print to stdout to ensure visibility in all environments
-        print(f"[GPU] CUDA available: {cuda_avail}")
-        print(f"[GPU] PyTorch CUDA version: {cuda_version}")
-        print(f"[GPU] CUDA device count: {device_count}")
-        if cuda_avail:
-            print(f"[GPU] Using CUDA device {current_idx}: {device_name}")
-        _log_gpu_env_once.done = True
-    except Exception as e:
-        logger.warning(f"GPU env log failed: {e}")
-
-_log_gpu_env_once()
-
-# Configuration - OPTIMIZED FOR VEHICLE AND LICENSE PLATE DETECTION
-# ROI chiếm toàn bộ chiều rộng khung hình, chiều cao giữ nguyên
-ROI_PERCENT_XMIN = 0.0   # 0% từ trái (toàn bộ chiều rộng)
-ROI_PERCENT_YMIN = 0.25  # 25% từ trên  
-ROI_PERCENT_XMAX = 1.0   # 100% từ trái (toàn bộ chiều rộng)
-ROI_PERCENT_YMAX = 0.75  # 75% từ trên (chiều cao = 50%)  
-MAX_DISAPPEARED = 30      # Reduced for better tracking stability
-MIN_CONFIDENCE = 0.1      # Lower threshold for better detection
-DETECTION_DOWNSCALE_FACTOR = 1.0
-
-# FPS OPTIMIZATION SETTINGS - NORMAL SPEED
-# Enable lightweight frame skipping to keep stream responsive
-FRAME_SKIP = 1  # Process every frame for better tracking
-ENABLE_FRAME_SKIP = False  # Disable frame skipping to ensure boxes always render
-MAX_OCR_VARIANTS = 3  # Lower variants to reduce CPU load
-SKIP_OCR_ON_LOW_CONFIDENCE = False  # Don't skip OCR for better accuracy
-OCR_CONFIDENCE_THRESHOLD = 0.15  # Increased for better quality OCR results
-OCR_COOLDOWN_FRAMES = 2  # Reduced for more frequent OCR attempts
-MAX_OCR_ATTEMPTS_PER_TRACK = 2  # Lower attempts to avoid stalls
-SAVE_DEBUG_CROPS = False  # Disable saving crops to avoid I/O stalls during live processing
-
-# VIDEO PERFORMANCE SETTINGS - NORMAL SPEED
-ENABLE_SMOOTH_VIDEO = False  # Disable smooth video for normal speed
-# Increase per-frame budget to allow more processing time for better detection
-MAX_PROCESSING_TIME_MS = 100  # Increased from 45ms to 100ms for better detection
-SKIP_COMPLEX_PREPROCESSING = False  # Enable preprocessing for better accuracy
-
-# OCR OPTIMIZATION SETTINGS FOR MAXIMUM ACCURACY (INCLUDING DOTS AND 2-ROW PLATES)
-OCR_USE_GPU = False  # Disable GPU for PaddleOCR due to CUDNN compatibility issues
-OCR_USE_ANGLE_CLS = False  # DISABLE angle classifier completely
-OCR_USE_DET = True
-OCR_USE_CLS = False  # DISABLE classification completely
-OCR_DET_DB_THRESH = 0.05  # Lowered from 0.1 for better detection
-OCR_DET_DB_BOX_THRESH = 0.1  # Lowered from 0.2 for better detection
-OCR_DET_DB_UNCLIP_RATIO = 1.6
-OCR_REC_BATCH_NUM = 4  # Smaller batch for CPU
-OCR_REC_CHAR_DICT_PATH = None
-OCR_SHOW_LOG = False  # DISABLE all logging
-
-# REALTIME GUARDS - Reduced frame skipping for better detection
-OCR_EVERY_N_FRAMES = 1  # Run OCR every frame for better detection (was 3)
-MIN_TIME_LEFT_FOR_OCR_MS = 10  # Reduced from 20ms to allow more OCR attempts
-
-# ENHANCED PLATE DETECTION SETTINGS
-PLATE_DETECTION_CONFIDENCE = 0.001  # Lowered from 0.01 for maximum sensitivity
-PLATE_DETECTION_IOU = 0.2  # Reduced from 0.3 for better separation
-PLATE_CROP_PADDING_RATIO = 0.6  # Increased padding to capture full plate context
-PLATE_MIN_SIZE = (15, 6)  # Reduced minimum size requirements
-
-# NEW: Enhanced settings for 2-row license plates
-OCR_ENABLE_2ROW_DETECTION = True  # Enable special 2-row plate handling
-OCR_2ROW_MIN_CONFIDENCE = 0.05  # Lowered from 0.1 for better 2-row detection
-OCR_2ROW_COMBINE_THRESHOLD = 0.2  # Lowered from 0.3 for better combination
-OCR_2ROW_MAX_SEPARATOR_DISTANCE = 0.4  # Increased from 0.3 for better row detection
-
-# NEW: Balanced validation settings - RELAXED FOR REAL-WORLD PLATES
-MIN_PLATE_LENGTH = 2  # Further reduced to catch very short plates
-MAX_PLATE_LENGTH = 20  # Increased to catch very long plates
-REQUIRE_CONSISTENT_OCR = False  # Disable consistency requirement for faster detection
-MIN_CONSISTENT_FRAMES = 1  # Minimum frames with same result before accepting
-
-# OCR ACCEPTANCE SETTINGS - MORE LENIENT
-ACCEPT_PARTIAL_PLATES = True  # Accept partial plate numbers
-ACCEPT_NUMBERS_ONLY = True  # Accept plates with only numbers (like '887', '888')
-ACCEPT_SINGLE_CHAR = True  # Allow single characters for edge cases
-MIN_ACCEPTABLE_CONFIDENCE = 0.2  # Increased for better quality results
-
-# Vehicle classes to track (COCO: car=2, motorbike=3, bus=5, truck=7)
-VEHICLE_CLASSES = [2, 3, 5, 7]  # Only track road vehicles
-
-# Vehicle type mapping
-VEHICLE_TYPE_MAPPING = {
-    2: 'car',        # car
-    3: 'motorbike',  # motorbike
-    5: 'bus',        # bus
-    7: 'truck'       # truck
-}
-
-def get_vehicle_type_from_class(class_id):
-    """Get vehicle type string from COCO class ID"""
-    return VEHICLE_TYPE_MAPPING.get(class_id, 'unknown')
-
-# Paths
-current_dir = os.path.dirname(os.path.abspath(__file__))
-CROPS_FOLDER = os.path.join(current_dir, 'static', 'crops')
+# ĐỊNH NGHĨA VÙNG ROI - NỬA KHUNG HÌNH Ở GIỮA
+# Sử dụng tỷ lệ phần trăm: nửa chiều rộng và nửa chiều cao, centered
+DEFAULT_ROI_XMIN, DEFAULT_ROI_YMIN, DEFAULT_ROI_XMAX, DEFAULT_ROI_YMAX = 0.25, 0.25, 0.75, 0.75
+CROPS_FOLDER = 'static/crops'
 os.makedirs(CROPS_FOLDER, exist_ok=True)
 
-# Global variables
+# Global variables for tracking and database saving
 tracked_objects = {}
-plate_tracking = {}  # Track plates separately for continuous display
 frame_count = 0
-yolo_model = None
-plate_model = None  # Model chuyên dụng cho biển số
-plate_model_name = None
-ocr_reader = None  # rec-only reader
-ocr_failure_count = 0  # watchdog for OCR failures
-processing_deadline_ts = 0.0  # per-frame deadline to keep stream responsive
-_round_robin_track_index = 0  # ensures at least one track processed per frame under load
-_raw_detection_id_counter = -1  # synthetic IDs for raw detections when no tracker
+duplicate_counter = 0
+last_cleanup_time = 0
+track_consistency = {}
+ocr_attempts_per_track = {}
+plate_history = {}
 
-def _time_left_ms() -> float:
-    try:
-        if not processing_deadline_ts:
-            return 1e9
-        return max(0.0, (processing_deadline_ts - time.time()) * 1000.0)
-    except Exception:
-        return 0.0
+# Anti-duplicate settings - TĂNG THRESHOLD ĐỂ KẾT QUẢ ỔN ĐỊNH HƠN
+consistency_threshold = 5  # Tăng từ 3 lên 5 để yêu cầu nhiều lần nhận diện giống nhau
+max_ocr_attempts = 8       # Tăng số lần thử OCR
+consistency_window = 15    # Tăng cửa sổ consistency
 
-# ANTI-DUPLICATE SYSTEM
-plate_history = {}  # Track all plates ever seen with their best results
-duplicate_counter = 0  # Count how many duplicates were prevented
-last_cleanup_time = 0  # Track when last cleanup was performed
+# Configuration - OPTIMIZED FOR VEHICLE AND LICENSE PLATE DETECTION
+# ROI toàn chiều rộng khung hình, chiều cao giữa
+ROI_PERCENT_XMIN = 0.0    # Bắt đầu từ 0% chiều rộng (toàn bộ chiều rộng)
+ROI_PERCENT_YMIN = 0.25   # Bắt đầu từ 25% chiều cao
+ROI_PERCENT_XMAX = 1.0    # Kết thúc ở 100% chiều rộng (toàn bộ chiều rộng)
+ROI_PERCENT_YMAX = 0.75   # Kết thúc ở 75% chiều cao
+MIN_CONFIDENCE = 0.6     # Tăng confidence threshold từ 0.3 lên 0.6
+MIN_PLATE_LENGTH = 6     # Tăng minimum length từ 4 lên 6
+MAX_PLATE_LENGTH = 12    # Giảm maximum length từ 15 xuống 12
 
-# NEW: CONSISTENCY TRACKING SYSTEM
-track_consistency = {}  # Track consistency for each track_id
-consistency_threshold = 3  # Minimum consistent frames before accepting plate
-consistency_window = 10  # Look back this many frames for consistency
-ocr_attempts_per_track = {}  # Track OCR attempts per track
-max_ocr_attempts = 2  # Lower attempts per track to avoid stalls
+# Vehicle classes to track (COCO: car=2, motorbike=3, bus=5, truck=7)
+VEHICLE_CLASSES = [2, 3, 5, 7]
 
-# ERROR HANDLING AND RECOVERY
-model_loading_attempts = 0
-max_model_loading_attempts = 3
-ocr_initialization_attempts = 0
-max_ocr_initialization_attempts = 3
-last_error_time = 0
-error_cooldown = 5  # seconds between error recovery attempts
+# Khởi tạo Redis
+try:
+    r = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=1)
+    r.ping()  # Test kết nối
+    redis_available = True
+    logger.info("Redis connection successful")
+except (redis.ConnectionError, redis.TimeoutError, Exception) as e:
+    redis_available = False
+    logger.warning(f"Redis not available: {str(e)}. Running without Redis support.")
 
-def safe_model_loading():
-    """Safely load models with enhanced error handling"""
-    global yolo_model, plate_model, plate_model_name, model_loading_attempts
+# Khởi tạo FastALPR với GPU support
+alpr = None
+try:
+    # Khởi tạo ALPR với GPU support
+    alpr = ALPR(
+        detector_model="yolo-v9-t-416-license-plate-end2end",
+        ocr_model="cct-xs-v1-global-model"
+        # Không cần tham số device, FastALPR tự động chọn
+    )
     
+    logger.info("FastALPR initialized successfully with GPU support")
+    # Test với một frame đơn giản để đảm bảo ALPR hoạt động
+    test_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    test_results = alpr.predict(test_frame)
+    logger.info(f"FastALPR test successful, detected {len(test_results)} objects")
+except Exception as e:
+    logger.error(f"Failed to load FastALPR model: {str(e)}")
+    logger.warning("Running without FastALPR - detection will be disabled")
+    alpr = None
+
+# Khởi tạo ByteTrack với tham số tối ưu
+tracker = BYTETracker(
+    track_thresh=0.25,
+    track_buffer=30,
+    match_thresh=0.8,
+    frame_rate=30
+)
+
+# Lưu lịch sử biển số và ánh xạ track_id
+track_info = {}
+track_id_mapping = {}  # Ánh xạ từ track_id mới sang track_id cũ
+plate_to_track_id = defaultdict(list)  # Ánh xạ từ biển số sang track_id
+
+# Biến toàn cục để tính FPS
+fps_counter = 0
+last_fps_time = time.time()
+current_fps = 0
+last_redis_update = 0
+sent_plates = {}
+plate_cooldown = 300  # 5 phút (300 giây)
+FRAMES_FOLDER = '../public/frames_crops'
+os.makedirs(FRAMES_FOLDER, exist_ok=True)
+
+# Gửi dữ liệu biển số tới server Node.js
+def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None):
     try:
-        # Check if we've exceeded loading attempts
-        if model_loading_attempts >= max_model_loading_attempts:
-            logger.warning(f"Model loading attempts exceeded ({model_loading_attempts}/{max_model_loading_attempts})")
-            return False
+        current_time = time.time()
+        plate_text = plate_data['plate']
         
-        model_loading_attempts += 1
-        logger.info(f"Model loading attempt {model_loading_attempts}/{max_model_loading_attempts}")
+        # Kiểm tra nếu biển số đã được gửi trong vòng 5 phút
+        if plate_text in sent_plates:
+            last_sent_time = sent_plates[plate_text]
+            if current_time - last_sent_time < plate_cooldown:
+                logger.info(f"Biển số {plate_text} đã được gửi gần đây, bỏ qua")
+                return
         
-        # Sử dụng initialize_models_properly để load models
-        return initialize_models_properly()
+        # Gửi tới API mới cho plate recognition
+        url = "http://localhost:5000/api/plate-recognitions/detected-plates"
+        data = {
+            "detection_uuid": f"camera_{camera_id}_{track_id}_{int(current_time)}",
+            "plate_number": plate_data['plate'],
+            "raw_plate_text": plate_data['plate'],
+            "camera_id": camera_id,
+            "location_id": None,
+            "detected_at": current_time,
+            "confidence_score": plate_data['confidence'],
+            "ocr_confidence": plate_data['confidence'],
+            "detection_confidence": plate_data['confidence'],
+            "bbox": plate_data['bbox'],
+            "frame_path": frame_path,
+            "detected_vehicle_type": "unknown",
+            "source_type": "camera_stream"
+        }
         
-    except Exception as e:
-        logger.error(f"Critical error in safe model loading: {e}")
-        return False
-def log_raw_ocr_results(ocr_result):
-    """Log all raw OCR results without filtering"""
-    try:
-        logger.info("=== RAW OCR RESULTS (BEFORE FILTERING) ===")
-        
-        def log_item(item, depth=0):
-            indent = "  " * depth
-            if isinstance(item, list):
-                logger.info(f"{indent}List with {len(item)} items:")
-                for i, subitem in enumerate(item):
-                    logger.info(f"{indent}[{i}]: {type(subitem)}")
-                    if isinstance(subitem, list) and len(subitem) >= 2:
-                        if isinstance(subitem[1], list) and len(subitem[1]) >= 2:
-                            text, conf = subitem[1][0], subitem[1][1]
-                            logger.info(f"{indent}    TEXT FOUND: '{text}' (type: {type(text)}) CONF: {conf}")
-                        elif len(subitem) == 2 and isinstance(subitem[0], str):
-                            logger.info(f"{indent}    DIRECT TEXT: '{subitem[0]}' CONF: {subitem[1]}")
-                    log_item(subitem, depth + 1)
-            elif isinstance(item, str):
-                logger.info(f"{indent}String: '{item}'")
-            else:
-                logger.info(f"{indent}{type(item)}: {str(item)[:50]}")
-        
-        if ocr_result:
-            log_item(ocr_result)
-        
-        logger.info("=== END RAW OCR RESULTS ===")
-        
-    except Exception as e:
-        logger.error(f"Error logging raw OCR results: {e}")
-def safe_ocr_initialization():
-    """Initialize OCR with CPU support to avoid CUDNN issues - PaddleOCR only"""
-    global ocr_reader, ocr_initialization_attempts
-    
-    try:
-        if ocr_initialization_attempts >= max_ocr_initialization_attempts:
-            logger.warning(f"OCR initialization attempts exceeded")
-            return False
-        
-        ocr_initialization_attempts += 1
-        logger.info(f"OCR initialization attempt {ocr_initialization_attempts}/{max_ocr_initialization_attempts}")
-        
-        # Initialize PaddleOCR with CPU mode
-        if ocr_reader is None:
-            # Force CPU mode to avoid CUDNN issues
-            import os
-            os.environ['FLAGS_use_gpu'] = '0'
-            os.environ['CUDA_VISIBLE_DEVICES'] = ''
-            os.environ['PADDLE_USE_GPU'] = '0'
-            
-            ocr_reader = create_paddle_ocr(prefer_gpu=False, lang='en')  # Force CPU
-            
-        if ocr_reader is None:
-            logger.error("PaddleOCR initialization failed")
-            return False
-        
-        logger.info("✅ PaddleOCR initialization completed")
-        return True
-        
-    except Exception as e:
-        error_msg = str(e)
-        if "cudnn" in error_msg.lower() or "cuda" in error_msg.lower():
-            logger.warning(f"❌ CUDNN/CUDA error detected: {error_msg}")
-            # Force CPU mode and retry
-            try:
-                import os
-                os.environ['FLAGS_use_gpu'] = '0'
-                os.environ['CUDA_VISIBLE_DEVICES'] = ''
-                os.environ['PADDLE_USE_GPU'] = '0'
-                logger.info("🔄 Forcing CPU mode and retrying...")
-                
-                # Clear existing reader and retry
-                ocr_reader = None
-                ocr_reader = create_paddle_ocr(prefer_gpu=False, lang='en')
-                
-                if ocr_reader is not None:
-                    logger.info("✅ PaddleOCR recreated successfully in CPU mode")
-                    return True
-                else:
-                    logger.error("❌ Failed to recreate PaddleOCR in CPU mode")
-                    return False
-                    
-            except Exception as retry_e:
-                logger.error(f"❌ Retry failed: {retry_e}")
-                return False
+        response = requests.post(url, json=data, timeout=2)
+        if response.status_code == 200:
+            logger.info(f"Biển số {plate_data['plate']} đã gửi tới server thành công")
+            # Cập nhật thời gian gửi cuối cùng
+            sent_plates[plate_text] = current_time
         else:
-            logger.error(f"❌ Other error in OCR initialization: {e}")
-            return False
-def safe_image_processing(image):
-    """Safely process image with comprehensive error handling"""
+            logger.error(f"Lỗi gửi biển số tới server: {response.status_code}")
+    except Exception as e:
+        logger.error(f"Lỗi khi gửi biển số tới server: {str(e)}")
+
+def levenshtein_distance(s1, s2):
+    """Tính khoảng cách Levenshtein giữa hai chuỗi."""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+def is_bbox_in_roi(bbox, roi):
+    """Kiểm tra xem bounding box có giao với vùng ROI hay không."""
+    bbox_x1, bbox_y1, bbox_x2, bbox_y2 = bbox
+    roi_x1, roi_y1, roi_x2, roi_y2 = roi
+    return not (bbox_x2 < roi_x1 or bbox_x1 > roi_x2 or
+                bbox_y2 < roi_y1 or bbox_y1 > roi_y2)
+
+def calculate_roi_coordinates(width, height):
+    """Tính toán ROI coordinates dựa trên kích thước frame - TOÀN CHIỀU RỘNG KHUNG HÌNH"""
     try:
-        if image is None:
-            logger.warning("Input image is None")
-            return None
+        # ROI toàn chiều rộng khung hình, chiều cao giữa
+        roi_xmin = max(0, int(width * ROI_PERCENT_XMIN))
+        roi_ymin = max(0, int(height * ROI_PERCENT_YMIN))
+        roi_xmax = min(width-1, int(width * ROI_PERCENT_XMAX))
+        roi_ymax = min(height-1, int(height * ROI_PERCENT_YMAX))
         
-        if not isinstance(image, np.ndarray):
-            logger.warning(f"Input image is not numpy array: {type(image)}")
-            return None
+        # Đảm bảo ROI hợp lệ và có kích thước tối thiểu
+        min_width = width  # Toàn bộ chiều rộng
+        min_height = min(height // 2, 150)  # Tối thiểu 1/2 height hoặc 150px
         
-        if image.size == 0:
-            logger.warning("Input image is empty")
-            return None
+        # Đảm bảo chiều rộng toàn khung hình
+        roi_xmin = 0
+        roi_xmax = width - 1
         
-        # Validate image dimensions
-        if len(image.shape) < 2 or len(image.shape) > 3:
-            logger.warning(f"Invalid image shape: {image.shape}")
-            return None
-        
-        # Ensure image is in BGR format
-        if len(image.shape) == 2:
-            # Grayscale to BGR
-            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-        elif len(image.shape) == 3 and image.shape[2] == 4:
-            # RGBA to BGR
-            image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
-        elif len(image.shape) == 3 and image.shape[2] != 3:
-            logger.warning(f"Invalid image channels: {image.shape[2]}")
-            return None
-        
-        # Validate image size
-        h, w = image.shape[:2]
-        if h < 10 or w < 10:
-            logger.warning(f"Image too small: {w}x{h}")
-            return None
-        
-        if h > 4096 or w > 4096:
-            logger.warning(f"Image too large: {w}x{h}, resizing...")
-            scale = min(4096/w, 4096/h)
-            new_w = int(w * scale)
-            new_h = int(h * scale)
-            image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        
-        return image
+        if roi_ymax - roi_ymin < min_height:
+            center_y = height // 2
+            roi_ymin = max(0, center_y - min_height // 2)
+            roi_ymax = min(height - 1, center_y + min_height // 2)
+            
+        logger.debug(f"ROI calculated: ({roi_xmin},{roi_ymin})-({roi_xmax},{roi_ymax}) from frame {width}x{height}")
+        return roi_xmin, roi_ymin, roi_xmax, roi_ymax
         
     except Exception as e:
-        logger.error(f"Error in image processing: {e}")
+        logger.error(f"Error calculating ROI: {e}")
+        # Fallback ROI - toàn chiều rộng, chiều cao giữa
+        roi_height = height // 2
+        center_y = height // 2
+        return (0, center_y - roi_height // 2, width - 1, center_y + roi_height // 2)
+
+def is_in_roi(centroid, width, height):
+    x, y = centroid
+    roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(width, height)
+    return roi_xmin <= x <= roi_xmax and roi_ymin <= y <= roi_ymax
+
+def fix_vietnamese_ocr_errors(text):
+    """Fix common OCR errors for Vietnamese license plates - CẢI THIỆN NHẬN DIỆN DẤU CHẤM"""
+    if not text:
+        return text
+    
+    # Common OCR errors for Vietnamese plates - THÊM XỬ LÝ DẤU CHẤM
+    replacements = {
+        # Số và chữ cái thường bị nhầm
+        'O': '0', 'I': '1', 'S': '5', 'G': '6', 'B': '8', 'Z': '2',
+        'L': '1', 'T': '7', 'J': '1', 'Q': '0', 'U': '0', 'V': 'U',
+        'W': 'VV', 'X': 'XX', 'Y': 'Y', 'K': 'K', 'M': 'M', 'N': 'N',
+        'P': 'P', 'R': 'R', 'A': 'A', 'C': 'C', 'D': 'D', 'E': 'E',
+        'F': 'F', 'H': 'H',
+        
+        # Xử lý dấu chấm và ký tự đặc biệt
+        ',': '.', ';': '.', ':': '.', '`': '.', "'": '.', '"': '.',
+        '°': '.', '•': '.', '·': '.', '∙': '.', '⋅': '.',
+        
+        # Xử lý dấu gạch ngang
+        '_': '-', '—': '-', '–': '-', '−': '-', '‑': '-',
+        
+        # Loại bỏ khoảng trắng thừa
+        '  ': ' ', '   ': ' ',
+    }
+    
+    # Áp dụng replacements
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Chuẩn hóa dấu chấm - đảm bảo có đúng định dạng
+    # Xử lý trường hợp thiếu dấu chấm hoặc sai vị trí
+    text = re.sub(r'(\d{2,4})\s*[.,;:]\s*(\d{2})$', r'\1.\2', text)
+    
+    # Xử lý trường hợp có nhiều dấu chấm
+    text = re.sub(r'\.{2,}', '.', text)
+    
+    # Loại bỏ dấu chấm ở đầu hoặc cuối nếu không đúng định dạng
+    text = re.sub(r'^\.+|\.+$', '', text)
+    
+    return text.strip()
+
+def process_plate_text(text):
+    """Process Vietnamese plate text with ENHANCED dot recognition and STRICT validation"""
+    if not text or not isinstance(text, str):
+        return None
+    
+    try:
+        # Basic cleaning
+        original = text
+        text = re.sub(r'[^A-Z0-9\-\.\s]', '', text.upper().strip())
+        
+        if len(text) < MIN_PLATE_LENGTH:
+            return None
+        
+        # Fix common OCR errors - ENHANCED DOT PROCESSING
+        text = fix_vietnamese_ocr_errors(text)
+        
+        # ENHANCED Vietnamese plate patterns - CHẤP NHẬN FORMAT CHÍNH XÁC VÀ CÓ DẤU CHẤM
+        patterns = [
+            # Xe máy với dấu chấm - ENHANCED
+            r'^\d{2}[A-Z]-\d{2,4}\.\d{2}$',        # 30A-123.45 (xe máy)
+            r'^\d{2}[A-Z]\d-\d{2,4}\.\d{2}$',      # 30A1-123.45 (xe máy)
+            r'^\d{2}[A-Z]{2}-\d{2,4}\.\d{2}$',     # 30AB-123.45 (xe máy)
+            
+            # Xe tải với dấu chấm - ENHANCED
+            r'^\d{2}[A-Z]-\d{3,4}\.\d{2}$',        # 30A-1234.56 (xe tải)
+            r'^\d{2}[A-Z]\d-\d{3,4}\.\d{2}$',      # 30A1-1234.56 (xe tải)
+            
+            # Xe ô tô không có dấu chấm
+            r'^\d{2}[A-Z]-\d{4,5}$',                # 30A-12345 (ô tô)
+            r'^\d{2}[A-Z]\d-\d{4,5}$',              # 30A1-12345 (ô tô)
+            r'^\d{2}[A-Z]{2}-\d{4,5}$',             # 30AB-12345 (ô tô)
+            
+            # Xe máy không có dấu chấm (format cũ)
+            r'^\d{2}[A-Z]-\d{3,6}$',                # 30A-12345 (xe máy)
+            r'^\d{2}[A-Z]\d-\d{3,4}$',              # 30A1-2345 (xe máy)
+        ]
+        
+        for pattern in patterns:
+            if re.match(pattern, text):
+                logger.info(f"✅ ENHANCED Pattern match: '{original}' -> '{text}'")
+                return text
+        
+        # Nếu không match pattern chính xác, thử format lại
+        # Loại bỏ khoảng trắng và kiểm tra lại
+        clean_text = re.sub(r'\s+', '', text)
+        
+        # Thử thêm dấu gạch ngang nếu thiếu
+        if re.match(r'^\d{2}[A-Z]\d{2,6}$', clean_text):
+            # Format: 30A12345 -> 30A-12345
+            formatted = re.sub(r'^(\d{2}[A-Z])(\d{2,6})$', r'\1-\2', clean_text)
+            if re.match(r'^\d{2}[A-Z]-\d{2,6}$', formatted):
+                logger.info(f"✅ Auto-formatted: '{original}' -> '{formatted}'")
+                return formatted
+        
+        # ENHANCED: Thử thêm dấu chấm nếu thiếu (cho xe máy/xe tải)
+        # Kiểm tra nếu có pattern xe máy/xe tải nhưng thiếu dấu chấm
+        dot_patterns = [
+            (r'^(\d{2}[A-Z]-\d{2,4})(\d{2})$', r'\1.\2'),      # 30A-12345 -> 30A-123.45
+            (r'^(\d{2}[A-Z]\d-\d{2,4})(\d{2})$', r'\1.\2'),    # 30A1-12345 -> 30A1-123.45
+        ]
+        
+        for pattern, replacement in dot_patterns:
+            if re.match(pattern, clean_text):
+                formatted = re.sub(pattern, replacement, clean_text)
+                # Kiểm tra xem kết quả có hợp lệ không
+                for valid_pattern in patterns:
+                    if re.match(valid_pattern, formatted):
+                        logger.info(f"✅ Auto-formatted with dot: '{original}' -> '{formatted}'")
+                        return formatted
+        
+        # ENHANCED: Thử sửa dấu chấm sai vị trí
+        # Tìm các số và thử đặt dấu chấm ở vị trí đúng
+        if '-' in clean_text:
+            parts = clean_text.split('-')
+            if len(parts) == 2:
+                prefix = parts[0]  # 30A hoặc 30A1
+                suffix = parts[1]  # 12345
+                
+                # Nếu suffix có ≥4 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
+                if re.match(r'^\d{4,}$', suffix) and len(suffix) >= 4:
+                    main_part = suffix[:-2]
+                    dot_part = suffix[-2:]
+                    formatted = f"{prefix}-{main_part}.{dot_part}"
+                    
+                    # Kiểm tra với patterns
+                    for valid_pattern in patterns:
+                        if re.match(valid_pattern, formatted):
+                            logger.info(f"✅ Fixed dot position: '{original}' -> '{formatted}'")
+                            return formatted
+        
+        logger.debug(f"❌ No valid pattern match for: '{original}' -> '{text}'")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing plate text: {e}")
         return None
 
-def safe_frame_encoding(frame):
-    """Safely encode frame with comprehensive error handling"""
-    try:
-        if frame is None:
-            logger.warning("Frame is None for encoding")
-            return None
-        
-        # Ensure frame is valid
-        if not isinstance(frame, np.ndarray) or frame.size == 0:
-            logger.warning("Invalid frame for encoding")
-            return None
-        
-        # Try different encoding methods
-        try:
-            # Method 1: Standard JPEG encoding with lower quality for speed
-            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
-            return buffer.tobytes()
-        except Exception as jpeg_error:
-            logger.warning(f"JPEG encoding failed: {jpeg_error}")
-            
-            try:
-                # Method 2: PNG encoding as fallback
-                _, buffer = cv2.imencode('.png', frame)
-                return buffer.tobytes()
-            except Exception as png_error:
-                logger.error(f"PNG encoding also failed: {png_error}")
-                
-                try:
-                    # Method 3: Create error frame
-                    error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                    cv2.putText(error_frame, "ENCODING ERROR", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                    _, buffer = cv2.imencode('.jpg', error_frame)
-                    return buffer.tobytes()
-                except Exception as final_error:
-                    logger.error(f"Final encoding attempt failed: {final_error}")
-                    return None
-        
-    except Exception as e:
-        logger.error(f"Critical error in frame encoding: {e}")
-        return None
-
-# validate_ocr_result_strictly removed - using is_valid_vietnamese_plate instead
-def process_two_row_plate_ocr(plate_crop):
-    """Xử lý OCR cho biển số 2 hàng với tách hàng thông minh (projection) và ghép kết quả"""
-    try:
-        h, w = plate_crop.shape[:2]
-        if w <= 0 or h <= 0:
-            return None, 0.0
-        aspect_ratio = h / w
-        logger.info(f"🔄 Processing 2-row plate: {w}x{h}, aspect_ratio: {aspect_ratio:.2f}")
-        
-        if aspect_ratio <= 0.32:
-            return None, 0.0
-        
-        # 1) Find row boundary using horizontal projection of dark pixels
-        try:
-            gray0 = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY) if len(plate_crop.shape) == 3 else plate_crop
-            gray = cv2.bilateralFilter(gray0, 5, 75, 75)
-            thr = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 25, 15)
-            # Count dark pixels per row
-            proj = np.sum(thr > 0, axis=1).astype(np.int32)
-            # Search for a valley (low count) around mid area
-            search_top = max(0, int(h * 0.3))
-            search_bot = min(h - 1, int(h * 0.7))
-            valley_idx = int(np.argmin(proj[search_top:search_bot]) + search_top)
-            logger.info(f"📉 Projection valley index: {valley_idx}")
-            split_y = valley_idx
-        except Exception as e:
-            logger.debug(f"Projection split failed: {e}")
-            split_y = h // 2
-        
-        margin = max(4, h // 20)
-        top = max(0, split_y - margin)
-        bottom = min(h, split_y + margin)
-        upper_half = plate_crop[0:bottom, :]
-        lower_half = plate_crop[top:h, :]
-        logger.info(f"📑 Split plate: upper={upper_half.shape}, lower={lower_half.shape}")
-        
-        def _prep(img):
-            try:
-                g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-                g = cv2.bilateralFilter(g, 5, 75, 75)
-                g = cv2.equalizeHist(g)
-                return g
-            except Exception:
-                return img
-        
-        upper_p = _prep(upper_half)
-        lower_p = _prep(lower_half)
-        
-        def _ocr_best(img):
-            best_t, best_c = "", 0.0
-            if img is None or img.size == 0:
-                return best_t, best_c
-            try:
-                # Build few variants
-                variants = []
-                try:
-                    variants.append(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if len(img.shape) == 2 else img)
-                except Exception:
-                    variants.append(img)
-                try:
-                    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-                    g = img if len(img.shape) == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    v = clahe.apply(g)
-                    variants.append(cv2.cvtColor(v, cv2.COLOR_GRAY2BGR))
-                except Exception:
-                    pass
-                try:
-                    g = img if len(img.shape) == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    v = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 25, 15)
-                    variants.append(cv2.cvtColor(v, cv2.COLOR_GRAY2BGR))
-                except Exception:
-                    pass
-                
-                for v in variants[:4]:
-                    res = ocr_with_auto_fallback(ocr_reader, v, det=True, rec=True, cls=True) if ocr_reader else None
-                    t, c = safe_extract_ocr_text(res)
-                    if t and c and c > best_c:
-                        best_t, best_c = t.strip().upper(), float(c)
-            except Exception:
-                pass
-            return best_t, best_c
-        
-        up_text, up_conf = _ocr_best(upper_p)
-        low_text, low_conf = _ocr_best(lower_p)
-        if up_text:
-            logger.info(f"📄 Upper half: '{up_text}' (conf: {up_conf:.3f})")
-        if low_text:
-            logger.info(f"📄 Lower half: '{low_text}' (conf: {low_conf:.3f})")
-        
-        # Normalize segments: remove spaces, normalize separators
-        def _normalize(txt):
-            t = re.sub(r"\s+", "", txt)
-            t = t.replace("—", "-").replace("_", "-")
-            return t
-        up_text_n = _normalize(up_text)
-        low_text_n = _normalize(low_text)
-        
-        # Use advanced combiner to try separators and pick best
-        combined_text, combined_conf = None, 0.0
-        try:
-            # Build fake OCR results list-like: list of tuples (text, conf)
-            upper_results = [(up_text_n, up_conf)] if up_text_n else []
-            lower_results = [(low_text_n, low_conf)] if low_text_n else []
-            if upper_results or lower_results:
-                combined_text, combined_conf = combine_two_row_ocr_results(upper_results, lower_results)
-        except Exception as e:
-            logger.debug(f"Combiner failed: {e}")
-            # Fallback simple combine
-            sep = "-" if re.match(r"^\d{2}[A-Z]{1,2}\d?$", up_text_n) else ""
-            tmp = (up_text_n + (sep if sep else "") + low_text_n) if (up_text_n or low_text_n) else ""
-            if tmp:
-                combined_text, combined_conf = tmp, max(up_conf, low_conf)
-        
-        if combined_text:
-            logger.info(f"🔗 Combined 2-row result: '{combined_text}' (conf: {combined_conf:.3f})")
-            return combined_text, combined_conf
-        
-        return None, 0.0
+def validate_ocr_result_strictly(plate_text, confidence, track_id):
+    """STRICT validation for OCR results - YÊU CẦU CAO HƠN"""
+    if not plate_text or not isinstance(plate_text, str):
+        return False, "No text"
     
-    except Exception as e:
-        logger.error(f"Error in 2-row plate processing: {e}")
-        return None, 0.0
-def debug_plate_detection(vehicle_crop, track_id):
-    """Debug function để kiểm tra plate detection"""
-    try:
-        logger.info(f"🔍 Debug plate detection for track {track_id}")
-        logger.info(f"Vehicle crop shape: {vehicle_crop.shape}")
+    clean_text = plate_text.upper().strip()
+    logger.info(f"🔍 STRICT Validating: '{clean_text}' (conf: {confidence:.3f})")
+    
+    # Length check - STRICT
+    if len(clean_text) < MIN_PLATE_LENGTH:
+        return False, f"Too short: {len(clean_text)} < {MIN_PLATE_LENGTH}"
+    
+    if len(clean_text) > MAX_PLATE_LENGTH:
+        return False, f"Too long: {len(clean_text)} > {MAX_PLATE_LENGTH}"
+    
+    # Confidence check - STRICT
+    if confidence < MIN_CONFIDENCE:
+        return False, f"Confidence too low: {confidence:.3f} < {MIN_CONFIDENCE}"
+    
+    # Must contain both letters and numbers
+    has_letters = any(c.isalpha() for c in clean_text)
+    has_numbers = any(c.isdigit() for c in clean_text)
+    
+    if not has_letters:
+        return False, "Must contain letters"
+    
+    if not has_numbers:
+        return False, "Must contain numbers"
+    
+    # Must have proper Vietnamese plate structure
+    if not re.match(r'^\d{2}[A-Z]', clean_text):
+        return False, "Must start with 2 digits followed by letter"
+    
+    # ENHANCED: Kiểm tra format có dấu chấm hợp lệ
+    if '.' in clean_text:
+        # Nếu có dấu chấm, phải đúng format xe máy/xe tải
+        dot_patterns = [
+            r'^\d{2}[A-Z]-\d{2,4}\.\d{2}$',
+            r'^\d{2}[A-Z]\d-\d{2,4}\.\d{2}$',
+            r'^\d{2}[A-Z]{2}-\d{2,4}\.\d{2}$',
+        ]
         
-        if plate_model is None:
-            logger.error("❌ Plate model is None!")
-            return False
-        
-        # Test detection với confidence rất thấp
-        results = plate_model(vehicle_crop, conf=0.01, verbose=True)
-        logger.info(f"Detection results: {len(results) if results else 0}")
-        
-        if results:
-            for i, result in enumerate(results):
-                if hasattr(result, 'boxes') and result.boxes is not None:
-                    boxes = result.boxes
-                    logger.info(f"Result {i}: {len(boxes)} boxes detected")
-                    
-                    if hasattr(boxes, 'conf'):
-                        confs = boxes.conf
-                        if hasattr(confs, 'cpu'):
-                            confs = confs.cpu().numpy()
-                        logger.info(f"Confidences: {confs}")
-        else:
-                    logger.info(f"Result {i}: No boxes")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Debug error: {e}")
-        return False
+        has_valid_dot_format = any(re.match(pattern, clean_text) for pattern in dot_patterns)
+        if not has_valid_dot_format:
+            return False, "Invalid dot format for motorcycle/truck plate"
+    
+    logger.info(f"✅ STRICT VALIDATION PASSED: '{clean_text}' (conf: {confidence:.3f})")
+    return True, "Strict validation passed"
 
 def should_save_plate(plate_text, confidence, track_id=None):
-    """ENHANCED save logic with consistency tracking"""
+    """Enhanced save logic with STRICT consistency tracking"""
     global duplicate_counter, plate_history, track_consistency, ocr_attempts_per_track
     
     if not plate_text or not isinstance(plate_text, str):
         return False
     
     clean_text = plate_text.upper().strip()
-    # Reject single-char noise early
-    if len(re.sub(r'[^A-Z0-9]', '', clean_text)) < 2:
-        return False
     
-    # Basic validation
+    # STRICT validation - chỉ chấp nhận format chính xác
     is_valid, reason = validate_ocr_result_strictly(plate_text, confidence, 0)
     
     if not is_valid:
         logger.info(f"❌ Not saving '{clean_text}': {reason}")
         return False
     
-    # ==== CONSISTENCY TRACKING ====
+    # THÊM KIỂM TRA FORMAT CHÍNH XÁC
+    processed_text = process_plate_text(plate_text)
+    if not processed_text:
+        logger.info(f"❌ Not saving '{clean_text}': Invalid format")
+        return False
+    
+    # Consistency tracking
     if track_id is not None:
         if track_id not in track_consistency:
             track_consistency[track_id] = {
@@ -1612,8 +482,8 @@ def should_save_plate(plate_text, confidence, track_id=None):
                     logger.info(f"🎯 CONSISTENT RESULT for track {track_id}: '{consistent_text}' (conf: {consistent_confidence:.3f}, count: {most_common_count})")
                     return True
                 else:
-                    logger.info(f"🔄 Consistent but not better: '{consistent_text}' (conf: {consistent_confidence:.3f} <= {consistency_data['best_confidence']:.3f})")
-                    return True  # vẫn giữ kết quả nhất quán hiện tại
+                    logger.info(f"🔄 Consistent but not better: '{consistent_text}'")
+                    return True
             else:
                 logger.debug(f"📊 No consistency yet for track {track_id}: {text_counts}")
                 return False
@@ -1621,7 +491,7 @@ def should_save_plate(plate_text, confidence, track_id=None):
             logger.debug(f"📈 Building consistency for track {track_id}: {len(consistency_data['results'])}/{consistency_threshold}")
             return False
     
-    # ==== FALLBACK DUPLICATE CHECK ====
+    # Fallback duplicate check
     if clean_text in plate_history:
         existing = plate_history[clean_text]
         existing_conf = existing.get('confidence', 0.0)
@@ -1649,137 +519,8 @@ def should_save_plate(plate_text, confidence, track_id=None):
         logger.info(f"✅ NEW PLATE SAVED: '{clean_text}' (conf: {confidence:.3f})")
         return True
 
-def debug_ocr_result(ocr_result, plate_crop=None):
-    """Debug OCR result structure"""
-    try:
-        logger.info(f"🔍 OCR DEBUG:")
-        logger.info(f"  Result type: {type(ocr_result)}")
-        logger.info(f"  Result value: {str(ocr_result)[:500]}")
-        
-        if plate_crop is not None:
-            logger.info(f"  Plate crop shape: {plate_crop.shape}")
-            logger.info(f"  Plate crop dtype: {plate_crop.dtype}")
-            
-            # Save debug image
-            try:
-                import os
-                debug_dir = os.path.join(os.path.dirname(__file__), 'debug_crops')
-                os.makedirs(debug_dir, exist_ok=True)
-                debug_path = os.path.join(debug_dir, f"debug_ocr_{int(time.time())}.jpg")
-                cv2.imwrite(debug_path, plate_crop)
-                logger.info(f"  Debug crop saved: {debug_path}")
-            except Exception as save_e:
-                logger.warning(f"Could not save debug crop: {save_e}")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Debug OCR failed: {e}")
-        return False
-
-def _is_valid_vn_plate_format(plate_text):
-    """Enhanced validation for Vietnamese license plate format - OPTIMIZED VERSION"""
-    if not plate_text or not isinstance(plate_text, str):
-        return False
-    
-    # Clean the text - keep only alphanumeric, dash, dot
-    clean_text = re.sub(r'[^A-Z0-9\-\.]', '', plate_text.upper().strip())
-    
-    if len(clean_text) < 4:
-        return False
-    
-    # ENHANCED Vietnamese license plate patterns - COMPREHENSIVE
-    patterns = [
-        # ==== Ô TÔ (CAR) FORMATS ====
-        r'^\d{2}[A-Z]-\d{2}\.\d{2}$',          # 30A-12.34 (ngắn)
-        r'^\d{2}[A-Z]-\d{3}\.\d{2}$',          # 30A-123.45 (chuẩn)
-        r'^\d{2}[A-Z]-\d{4}\.\d{2}$',          # 30A-1234.56 (dài)
-        r'^\d{2}[A-Z]-\d{5}$',                  # 30A-12345 (taxi)
-        r'^\d{2}[A-Z]-\d{6}$',                  # 30A-123456 (taxi dài)
-        
-        # ==== XE MÁY (MOTORCYCLE) FORMATS ====
-        r'^\d{2}[A-Z]\d-\d{4}$',                # 30A1-2345 (cũ)
-        r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',        # 30A1-234.56 (mới)
-        r'^\d{2}[A-Z]\d-\d{4}\.\d{2}$',        # 30A1-2345.67 (mới dài)
-        
-        # ==== NGOẠI GIAO (DIPLOMATIC) FORMATS ====
-        r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',       # 30AB-12.34
-        r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',       # 30AB-123.45
-        r'^\d{2}[A-Z]{2}-\d{4}\.\d{2}$',       # 30AB-1234.56
-        
-        # ==== QUÂN ĐỘI/CẢNH SÁT (MILITARY/POLICE) ====
-        r'^[A-Z]{2}\d{4}$',                     # QD1234, CS1234
-        r'^[A-Z]{2}\d{3}\.\d{2}$',              # QD123.45
-        
-        # ==== COMPACT FORMATS (KHÔNG DẤU PHÂN CÁCH) ====
-        r'^\d{2}[A-Z]\d{4,5}$',                 # 30A1234, 30A12345
-        r'^\d{2}[A-Z]{2}\d{4,5}$',              # 30AB1234, 30AB12345
-        r'^\d{2}[A-Z]\d{3}\.\d{2}$',            # 30A123.45 (compact)
-        
-        # ==== PARTIAL FORMATS (CHO OCR KHÔNG HOÀN HẢO) ====
-        r'^\d{2}[A-Z]\d{3,4}$',                 # 30A123, 30A1234 (partial)
-        r'^\d{2}[A-Z]{1,2}\d{2,4}$',            # 30A12, 30AB123 (partial)
-        r'^\d{1,2}[A-Z]\d{3,4}$',               # 3A123, 30A123 (partial)
-        
-        # ==== FLEXIBLE FORMATS (CHO OCR KHÓ) ====
-        r'^\d{2}[A-Z][\-\s]?\d{2,4}[\-\s]?\d{2}$',  # 30A-12-34, 30A 12 34
-        r'^\d{2}[A-Z]\d{2,4}[\-\s]?\d{2}$',         # 30A12-34, 30A1234
-    ]
-    
-    for pattern in patterns:
-        if re.match(pattern, clean_text):
-            return True
-    
-    return False
-
-# _is_valid_vn_plate_format_relaxed removed - using is_valid_vietnamese_plate instead
-
-def _is_basic_alphanumeric_plate(plate_text):
-    """REALISTIC check for alphanumeric plate format - accept partial plates"""
-    if not plate_text or not isinstance(plate_text, str):
-        return False
-    
-    clean_text = re.sub(r'[^A-Z0-9]', '', plate_text.upper().strip())
-    
-    # Accept partial plates (2+ characters)
-    if len(clean_text) < MIN_PLATE_LENGTH or len(clean_text) > MAX_PLATE_LENGTH:
-        return False
-    
-    # For very short text (2-3 chars), accept anything alphanumeric
-    if len(clean_text) <= 3:
-        return True  # Accept 'O', 'R', 'P', 'SE', '30', etc.
-    
-    # For longer text, require mix of letters and numbers
-    has_letter = any(c.isalpha() for c in clean_text)
-    has_digit = any(c.isdigit() for c in clean_text)
-    
-    return has_letter and has_digit
-
-# Helpers adapted from detect_plate.py expectations
-def clean_and_preserve_structure(text: str) -> str:
-    try:
-        if not isinstance(text, str):
-            return ""
-        # Keep alphanumerics, dash and dot, uppercase for consistency
-        return re.sub(r'[^A-Z0-9\-\.]', '', text.upper().strip())
-    except Exception:
-        return ""
-
-def analyze_dash_position_precise(cleaned_text: str) -> Dict[str, Any]:
-    """Lightweight heuristic analysis returning vehicle_type and confidence.
-    Provides a stable interface for callers expecting this from detect_plate.py.
-    """
-    try:
-        text = cleaned_text or ""
-        is_relaxed_valid = _is_valid_vn_plate_format_relaxed(text)
-        vehicle_type = 'car' if '-' in text or '.' in text else 'unknown'
-        conf = 0.85 if is_relaxed_valid else (0.5 if _is_basic_alphanumeric_plate(text) else 0.2)
-        return {'vehicle_type': vehicle_type, 'confidence': float(conf)}
-    except Exception:
-        return {'vehicle_type': 'unknown', 'confidence': 0.3}
-
 def cleanup_tracked_objects():
-    """ENHANCED cleanup with consistency tracking"""
+    """Enhanced cleanup with consistency tracking"""
     global tracked_objects, plate_history, last_cleanup_time, track_consistency, ocr_attempts_per_track
     
     try:
@@ -1796,7 +537,7 @@ def cleanup_tracked_objects():
         
         logger.info(f"🧹 ENHANCED cleanup of {len(tracked_objects)} tracked objects...")
         
-        # Step 1: Clean up old consistency data
+        # Clean up old consistency data
         old_tracks = set(track_consistency.keys()) - set(tracked_objects.keys())
         for old_track in old_tracks:
             del track_consistency[old_track]
@@ -1806,7 +547,7 @@ def cleanup_tracked_objects():
         if old_tracks:
             logger.info(f"🧹 Cleaned up {len(old_tracks)} old consistency records")
         
-        # Step 2: Group objects by plate number (prioritize consistent results)
+        # Group objects by plate number
         plate_groups = {}
         vehicles_without_plates = {}
         
@@ -1820,17 +561,18 @@ def cleanup_tracked_objects():
                 vehicles_without_plates[track_id] = obj
                 continue
             
-            # Remove invalid formats
-            if not _is_valid_vn_plate_format_relaxed(plate_num):
-                logger.info(f"🗑️ Removed invalid plate '{plate_num}' (track {track_id})")
+            # STRICT: Chỉ giữ lại biển số có format chính xác
+            processed_plate = process_plate_text(plate_num)
+            if not processed_plate:
+                logger.info(f"🧹 Removing invalid format plate: '{plate_num}'")
                 continue
             
-            # Group by plate number
-            if plate_num not in plate_groups:
-                plate_groups[plate_num] = []
-            plate_groups[plate_num].append((track_id, obj, confidence, is_consistent))
+            # Group by processed plate number
+            if processed_plate not in plate_groups:
+                plate_groups[processed_plate] = []
+            plate_groups[processed_plate].append((track_id, obj, confidence, is_consistent))
         
-        # Step 3: For each plate number, prioritize consistent results
+        # For each plate number, prioritize consistent results
         valid_objects = {}
         duplicates_removed = 0
         
@@ -1839,26 +581,20 @@ def cleanup_tracked_objects():
                 # Only one result, keep it
                 track_id, obj, confidence, is_consistent = group[0]
                 valid_objects[track_id] = obj
-                logger.debug(f"✅ Kept single result for '{plate_num}': conf {confidence:.3f}, consistent: {is_consistent}")
             else:
                 # Multiple results - prioritize consistent ones
                 # Sort by consistency first, then by confidence
-                group.sort(key=lambda x: (not x[3], -x[2]))  # Consistent first, then highest confidence
+                group.sort(key=lambda x: (not x[3], -x[2]))
                 best_track_id, best_obj, best_confidence, best_consistent = group[0]
                 
                 # Keep only the best
                 valid_objects[best_track_id] = best_obj
-                logger.info(f"🎯 Kept BEST result for '{plate_num}': conf {best_confidence:.3f}, consistent: {best_consistent} (removed {len(group)-1} duplicates)")
+                logger.info(f"🎯 Kept BEST result for '{plate_num}': conf {best_confidence:.3f}, consistent: {best_consistent}")
                 
                 # Remove all others
                 duplicates_removed += len(group) - 1
-                
-                # Update plate_history to reflect the best result
-                if plate_num in plate_history:
-                    plate_history[plate_num]['confidence'] = best_confidence
-                    plate_history[plate_num]['timestamp'] = current_time
         
-        # Step 4: Add back vehicles without plates
+        # Add back vehicles without plates
         valid_objects.update(vehicles_without_plates)
         
         old_count = len(tracked_objects)
@@ -1870,480 +606,579 @@ def cleanup_tracked_objects():
         logger.info(f"   Duplicates removed: {duplicates_removed}")
         logger.info(f"   Unique plates: {len(plate_groups)}")
         logger.info(f"   Vehicles without plates: {len(vehicles_without_plates)}")
-        logger.info(f"   Plate history size: {len(plate_history)}")
-        logger.info(f"   Consistency records: {len(track_consistency)}")
         
-        if old_count != new_count:
-            logger.info(f"🎯 Cleanup successful: removed {old_count - new_count} objects")
-            
     except Exception as e:
         logger.error(f"Error in enhanced cleanup: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-# ---- Paddle GPU detection and OCR init helpers ----
-def is_paddle_gpu_available() -> bool:
-    """Kiểm tra Paddle GPU availability một cách chính xác"""
-    try:
-        if paddle is None:
-            logger.info("Paddle module not available")
-            return False
-        
-        # Kiểm tra compiled with CUDA
-        try:
-            compiled_with_cuda = bool(paddle.is_compiled_with_cuda())
-            logger.info(f"Paddle compiled with CUDA: {compiled_with_cuda}")
-        except Exception as e:
-            logger.warning(f"Could not check CUDA compilation: {e}")
-            compiled_with_cuda = False
-        
-        if not compiled_with_cuda:
-            logger.info("Paddle not compiled with CUDA")
-            return False
-        
-        # Kiểm tra CUDA device count
-        try:
-            device_count = paddle.device.cuda.device_count()
-            logger.info(f"CUDA devices available: {device_count}")
-        except Exception as e:
-            logger.warning(f"Could not get CUDA device count: {e}")
-            device_count = 0
-        
-        if device_count <= 0:
-            logger.info("No CUDA devices available")
-            return False
-        
-        # ==== TEST THỰC TẾ PADDLE GPU ====
-        try:
-            # Tạo tensor đơn giản trên GPU để test
-            test_tensor = paddle.to_tensor([1.0, 2.0], place=paddle.CUDAPlace(0))
-            result = paddle.sum(test_tensor)
-            result_cpu = result.numpy()
-            logger.info(f"✅ Paddle GPU test successful: {result_cpu}")
-            return True
-        except Exception as gpu_test_e:
-            logger.warning(f"❌ Paddle GPU test failed: {gpu_test_e}")
-            # FIXED: Don't return False immediately, try CPU fallback
-            logger.info("🔄 GPU test failed, will use CPU fallback")
-            return False
-        
-    except Exception as e:
-        logger.warning(f"Error checking Paddle GPU availability: {e}")
-        return False
-# ==== SỬA LỖI OCR TRẢ VỀ [None] - GIẢI PHÁP TOÀN DIỆN ====
 
-# 1. SỬA HÀM ocr_with_auto_fallback - KIỂM TRA IMAGE TRƯỚC KHI GỌI OCR
-def ocr_with_auto_fallback_simple(reader: Optional[PaddleOCR], image: np.ndarray, det: bool, rec: bool, cls: bool):
-    """Run OCR with timeout protection"""
-    try:
-        if reader is None or image is None or image.size == 0:
-            return None
-            
-        ocr_start = time.time()
-        OCR_TIMEOUT = 1.0  # 1 second timeout
-        
-        # Quick preprocessing
-        processed_image = image.copy()
-        if len(processed_image.shape) == 2:
-            processed_image = cv2.cvtColor(processed_image, cv2.COLOR_GRAY2BGR)
-        
-        # Simple upscaling if needed
-        h, w = processed_image.shape[:2]
-        if w < 100 or h < 40:
-            scale = max(100/w, 40/h, 2.0)  # Reduced from 3.0 for speed
-            new_w, new_h = int(w * scale), int(h * scale)
-            processed_image = cv2.resize(processed_image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-        
-        # Single OCR attempt with timeout
-        try:
-            result = reader.ocr(processed_image, det=det, rec=rec, cls=False)  # Always disable cls for speed
-            ocr_time = time.time() - ocr_start
-            
-            if ocr_time > OCR_TIMEOUT:
-                logger.warning(f"OCR exceeded timeout: {ocr_time:.2f}s")
-                return None
-                
-            return result
-            
-        except Exception as ocr_error:
-            logger.error(f"OCR execution error: {ocr_error}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"OCR fallback error: {e}")
-        return None
-# 2. SỬA HÀM create_paddle_ocr - CẤU HÌNH TỐI ƯU CHO VIỆT NAM
-def create_paddle_ocr(prefer_gpu=False, lang='en'):
-    """Create PaddleOCR with CPU-optimized configuration"""
-    try:
-        logger.info("🔧 Creating PaddleOCR with CPU configuration...")
-        
-        # Force CPU mode to avoid CUDNN issues
-        import os
-        os.environ['FLAGS_use_gpu'] = '0'
-        os.environ['CUDA_VISIBLE_DEVICES'] = ''
-        os.environ['PADDLE_USE_GPU'] = '0'
-        
-        # IMPROVED PaddleOCR config for better license plate recognition
-        from paddleocr import PaddleOCR
-        reader = PaddleOCR(
-            use_angle_cls=True,  # Enable angle classification for better accuracy
-            lang='en',
-            show_log=False,
-            use_gpu=False,  # Force CPU mode
-            enable_mkldnn=True,  # Enable MKL-DNN for better CPU performance
-            cpu_threads=4,  # Increase CPU threads
-            rec_batch_num=1,
-            # Optimized detection thresholds for license plates
-            det_db_thresh=0.15,  # Balanced threshold for license plates
-            det_db_box_thresh=0.25,  # Balanced box threshold
-            det_db_unclip_ratio=1.8,  # Increased for better text detection
-            drop_score=0.1,  # Increased drop score for better quality
-            rec_image_shape='3,48,320',
-            use_space_char=True,
-            # Additional parameters for better license plate recognition
-            det_limit_side_len=960,  # Limit side length for better performance
-            det_limit_type='max'
-        )
-        
-        logger.info("✅ PaddleOCR created successfully (CPU mode)")
-        return reader
-            
-    except Exception as e:
-        logger.error(f"❌ PaddleOCR creation failed: {e}")
-        # Try alternative initialization
-        try:
-            logger.info("🔄 Trying alternative PaddleOCR initialization...")
-            from paddleocr import PaddleOCR
-            reader = PaddleOCR(
-                use_angle_cls=False,
-                lang='en',
-                show_log=False,
-                use_gpu=False
-            )
-            logger.info("✅ Alternative PaddleOCR initialization successful")
-            return reader
-        except Exception as alt_e:
-            logger.error(f"❌ Alternative PaddleOCR also failed: {alt_e}")
-            return None
-
-def ocr_with_auto_fallback(reader: Optional[PaddleOCR], image: np.ndarray, det: bool, rec: bool, cls: bool):
-    """OCR with comprehensive fallback and debugging"""
-    try:
-        if reader is None or image is None or image.size == 0:
-            return None
-        
-        # Ensure minimum size
-        h, w = image.shape[:2]
-        if w < 100 or h < 40:
-            scale = max(100/w, 40/h, 3.0)
-            new_w, new_h = int(w * scale), int(h * scale)
-            image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-        
-        # Add white padding
-        pad_size = 20
-        image = cv2.copyMakeBorder(image, pad_size, pad_size, pad_size, pad_size, 
-                                 cv2.BORDER_CONSTANT, value=[255, 255, 255])
-        
-        # Primary OCR attempt
-        try:
-            result = reader.ocr(image, det=det, rec=rec, cls=False)  # Always disable cls
-            
-            if result and isinstance(result, list) and len(result) > 0:
-                # Quick validation
-                text, conf = safe_extract_ocr_text(result)
-                if text and conf > 0.01:
-                    logger.info(f"Primary OCR success: '{text}' ({conf:.3f})")
-                    return result
-                    
-        except Exception as e:
-            logger.warning(f"Primary OCR failed: {e}")
-        
-        # Fallback: Try with different preprocessing
-        try:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            # High contrast
-            enhanced = cv2.convertScaleAbs(gray, alpha=2.0, beta=30)
-            enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-            
-            result = reader.ocr(enhanced_bgr, det=True, rec=True, cls=False)
-            
-            if result:
-                text, conf = safe_extract_ocr_text(result)
-                if text and conf > 0.01:
-                    logger.info(f"Enhanced OCR success: '{text}' ({conf:.3f})")
-                    return result
-                    
-        except Exception as e:
-            logger.warning(f"Enhanced OCR failed: {e}")
-        
-        # Final fallback: rec-only
-        try:
-            result = reader.ocr(image, det=False, rec=True, cls=False)
-            
-            if result:
-                text, conf = safe_extract_ocr_text(result)
-                if text and conf > 0.01:
-                    logger.info(f"Rec-only OCR success: '{text}' ({conf:.3f})")
-                    return result
-                    
-        except Exception as e:
-            logger.warning(f"Rec-only OCR failed: {e}")
-        
-        logger.error("All OCR attempts failed")
+def find_existing_track_id(plate_text, threshold=3):
+    """Tìm track_id hiện có cho biển số tương tự"""
+    # Tìm trong plate_to_track_id trước
+    for existing_plate, track_ids in plate_to_track_id.items():
+        if levenshtein_distance(plate_text, existing_plate) <= threshold:
+            # Trả về track_id đầu tiên (cũ nhất)
+            return track_ids[0]
+    
+    # Nếu không tìm thấy, tìm trong Redis
+    if not redis_available:
         return None
         
-    except Exception as e:
-        logger.error(f"OCR with fallback error: {e}")
-        return None
-
-def _edge_detection_ocr_fallback(processed_image, reader):
-    """Edge detection + OCR fallback strategy"""
     try:
-        # Convert to grayscale
-        gray = cv2.cvtColor(processed_image, cv2.COLOR_BGR2GRAY)
-        
-        # Apply edge detection
-        edges = cv2.Canny(gray, 30, 100)
-        
-        # Find contours
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Look for rectangular contours that could be plates
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > 50:  # Minimum area
-                x, y, w_contour, h_contour = cv2.boundingRect(contour)
-                
-                # Check aspect ratio (plates are usually wider than tall)
-                aspect_ratio = w_contour / max(1, h_contour)
-                if 1.5 <= aspect_ratio <= 10.0:  # Plate aspect ratio
-                    # Crop the potential plate area
-                    plate_crop = processed_image[y:y+h_contour, x:x+w_contour]
-                    
-                    if plate_crop.size > 0:
-                        # Try OCR on this crop
-                        try:
-                            result = reader.ocr(plate_crop, det=False, rec=True, cls=False)
-                            if result:
-                                text, conf = safe_extract_ocr_text(result)
-                                if text and conf > 0.005:
-                                    return result
-                        except Exception:
-                            continue
-        
-        return None
-        
-    except Exception as e:
-        logger.debug(f"Edge detection OCR fallback failed: {e}")
-        return None
+        for key in r.keys("track:*"):
+            track_data = r.hgetall(key)
+            existing_plate = track_data.get('plate', '')
+            if levenshtein_distance(plate_text, existing_plate) <= threshold:
+                return key.split(":")[1]  # Trả về track_id
+    except redis.RedisError as e:
+        logger.error(f"Redis error in find_existing_track_id: {str(e)}")
+    
+    return None
 
-# FPS tracking
-last_frame_time = None
-smoothed_fps = 0.0
-
-# Plate model candidates - only yolov9s.pt
-PLATE_MODEL_CANDIDATE_NAMES = [
-    'yolov9s.pt'
-]
-
-# HARD-CODED selection for plate model - only yolov9s.pt
-PLATE_MODEL_FIXED_NAME = 'yolov9s.pt'  # Use yolov9s.pt for license plate detection
-
-def get_available_plate_models():
+def update_redis_plate(track_id, plate_text, confidence, bbox):
+    """Cập nhật biển số vào Redis"""
+    if not redis_available:
+        return
+        
     try:
-        models = []
-        search_paths = [
-            current_dir,  # Root directory
-            os.path.join(current_dir, 'models'),  # Models subdirectory
-            os.path.expanduser('~/.ultralytics'),  # Ultralytics cache
-        ]
+        redis_key = f"track:{track_id}"
+        plate_key = f"plate:{plate_text}"
         
-        for base_path in search_paths:
-            if not os.path.exists(base_path):
-                continue
-                
-            for name in PLATE_MODEL_CANDIDATE_NAMES:
-                full_path = os.path.join(base_path, name)
-                if os.path.exists(full_path):
-                    models.append(full_path)
-                    logger.info(f"Found model: {full_path}")
-        
-        if not models:
-            logger.warning("No plate models found, will use YOLO fallback")
+        # Kiểm tra xem có nên cập nhật không (confidence cao hơn)
+        existing_data = r.hgetall(redis_key)
+        if existing_data and float(existing_data.get('confidence', 0)) >= confidence:
+            return  # Không cập nhật nếu confidence không cao hơn
             
-        return models
-    except Exception as e:
-        logger.error(f"Error scanning for models: {e}")
-        return []
+        # Cập nhật Redis
+        r.hset(redis_key, mapping={
+            'plate': plate_text,
+            'confidence': confidence,
+            'bbox': bbox,
+            'timestamp': time.time(),
+            'last_seen': time.time()
+        })
+        r.set(plate_key, track_id)
+        r.expire(redis_key, 3600)  # Tự động xóa sau 1 giờ
+        r.expire(plate_key, 3600)  # Tự động xóa sau 1 giờ
+    except redis.RedisError as e:
+        logger.error(f"Redis error: {str(e)}")
 
-def _load_plate_model_from_path(model_path: str):
-    global plate_model, plate_model_name
-    try:
-        if not os.path.exists(model_path):
-            logger.warning(f"Plate model path does not exist: {model_path}")
-            # FALLBACK: Sử dụng YOLO model chung nếu không có model chuyên dụng
-            if yolo_model is not None:
-                logger.info("Using general YOLO model for plate detection as fallback")
-                plate_model = yolo_model
-                plate_model_name = "yolo_fallback"
-                return True
-            return False
-            
-        logger.info(f"Loading license plate model: {model_path}")
-        plate_model = safe_yolo_load(model_path)
-        
-        if plate_model is None:
-            logger.error(f"Failed to load plate model with safe_yolo_load: {model_path}")
-            # FALLBACK: Sử dụng YOLO model chung
-            if yolo_model is not None:
-                logger.info("Using general YOLO model for plate detection as fallback")
-                plate_model = yolo_model
-                plate_model_name = "yolo_fallback"
-                return True
-            return False
-        
-        # Move to GPU if available
+def detect_and_ocr_stable(frame, camera_id=None):
+    """Main detection function with enhanced plate detection and CENTERED ROI"""
+    global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
+    global frame_count, tracked_objects
+    
+    frame_count += 1
+    
+    # Tính FPS
+    current_time = time.time()
+    fps_counter += 1
+    if current_time - last_fps_time >= 1.0:
+        current_fps = fps_counter / (current_time - last_fps_time)
+        fps_counter = 0
+        last_fps_time = current_time
+    
+    curr_time = time.time()
+    original_height, original_width = frame.shape[:2]
+    display_frame = frame.copy()
+    
+    # Calculate ROI coordinates - CENTERED HALF FRAME
+    roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
+    
+    # Ensure ROI is valid
+    if roi_xmax <= roi_xmin or roi_ymax <= roi_ymin:
+        # Fallback to centered half frame
+        center_x, center_y = original_width // 2, original_height // 2
+        roi_width, roi_height = original_width // 2, original_height // 2
+        roi_xmin = center_x - roi_width // 2
+        roi_ymin = center_y - roi_height // 2
+        roi_xmax = center_x + roi_width // 2
+        roi_ymax = center_y + roi_height // 2
+        logger.warning("ROI không hợp lệ, sử dụng nửa khung hình ở giữa")
+    
+    # Extract ROI frame
+    roi_frame = frame[roi_ymin:roi_ymax, roi_xmin:roi_xmax]
+    
+    # Ensure ROI frame has valid size
+    if roi_frame.shape[0] < 50 or roi_frame.shape[1] < 50:
+        logger.warning(f"ROI frame too small: {roi_frame.shape}, using centered half frame")
+        center_x, center_y = original_width // 2, original_height // 2
+        roi_width, roi_height = max(original_width // 2, 100), max(original_height // 2, 100)
+        roi_xmin = max(0, center_x - roi_width // 2)
+        roi_ymin = max(0, center_y - roi_height // 2)
+        roi_xmax = min(original_width, center_x + roi_width // 2)
+        roi_ymax = min(original_height, center_y + roi_height // 2)
+        roi_frame = frame[roi_ymin:roi_ymax, roi_xmin:roi_xmax]
+    
+    # Call FastALPR on ROI only
+    alpr_results = []
+    if alpr is not None:
         try:
-            if torch.cuda.is_available():
-                plate_model.to('cuda')
-                logger.info(f"Plate model moved to CUDA")
+            # Convert BGR to RGB for FastALPR
+            if len(roi_frame.shape) == 3 and roi_frame.shape[2] == 3:
+                roi_frame_rgb = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2RGB)
             else:
-                logger.info("Plate model loaded on CPU")
+                roi_frame_rgb = roi_frame
+                
+            logger.debug(f"ROI frame shape: {roi_frame_rgb.shape}")
+            
+            # Ensure frame has minimum size
+            if roi_frame_rgb.shape[0] >= 50 and roi_frame_rgb.shape[1] >= 50:
+                alpr_results = alpr.predict(roi_frame_rgb)
+                logger.debug(f"FastALPR detected {len(alpr_results)} objects in centered ROI")
+            else:
+                logger.warning(f"ROI frame too small for detection: {roi_frame_rgb.shape}")
+                
         except Exception as e:
-            logger.warning(f"Could not move plate model to CUDA: {e}")
-        
-        plate_model_name = os.path.basename(model_path)
-        logger.info(f"✅ Plate model loaded successfully: {plate_model_name}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Failed to load plate model {model_path}: {e}")
-        # FALLBACK: Sử dụng YOLO model chung
-        if yolo_model is not None:
-            logger.info("Using general YOLO model for plate detection as fallback")
-            plate_model = yolo_model
-            plate_model_name = "yolo_fallback"
-            return True
-        return False
-def debug_ocr_engine_health():
-    """Kiểm tra tình trạng OCR engines"""
-    try:
-        logger.info("🔍 DEBUGGING OCR ENGINE HEALTH...")
-        
-        # Kiểm tra global readers
-        global ocr_reader, ocr_reader_fallback
-        
-        logger.info(f"OCR Reader: {'Available' if ocr_reader else 'None'}")
-        logger.info(f"OCR Fallback: {'Available' if ocr_reader_fallback else 'None'}")
-        
-        if ocr_reader is None and ocr_reader_fallback is None:
-            logger.error("❌ BOTH OCR readers are None!")
-            return False
-        
-        # Test primary reader
-        if ocr_reader:
-            try:
-                test_img = np.ones((60, 200, 3), dtype=np.uint8) * 255
-                cv2.rectangle(test_img, (10, 10), (190, 50), (0, 0, 0), -1)
-                cv2.putText(test_img, "TEST", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                
-                result = ocr_reader.ocr(test_img, det=True, rec=True, cls=True)
-                logger.info(f"✅ Primary OCR test: {type(result)} - {str(result)[:100]}")
-                
-                if result is None or (isinstance(result, list) and all(x is None for x in result)):
-                    logger.error("❌ Primary OCR returns None!")
-                    return False
-                else:
-                    logger.info("✅ Primary OCR working")
-                    
-            except Exception as e:
-                logger.error(f"❌ Primary OCR test failed: {e}")
-                return False
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"OCR health check failed: {e}")
-        return False
-def force_recreate_ocr():
-    """Tạo lại OCR readers hoàn toàn từ đầu"""
-    global ocr_reader, ocr_reader_fallback  # XÓA ocr_reader_fallback
+            logger.error(f"FastALPR prediction failed: {str(e)}")
+            alpr_results = []
+    else:
+        logger.warning("FastALPR not available - skipping detection")
+
+    # Prepare detections list with coordinates converted back to original frame
+    detections = []
+    plate_detections = []  # Store plate-specific detections for bounding box display
     
-    logger.warning("🔄 FORCE RECREATING OCR READERS FROM SCRATCH...")
+    for res in alpr_results:
+        bbox = res.detection.bounding_box
+        # Convert coordinates from ROI back to original frame
+        x1 = max(int(bbox.x1) + roi_xmin, 0)
+        y1 = max(int(bbox.y1) + roi_ymin, 0)
+        x2 = min(int(bbox.x2) + roi_xmin, original_width)
+        y2 = min(int(bbox.y2) + roi_ymin, original_height)
+        conf = res.detection.confidence or 0.7
+        
+        logger.debug(f"Detection bbox (converted to original): ({x1},{y1})-({x2},{y2}), conf: {conf}")
+        
+        # Add detection
+        detections.append([x1, y1, x2, y2, conf])
+        
+        # Extract OCR text for this detection - ENHANCED DOT PROCESSING
+        plate_text = ""
+        ocr_conf = 0
+        
+        if res.ocr and res.ocr.text:
+            raw_text = res.ocr.text
+            conf_list = res.ocr.confidence
+            ocr_conf = mean(conf_list) if isinstance(conf_list, list) else conf_list
+            
+            # ENHANCED: Pre-process OCR text for better dot recognition
+            enhanced_text = fix_vietnamese_ocr_errors(raw_text)
+            plate_text = enhanced_text
+        
+        # Store plate detection info for bounding box display
+        plate_detections.append({
+            'bbox': [x1, y1, x2, y2],
+            'plate_text': plate_text,
+            'confidence': ocr_conf,
+            'detection_conf': conf,
+            'raw_text': res.ocr.text if res.ocr else ""
+        })
+        
+        logger.debug(f"Added detection: bbox=({x1},{y1})-({x2},{y2}), plate='{plate_text}', ocr_conf={ocr_conf:.3f}")
+
+    # Convert to numpy array for tracker
+    if detections:
+        detections_np = np.array(detections, dtype=np.float32)
+    else:
+        detections_np = np.zeros((0, 5), dtype=np.float32)
+
+    # Update tracker
+    tracks = tracker.update(
+        output_results=detections_np,
+        img_info=(original_height, original_width),
+        img_size=(original_height, original_width)
+    )
+
+    # Draw ROI - CHỈ HIỂN THỊ KHUNG VÀNG MỎNG
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 1)  # Vàng, nét mỏng
+
+    # Display FPS and debug info - ENHANCED
+    fps_text = f"FPS: {current_fps:.1f}"
+    cv2.putText(display_frame, fps_text, (original_width - 150, 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
     
-    try:
-        # Clear existing readers completely
-        if ocr_reader:
-            try:
-                del ocr_reader
-            except:
-                pass
-        # XÓA PHẦN XỬ LÝ ocr_reader_fallback
+    # Display debug information
+    debug_text = f"ROI Center: ({(roi_xmin+roi_xmax)//2},{(roi_ymin+roi_ymax)//2})"
+    cv2.putText(display_frame, debug_text, (10, 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    
+    detections_text = f"Detections: {len(detections)}"
+    cv2.putText(display_frame, detections_text, (10, 65),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    
+    # Display FastALPR status
+    alpr_status = "ALPR: OK" if alpr is not None else "ALPR: NOT AVAILABLE"
+    cv2.putText(display_frame, alpr_status, (10, 95),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0) if alpr is not None else (0, 0, 255), 2)
+    
+    # Frame size info
+    frame_size_text = f"Frame: {original_width}x{original_height}"
+    cv2.putText(display_frame, frame_size_text, (10, 125),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+
+    # Draw all plate detections with bounding boxes - ENHANCED DISPLAY
+    boxes = []
+    labels = []
+    ocr_results = []
+    
+    for detection in plate_detections:
+        x1, y1, x2, y2 = detection['bbox']
+        plate_text = detection['plate_text']
+        confidence = detection['confidence']
+        detection_conf = detection['detection_conf']
+        raw_text = detection.get('raw_text', '')
         
-        ocr_reader = None
-        # ocr_reader_fallback = None  # XÓA DÒNG NÀY
+        # Draw detection bounding box (WHITE for raw detections)
+        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 255, 255), 3)
         
-        # Force garbage collection
-        import gc
-        gc.collect()
+        # Process plate text - ENHANCED
+        processed_text = process_plate_text(plate_text) if plate_text else None
         
-        logger.info("🗑️ Cleared existing OCR readers")
-        
-        # Recreate chỉ PaddleOCR
-        logger.info("🔧 Creating new CPU-only PaddleOCR reader...")
-        ocr_reader = create_paddle_ocr(prefer_gpu=False, lang='en')
-        
-        if ocr_reader:
-            logger.info("✅ New PaddleOCR reader created")
-            return True
+        if processed_text and confidence > MIN_CONFIDENCE:
+            # Draw plate text with confidence - ENHANCED DISPLAY
+            label = f"PLATE: {processed_text}"
+            cv2.putText(display_frame, label, (x1, y1 - 45),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 3)
+            
+            conf_text = f"OCR: {confidence:.3f}"
+            cv2.putText(display_frame, conf_text, (x1, y2 + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
+            # Show raw text for debugging (WHITE text)
+            raw_debug = f"Raw: {raw_text}"
+            cv2.putText(display_frame, raw_debug, (x1, y2 + 55),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+            # Draw smaller plate bounding box (WHITE for processed plates)
+            plate_padding = 5
+            plate_x1 = max(x1 + plate_padding, 0)
+            plate_y1 = max(y1 + plate_padding, 0)
+            plate_x2 = min(x2 - plate_padding, original_width)
+            plate_y2 = min(y2 - plate_padding, original_height)
+            
+            cv2.rectangle(display_frame, (plate_x1, plate_y1), (plate_x2, plate_y2), (255, 255, 255), 2)
+            
+            # Add to response arrays
+            boxes.append([x1, y1, x2, y2])
+            labels.append(f"Plate: {processed_text}")
+            ocr_results.append([processed_text, confidence])
+            
+            logger.info(f"✅ Displayed ENHANCED plate: '{processed_text}' at ({x1},{y1})-({x2},{y2})")
         else:
-            logger.error("❌ Failed to create PaddleOCR reader")
-            return False
+            # Show detection but mark as unprocessed (WHITE text)
+            no_text_label = "NO VALID TEXT"
+            cv2.putText(display_frame, no_text_label, (x1, y1 - 45),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            det_conf_text = f"Det: {detection_conf:.3f}"
+            cv2.putText(display_frame, det_conf_text, (x1, y2 + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
+            # Show raw text for debugging (WHITE text)
+            if raw_text:
+                raw_debug = f"Raw: {raw_text}"
+                cv2.putText(display_frame, raw_debug, (x1, y2 + 55),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+    # Process tracker results for vehicles
+    current_track_ids = set()
+    
+    for track in tracks:
+        tlwh = track.tlwh
+        current_track_id = track.track_id
+        x1, y1, w, h = map(int, tlwh)
+        x2, y2 = x1 + w, y1 + h
+        
+        # Check bbox size
+        if (x2 - x1) < 30 or (y2 - y1) < 15:
+            continue
+
+        # Try to match track with plate detections
+        best_plate_match = None
+        best_overlap = 0
+        
+        for detection in plate_detections:
+            det_x1, det_y1, det_x2, det_y2 = detection['bbox']
+            
+            # Calculate overlap between track and detection
+            overlap_x1 = max(x1, det_x1)
+            overlap_y1 = max(y1, det_y1)
+            overlap_x2 = min(x2, det_x2)
+            overlap_y2 = min(y2, det_y2)
+            
+            if overlap_x1 < overlap_x2 and overlap_y1 < overlap_y2:
+                overlap_area = (overlap_x2 - overlap_x1) * (overlap_y2 - overlap_y1)
+                detection_area = (det_x2 - det_x1) * (det_y2 - det_y1)
+                overlap_ratio = overlap_area / detection_area if detection_area > 0 else 0
+                
+                if overlap_ratio > best_overlap:
+                    best_overlap = overlap_ratio
+                    best_plate_match = detection
+
+        # Process plate text for this track - ENHANCED
+        plate_text = ""
+        conf_val = 0
+        
+        if best_plate_match and best_overlap > 0.1:  # 10% overlap threshold
+            raw_text = best_plate_match['plate_text']
+            conf_val = best_plate_match['confidence']
+            
+            if raw_text and conf_val > MIN_CONFIDENCE:
+                processed_text = process_plate_text(raw_text)
+                if processed_text:
+                    plate_text = processed_text
+
+        # Filter plates
+        logger.debug(f"Processing track {current_track_id}: plate='{plate_text}', conf={conf_val:.3f}")
+        
+        if not plate_text or conf_val < MIN_CONFIDENCE:
+            plate_text = "Đang nhận diện..."
+            conf_val = 0.0
+
+        # Find existing track_id for similar plates
+        existing_track_id = find_existing_track_id(plate_text) if plate_text != "Đang nhận diện..." else None
+        
+        # Determine final track_id to use
+        if existing_track_id and existing_track_id != current_track_id:
+            track_id_mapping[current_track_id] = existing_track_id
+            final_track_id = existing_track_id
+        else:
+            final_track_id = current_track_id
+        
+        # Update plate to track_id mapping
+        if plate_text != "Đang nhận diện...":
+            if plate_text not in plate_to_track_id:
+                plate_to_track_id[plate_text] = []
+            if final_track_id not in plate_to_track_id[plate_text]:
+                plate_to_track_id[plate_text].append(final_track_id)
+        
+        # Update plate history
+        if final_track_id not in plate_history:
+            plate_history[final_track_id] = []
+        
+        if len(plate_history[final_track_id]) >= 5:
+            plate_history[final_track_id].pop(0)
+            
+        plate_history[final_track_id].append((plate_text, conf_val))
+
+        # Update Redis immediately
+        if plate_text != "Đang nhận diện...":
+            bbox_str = f"{x1},{y1},{x2},{y2}"
+            update_redis_plate(final_track_id, plate_text, conf_val, bbox_str)
+
+        # Update track_info
+        track_info[final_track_id] = {
+            'plate': plate_text,
+            'confidence': conf_val,
+            'bbox': f"{x1},{y1},{x2},{y2}",
+            'last_seen': curr_time
+        }
+        
+        # Update tracked_objects for database saving
+        if final_track_id not in tracked_objects:
+            tracked_objects[final_track_id] = {
+                'track_id': final_track_id,
+                'bbox': [x1, y1, x2, y2],
+                'plate_number': plate_text,
+                'raw_text': plate_text,
+                'confidence': conf_val,
+                'first_seen': curr_time,
+                'last_seen': curr_time,
+                'crop_filename': '',
+                'disappeared': 0,
+                'validation_passed': plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE,
+                'is_consistent': should_save_plate(plate_text, conf_val, final_track_id),
+                'ocr_attempts': 1,
+                'saved_to_db': False
+            }
+        else:
+            # Update existing object
+            obj = tracked_objects[final_track_id]
+            obj['bbox'] = [x1, y1, x2, y2]
+            obj['last_seen'] = curr_time
+            obj['disappeared'] = 0
+            
+            # Update plate number if we have a new valid result
+            if plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE:
+                if should_save_plate(plate_text, conf_val, final_track_id):
+                    obj['plate_number'] = plate_text
+                    obj['raw_text'] = plate_text
+                    obj['confidence'] = conf_val
+                    obj['validation_passed'] = True
+                    obj['is_consistent'] = True
+                    logger.info(f"Updated track {final_track_id} with ENHANCED plate: '{plate_text}' (conf: {conf_val:.3f})")
+        
+        current_track_ids.add(final_track_id)
+
+        # Draw vehicle bounding box (WHITE for tracked vehicles)
+        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 255, 255), 3)
+        
+        # Vehicle label with track ID and plate (WHITE text)
+        vehicle_label = f"VEHICLE T{final_track_id}: {plate_text}"
+        cv2.putText(display_frame, vehicle_label, (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Confidence score (WHITE text)
+        if plate_text != "Đang nhận diện...":
+            conf_text = f"Conf: {conf_val:.3f}"
+            cv2.putText(display_frame, conf_text, (x1, y2 + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        # Save crop for first detection
+        if final_track_id not in plate_history or len(plate_history[final_track_id]) == 1:
+            # Tạo tên file với format: plate_{track_id}_{plate_text}_{timestamp}.jpg
+            clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text) if plate_text else f"unknown_{final_track_id}"
+            crop_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
+            padding = 10
+            x1_crop = max(x1-padding, 0)
+            y1_crop = max(y1-padding, 0)
+            x2_crop = min(x2+padding, original_width)
+            y2_crop = min(y2+padding, original_height)
+            crop = display_frame[y1_crop:y2_crop, x1_crop:x2_crop]
+            if crop.size > 0:
+                crop_path = os.path.join(CROPS_FOLDER, crop_filename)
+                cv2.imwrite(crop_path, crop)
+                
+                # Update crop filename in tracked object
+                if final_track_id in tracked_objects:
+                    tracked_objects[final_track_id]['crop_filename'] = crop_filename
+
+    # Clean up old tracks
+    if len(plate_history) > 30:
+        oldest_track = min(plate_history.keys(), key=lambda k: track_info.get(k, {}).get('last_seen', 0))
+        del plate_history[oldest_track]
+        if oldest_track in track_info:
+            del track_info[oldest_track]
+    
+    # Cleanup inactive tracks and send to database
+    if curr_time - last_redis_update > 10.0:
+        tracks_to_remove = []
+        for track_id in list(track_info.keys()):
+            if curr_time - track_info[track_id]['last_seen'] > 10.0:
+                
+                # Get plate information
+                plate_text = track_info[track_id]['plate']
+                
+                if plate_text and plate_text != "Đang nhận diện...":
+                    clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
+                    
+                    # Create frame filename: plate_number_trackID_timestamp.jpg
+                    frame_filename = f"{clean_plate_text}_{track_id}_{int(curr_time)}.jpg"
+                    frame_path = f"/frame_crops/{frame_filename}"
+                    
+                    # Save original frame (without bounding boxes)
+                    absolute_frame_path = os.path.join(FRAMES_FOLDER, frame_filename)
+                    
+                    # Use original frame instead of display_frame
+                    success = cv2.imwrite(absolute_frame_path, frame)
+                    if success:
+                        logger.info(f"Original frame saved to {absolute_frame_path}")
+                    else:
+                        logger.warning(f"Failed to save original frame to {absolute_frame_path}")
+                    
+                    # Send plate data to server Node.js
+                    send_plate_to_server(track_id, track_info[track_id], frame_path, camera_id=camera_id)
+                
+                tracks_to_remove.append(track_id)
+        
+        for track_id in tracks_to_remove:
+            if track_id in track_info:
+                del track_info[track_id]
+            if track_id in plate_history:
+                del plate_history[track_id]
+        
+        last_redis_update = curr_time
+
+    # Periodic cleanup of tracked objects
+    if frame_count % 60 == 0:
+        cleanup_tracked_objects()
+
+    # Create result dictionary
+    result = {
+        'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes(),
+        'boxes': boxes,
+        'labels': labels,
+        'ocr_results': ocr_results,
+        'tracked_objects': tracked_objects.copy(),
+        'ids': list(current_track_ids),
+        'frame_width': original_width,
+        'frame_height': original_height,
+        'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
+        'fps': current_fps,
+        'detection_count': len(detections),
+        'track_count': len(tracks)
+    }
+    
+    logger.debug(f"Frame {frame_count} completed: {len(boxes)} boxes, {len(labels)} labels, {len(tracked_objects)} tracked objects")
+    
+    return result
+
+def get_detection_stats():
+    """Get detection statistics for monitoring"""
+    try:
+        current_time = time.time()
+        consistent_plates = len([obj for obj in tracked_objects.values() if obj.get('is_consistent', False)])
+        
+        stats = {
+            'total_tracks': len(tracked_objects),
+            'plates_detected': len([obj for obj in tracked_objects.values() if obj.get('plate_number') and obj.get('plate_number') != 'Đang nhận diện...']),
+            'consistent_plates': consistent_plates,
+            'plates_saved': len([obj for obj in tracked_objects.values() if obj.get('saved_to_db')]),
+            'current_fps': current_fps,
+            'frame_count': frame_count,
+            'plate_history_size': len(plate_history),
+            'duplicates_prevented': duplicate_counter,
+            'consistency_records': len(track_consistency),
+            'ocr_attempts': len(ocr_attempts_per_track),
+            'consistency_threshold': consistency_threshold,
+            'max_ocr_attempts': max_ocr_attempts,
+            'last_cleanup': last_cleanup_time,
+            'alpr_available': alpr is not None,
+            'redis_available': redis_available,
+            'roi_info': {
+                'type': 'centered_half_frame',
+                'x_percent': f"{ROI_PERCENT_XMIN:.0%}-{ROI_PERCENT_XMAX:.0%}",
+                'y_percent': f"{ROI_PERCENT_YMIN:.0%}-{ROI_PERCENT_YMAX:.0%}"
+            }
+        }
+        
+        return stats
         
     except Exception as e:
-        logger.error(f"❌ Force recreate OCR failed: {e}")
-        return False  
-def set_plate_model_by_name(name: str):
-    """Select and load a plate model by file name (basename)."""
-    try:
-        available = get_available_plate_models()
-        for path in available:
-            if os.path.basename(path).lower() == str(name).lower():
-                return _load_plate_model_from_path(path)
-        logger.warning(f"Requested plate model not found: {name}")
-        return False
-    except Exception as e:
-        logger.error(f"Error selecting plate model {name}: {e}")
-        return False
+        logger.error(f"Error getting detection stats: {e}")
+        return {'error': str(e)}
 
-def cycle_plate_model():
-    """Cycle to the next available plate model in the preference list."""
-    try:
-        available = get_available_plate_models()
-        if not available:
-            logger.warning("No plate models available to cycle")
-            return False
-        if plate_model_name is None:
-            return _load_plate_model_from_path(available[0])
-        current_idx = -1
-        for i, path in enumerate(available):
-            if os.path.basename(path) == plate_model_name:
-                current_idx = i
-                break
-        next_idx = (current_idx + 1) % len(available)
-        return _load_plate_model_from_path(available[next_idx])
-    except Exception as e:
-        logger.error(f"Error cycling plate model: {e}")
-        return False
-
-def get_plate_model_status():
-    try:
-        return {
-            'current': plate_model_name,
-            'available': [os.path.basename(p) for p in get_available_plate_models()]
-        }
-    except Exception:
-        return {'current': plate_model_name, 'available': []}
+def reset_anti_duplicate_system():
+    """Reset the entire anti-duplicate system"""
+    global tracked_objects, plate_history, duplicate_counter, last_cleanup_time, track_consistency, ocr_attempts_per_track
+    
+    logger.warning("🔄 RESETTING ANTI-DUPLICATE SYSTEM...")
+    
+    old_tracked_count = len(tracked_objects)
+    old_history_count = len(plate_history)
+    old_consistency_count = len(track_consistency)
+    old_attempts_count = len(ocr_attempts_per_track)
+    
+    tracked_objects.clear()
+    plate_history.clear()
+    track_consistency.clear()
+    ocr_attempts_per_track.clear()
+    duplicate_counter = 0
+    last_cleanup_time = 0
+    
+    logger.info(f"🔄 Anti-duplicate system reset:")
+    logger.info(f"   Tracked objects: {old_tracked_count} -> 0")
+    logger.info(f"   Plate history: {old_history_count} -> 0")
+    logger.info(f"   Consistency records: {old_consistency_count} -> 0")
+    logger.info(f"   OCR attempts: {old_attempts_count} -> 0")
+    
+    return {
+        'success': True,
+        'message': 'Anti-duplicate system reset successfully',
+        'old_tracked_count': old_tracked_count,
+        'old_history_count': old_history_count,
+        'old_consistency_count': old_consistency_count,
+        'old_attempts_count': old_attempts_count
+    }
 
 def get_tracked_objects_status():
     """Get detailed status of tracked_objects for debugging"""
@@ -2377,10 +1212,6 @@ def get_tracked_objects_status():
                 vehicles_only += 1
                 continue
             
-            if not _is_valid_vn_plate_format(plate_num):
-                invalid_count += 1
-                continue
-            
             if is_consistent:
                 consistent_plates += 1
             
@@ -2398,18 +1229,6 @@ def get_tracked_objects_status():
         # Find duplicates
         duplicates = {plate: tracks for plate, tracks in plate_counts.items() if len(tracks) > 1}
         
-        # Analyze consistency data
-        consistency_summary = {}
-        for track_id, consistency_data in track_consistency.items():
-            if track_id in tracked_objects:
-                consistency_summary[track_id] = {
-                    'best_result': consistency_data.get('best_result'),
-                    'best_confidence': consistency_data.get('best_confidence', 0),
-                    'consistent_count': consistency_data.get('consistent_count', 0),
-                    'total_results': len(consistency_data.get('results', [])),
-                    'ocr_attempts': ocr_attempts_per_track.get(track_id, 0)
-                }
-        
         return {
             'total': len(tracked_objects),
             'valid_plates': len(plate_counts),
@@ -2423,7 +1242,6 @@ def get_tracked_objects_status():
             'duplicates_prevented': duplicate_counter,
             'consistency_records': len(track_consistency),
             'ocr_attempts': len(ocr_attempts_per_track),
-            'consistency_summary': consistency_summary,
             'last_cleanup': last_cleanup_time
         }
         
@@ -2431,2596 +1249,36 @@ def get_tracked_objects_status():
         logger.error(f"Error getting tracked_objects status: {e}")
         return {'error': str(e)}
 
-def reset_anti_duplicate_system():
-    """Reset the entire anti-duplicate system"""
-    global tracked_objects, plate_history, duplicate_counter, last_cleanup_time, track_consistency, ocr_attempts_per_track
-    
-    logger.warning("🔄 RESETTING ANTI-DUPLICATE SYSTEM...")
-    
-    old_tracked_count = len(tracked_objects)
-    old_history_count = len(plate_history)
-    old_consistency_count = len(track_consistency)
-    old_attempts_count = len(ocr_attempts_per_track)
-    
-    tracked_objects.clear()
-    plate_history.clear()
-    track_consistency.clear()
-    ocr_attempts_per_track.clear()
-    duplicate_counter = 0
-    last_cleanup_time = 0
-    
-    logger.info(f"🔄 Anti-duplicate system reset:")
-    logger.info(f"   Tracked objects: {old_tracked_count} -> 0")
-    logger.info(f"   Plate history: {old_history_count} -> 0")
-    logger.info(f"   Consistency records: {old_consistency_count} -> 0")
-    logger.info(f"   OCR attempts: {old_attempts_count} -> 0")
-    logger.info(f"   Duplicate counter: reset to 0")
-    logger.info(f"   Last cleanup: reset to 0")
-    
-    return {
-        'success': True,
-        'message': 'Anti-duplicate system reset successfully',
-        'old_tracked_count': old_tracked_count,
-        'old_history_count': old_history_count,
-        'old_consistency_count': old_consistency_count,
-        'old_attempts_count': old_attempts_count
-    }
-
-# Tracker removed - using direct plate detection only
-# Tracker removed - using direct plate detection only
-def calculate_centroid(xmin, ymin, xmax, ymax):
-    return ((xmin + xmax) / 2, (ymin + ymax) / 2)
-
-def calculate_roi_coordinates(width, height):
-    """Tính toán ROI coordinates dựa trên kích thước frame"""
+# Legacy function for backward compatibility
+def detect_and_ocr(frame, camera_id=None):
+    """Legacy function that returns only the processed frame for backward compatibility"""
     try:
-        roi_xmin = max(0, int(width * ROI_PERCENT_XMIN))
-        roi_ymin = max(0, int(height * ROI_PERCENT_YMIN))
-        roi_xmax = min(width-1, int(width * ROI_PERCENT_XMAX))
-        roi_ymax = min(height-1, int(height * ROI_PERCENT_YMAX))
+        result = detect_and_ocr_stable(frame, camera_id)
         
-        # Đảm bảo ROI hợp lệ
-        if roi_xmax <= roi_xmin:
-            roi_xmax = width - 50
-            roi_xmin = 50
-        if roi_ymax <= roi_ymin:
-            roi_ymax = height - 50
-            roi_ymin = 50
-            
-        return roi_xmin, roi_ymin, roi_xmax, roi_ymax
-    except Exception as e:
-        logger.error(f"Error calculating ROI: {e}")
-        # Fallback ROI
-        return 50, 50, width-50, height-50
-
-def is_in_roi(centroid, width, height):
-    x, y = centroid
-    roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(width, height)
-    return roi_xmin <= x <= roi_xmax and roi_ymin <= y <= roi_ymax
-
-# Overlap-based ROI check: consider a track inside ROI if its bbox overlaps ROI
-# by at least a minimum ratio of its own area. This is more robust than centroid-only.
-def is_bbox_in_roi(bbox, width, height, min_overlap=0.01):
-    """FIXED: ROI checking với overlap ratio thích hợp"""
-    try:
-        x1, y1, x2, y2 = map(float, bbox)
-        roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(width, height)
-
-        # Tính intersection
-        inter_x1 = max(x1, roi_xmin)
-        inter_y1 = max(y1, roi_ymin)
-        inter_x2 = min(x2, roi_xmax)
-        inter_y2 = min(y2, roi_ymax)
-
-        inter_w = max(0.0, inter_x2 - inter_x1)
-        inter_h = max(0.0, inter_y2 - inter_y1)
-        inter_area = inter_w * inter_h
-
-        bbox_area = max(1.0, (x2 - x1) * (y2 - y1))
-        overlap_ratio = inter_area / bbox_area
-        
-        # Log để debug
-        if overlap_ratio > 0:
-            logger.debug(f"ROI check: bbox=[{x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}], overlap={overlap_ratio:.3f}")
-        
-        return overlap_ratio >= min_overlap
-    except Exception as e:
-        logger.error(f"Error in ROI check: {e}")
-        return True  # Fallback: accept all
-def process_plate_text(text):
-    """SIMPLIFIED: Process Vietnamese plate text with relaxed validation"""
-    if not text or not isinstance(text, str):
-        return None
-    
-    try:
-        # Basic cleaning
-        original = text
-        text = re.sub(r'[^A-Z0-9\-\.\s]', '', text.upper().strip())
-        
-        if len(text) < 3:  # Very relaxed minimum length
-            return None
-        
-        # Fix common OCR errors
-        text = fix_vietnamese_ocr_errors(text)
-        
-        # Simple Vietnamese plate patterns - RELAXED
-        patterns = [
-            # Standard formats
-            r'^\d{2}[A-Z]-\d{2,4}\.\d{2}$',        # 30A-123.45
-            r'^\d{2}[A-Z]-\d{3,6}$',                # 30A-12345
-            r'^\d{2}[A-Z]\d-\d{3,4}$',              # 30A1-2345
-            r'^\d{2}[A-Z]{2}-\d{2,4}\.\d{2}$',     # 30AB-123.45
-            
-            # Compact formats
-            r'^\d{2}[A-Z]\d{3,6}$',                 # 30A1234
-            r'^\d{2}[A-Z]{2}\d{3,5}$',              # 30AB1234
-            
-            # Partial formats (very relaxed)
-            r'^\d{1,2}[A-Z]\d{2,5}$',               # 3A123, 30A1234
-            r'^\d{2}[A-Z]{1,2}\d{2,4}$',            # 30A12, 30AB123
-        ]
-        
-        for pattern in patterns:
-            if re.match(pattern, text):
-                logger.info(f"✅ Pattern match: '{original}' -> '{text}'")
-                return text
-        
-        # Very relaxed fallback: any alphanumeric with at least 2 digits
-        clean_text = re.sub(r'[^A-Z0-9]', '', text)
-        if len(clean_text) >= 4 and sum(c.isdigit() for c in clean_text) >= 2:
-            logger.info(f"✅ Accepted relaxed pattern: '{original}' -> '{clean_text}'")
-            return clean_text
-        
-        logger.debug(f"❌ No pattern match for: '{original}' -> '{text}'")
-        return None
-        
-    except Exception as e:
-        logger.error(f"❌ Error processing plate text: {e}")
-        return None
-
-def fix_vietnamese_ocr_errors(text):
-    """Fix common OCR errors for Vietnamese license plates"""
-    if not text:
-        return text
-    
-    # Common OCR errors for Vietnamese plates
-    replacements = {
-        'O': '0', 'I': '1', 'S': '5', 'G': '6', 'B': '8', 'Z': '2',
-        'L': '1', 'T': '7', 'J': '1', 'Q': '0', 'U': '0', 'V': 'U',
-        'W': 'VV', 'X': 'XX', 'Y': 'Y', 'K': 'K', 'M': 'M', 'N': 'N',
-        'P': 'P', 'R': 'R', 'A': 'A', 'C': 'C', 'D': 'D', 'E': 'E',
-        'F': 'F', 'H': 'H'
-    }
-    
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    
-    return text
-
-def auto_format_vietnamese_plate(text):
-    """Auto-format text to Vietnamese plate standard"""
-    if not text or len(text) < 4:
-        return text
-    
-    # Remove all separators first
-    clean_text = re.sub(r'[\-\.\s]', '', text)
-    
-    # Check if it's already properly formatted
-    if _is_valid_vn_plate_format(text):
-        return text
-    
-    # Auto-format based on length and pattern
-    if len(clean_text) >= 6:
-        # Pattern: 2 digits + 1 letter + ...
-        if re.match(r'^\d{2}[A-Z]', clean_text):
-            province_code = clean_text[:2]  # Mã tỉnh
-            letter = clean_text[2:3]        # Chữ cái
-            rest = clean_text[3:]            # Phần còn lại
-            
-            # Ô tô formats
-            if len(rest) == 4:
-                return f"{province_code}{letter}-{rest[:2]}.{rest[2:]}"
-            elif len(rest) == 5:
-                return f"{province_code}{letter}-{rest[:3]}.{rest[3:]}"
-            elif len(rest) == 6:
-                return f"{province_code}{letter}-{rest[:4]}.{rest[4:]}"
-            elif len(rest) >= 7:
-                return f"{province_code}{letter}-{rest}"
-            
-            # Xe máy formats
-            elif len(rest) >= 4:
-                fourth_char = rest[0]
-                if fourth_char.isdigit():
-                    if len(rest) == 5:
-                        return f"{province_code}{letter}{fourth_char}-{rest[1:]}"
-                    elif len(rest) == 6:
-                        return f"{province_code}{letter}{fourth_char}-{rest[1:4]}.{rest[4:]}"
-        
-        # Ngoại giao format: 2 digits + 2 letters
-        elif re.match(r'^\d{2}[A-Z]{2}', clean_text):
-            province_code = clean_text[:2]
-            letters = clean_text[2:4]
-            rest = clean_text[4:]
-            
-            if len(rest) == 4:
-                return f"{province_code}{letters}-{rest[:2]}.{rest[2:]}"
-            elif len(rest) == 5:
-                return f"{province_code}{letters}-{rest[:3]}.{rest[3:]}"
-            elif len(rest) == 6:
-                return f"{province_code}{letters}-{rest[:4]}.{rest[4:]}"
-    
-    # If no specific pattern matches, return cleaned text
-    return clean_text
-
-def normalize_vn_plate_for_db(text, min_conf: float = 0.3):
-    """Normalize and validate a plate text strictly for DB saving.
-    Returns normalized VN plate string if valid, otherwise None.
-    """
-    try:
-        if not text or not isinstance(text, str):
-            return None
-        cleaned = re.sub(r'[^A-Z0-9\-\.]', '', text.upper().strip())
-        # Prefer dash format if plausible: insert dash when pattern like NN[A-Z]{1,2} followed by digits
-        m = re.match(r'^(\d{2}[A-Z]{1,2})(\d[\d\.]*)$', cleaned)
-        if m:
-            candidate = f"{m.group(1)}-{m.group(2)}"
-            if process_plate_text(candidate):
-                return candidate
-        # Otherwise accept if strict or relaxed processor approves
-        strict_ok = _is_valid_vn_plate_format(cleaned) if '_is_valid_vn_plate_format' in globals() else False
-        relaxed_ok = process_plate_text(cleaned) is not None
-        if strict_ok or relaxed_ok:
-            return cleaned
-        return None
-    except Exception:
-        return None
-
-# ==== SỬA LỖI OCR RESULT EMPTY LIST ====
-
-def safe_extract_ocr_text(ocr_result):
-    """Extract OCR text với validation chi tiết và debug toàn diện"""
-    try:
-        if not ocr_result:
-            logger.warning("OCR result is None or empty")
-            return None, 0.0
-        
-        logger.info(f"🔍 EXTRACTING TEXT FROM OCR RESULT: {type(ocr_result)}")
-        logger.info(f"🔍 OCR result value: {str(ocr_result)[:500]}")
-        
-        # Debug: Log raw structure
-        def debug_structure(obj, depth=0, max_depth=3):
-            if depth > max_depth:
-                return
-            indent = "  " * depth
-            if isinstance(obj, list):
-                logger.info(f"{indent}List with {len(obj)} items:")
-                for i, item in enumerate(obj[:3]):  # Only first 3 items
-                    logger.info(f"{indent}[{i}]: {type(item)}")
-                    debug_structure(item, depth + 1, max_depth)
-            elif isinstance(obj, tuple):
-                logger.info(f"{indent}Tuple with {len(obj)} items:")
-                for i, item in enumerate(obj[:3]):
-                    logger.info(f"{indent}[{i}]: {type(item)} = {str(item)[:50]}")
+        if isinstance(result, dict):
+            # Return just the frame bytes for legacy compatibility
+            frame_bytes = result.get('frame', b'')
+            if frame_bytes:
+                # Decode frame bytes back to numpy array
+                nparr = np.frombuffer(frame_bytes, np.uint8)
+                return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             else:
-                logger.info(f"{indent}{type(obj)}: {str(obj)[:100]}")
-        
-        debug_structure(ocr_result)
-        
-        all_extractions = []
-            
-        # Handle different OCR result formats
-        if isinstance(ocr_result, list):
-            logger.info(f"📄 Processing list with {len(ocr_result)} items")
-            
-            for page_idx, page_result in enumerate(ocr_result):
-                logger.info(f"📄 Page {page_idx}: {type(page_result)}")
-                
-                if page_result is None:
-                    logger.warning(f"Page {page_idx} is None, skipping")
-                    continue
-                
-                if isinstance(page_result, list):
-                    logger.info(f"📄 Page {page_idx} has {len(page_result)} line results")
-                    
-                    for line_idx, line_result in enumerate(page_result):
-                        logger.info(f"📄 Line {page_idx}-{line_idx}: {type(line_result)}")
-                        
-                        if line_result is None:
-                            logger.warning(f"Line {page_idx}-{line_idx} is None, skipping")
-                            continue
-                        
-                        # Format 1: [bbox, [text, conf]]
-                        if isinstance(line_result, (list, tuple)) and len(line_result) >= 2:
-                            bbox = line_result[0]
-                            text_data = line_result[1]
-                            
-                            logger.info(f"📄 Line {page_idx}-{line_idx} bbox: {bbox}")
-                            logger.info(f"📄 Line {page_idx}-{line_idx} text_data: {text_data}")
-                            
-                            if isinstance(text_data, (list, tuple)) and len(text_data) >= 2:
-                                text = str(text_data[0]).strip()
-                                try:
-                                    confidence = float(text_data[1])
-                                except Exception:
-                                    try:
-                                        import numpy as _np
-                                        if isinstance(text_data[1], (_np.floating, _np.integer)):
-                                            confidence = float(text_data[1])
-                                        else:
-                                            confidence = 0.0
-                                    except Exception:
-                                        confidence = 0.0
-                                
-                                logger.info(f"✅ Extracted: '{text}' with confidence {confidence}")
-                                
-                                # Very lenient validation
-                                if text and len(text) >= 1 and confidence > 0.001:
-                                    all_extractions.append((text, confidence))
-                                    logger.info(f"✅ Added to extractions: '{text}' (conf: {confidence})")
-                                else:
-                                    logger.info(f"❌ Rejected: text='{text}', conf={confidence}")
-                        
-                        # Format 2: [text, conf] directly
-                        elif isinstance(line_result, (list, tuple)) and len(line_result) >= 2:
-                            text = str(line_result[0]).strip()
-                            try:
-                                confidence = float(line_result[1])
-                            except Exception:
-                                confidence = 0.0
-                            
-                            logger.info(f"✅ Direct format extracted: '{text}' with confidence {confidence}")
-                            
-                            if text and len(text) >= 1 and confidence > 0.001:
-                                all_extractions.append((text, confidence))
-                                logger.info(f"✅ Added direct extraction: '{text}' (conf: {confidence})")
-                            else:
-                                logger.info(f"❌ Rejected direct: text='{text}', conf={confidence}")
-                        
-                        # Format 3: String directly
-                        elif isinstance(line_result, str):
-                            text = line_result.strip()
-                            confidence = 0.5  # Default confidence for string
-                            
-                            logger.info(f"✅ String format extracted: '{text}' with default confidence {confidence}")
-                            
-                            if text and len(text) >= 1:
-                                all_extractions.append((text, confidence))
-                                logger.info(f"✅ Added string extraction: '{text}' (conf: {confidence})")
-                            else:
-                                logger.info(f"❌ Rejected string: text='{text}'")
-                
-                # Handle single item (not list)
-                elif isinstance(page_result, (list, tuple)) and len(page_result) >= 2:
-                    # Try to extract from single item
-                    text = str(page_result[0]).strip()
-                    try:
-                        confidence = float(page_result[1])
-                    except Exception:
-                        confidence = 0.0
-                    
-                    logger.info(f"✅ Single item extracted: '{text}' with confidence {confidence}")
-                    
-                    if text and len(text) >= 1 and confidence > 0.001:
-                        all_extractions.append((text, confidence))
-                        logger.info(f"✅ Added single item: '{text}' (conf: {confidence})")
-                    else:
-                        logger.info(f"❌ Rejected single item: text='{text}', conf={confidence}")
-        
-        # Handle non-list results
-        elif isinstance(ocr_result, str):
-            text = ocr_result.strip()
-            confidence = 0.5
-            logger.info(f"✅ String result: '{text}' with default confidence {confidence}")
-            if text and len(text) >= 1:
-                all_extractions.append((text, confidence))
-                logger.info(f"✅ Added string result: '{text}' (conf: {confidence})")
-        
-        elif isinstance(ocr_result, tuple) and len(ocr_result) >= 2:
-            text = str(ocr_result[0]).strip()
-            try:
-                confidence = float(ocr_result[1])
-            except Exception:
-                confidence = 0.0
-            
-            logger.info(f"✅ Tuple result: '{text}' with confidence {confidence}")
-            if text and len(text) >= 1 and confidence > 0.001:
-                all_extractions.append((text, confidence))
-                logger.info(f"✅ Added tuple result: '{text}' (conf: {confidence})")
-        
-        # Return best extraction
-        if all_extractions:
-            all_extractions.sort(key=lambda x: x[1], reverse=True)  # Sort by confidence
-            best_text, best_conf = all_extractions[0]
-            logger.info(f"🎯 BEST EXTRACTION: '{best_text}' (conf: {best_conf})")
-            return best_text, best_conf
+                return frame
         else:
-            logger.warning("❌ No valid extractions found")
-            return None, 0.0
-        
-    except Exception as e:
-        logger.error(f"❌ Error extracting OCR text: {e}")
-        import traceback
-        logger.error(f"❌ Extraction traceback: {traceback.format_exc()}")
-        return None, 0.0
-
-def force_reinit_ocr():
-    """Buộc khởi tạo lại OCR readers"""
-    global ocr_reader, ocr_reader_fallback
-    
-    logger.warning("🔄 FORCE REINITIALIZING OCR READERS...")
-    
-    # Clear existing readers
-    ocr_reader = None
-    ocr_reader_fallback = None
-    
-    try:
-        # Reinitialize main reader
-        logger.info("🔄 Reinitializing main OCR reader...")
-        ocr_reader = create_paddle_ocr(prefer_gpu=False, lang='en')  # Force CPU first
-        
-        if ocr_reader:
-            logger.info("✅ Main OCR reader reinitialized")
-        else:
-            logger.error("❌ Failed to reinitialize main OCR reader")
-        
-        # Reinitialize fallback reader
-        logger.info("🔄 Reinitializing fallback OCR reader...")
-        ocr_reader_fallback = create_paddle_ocr(prefer_gpu=False, lang='en')
-        
-        if ocr_reader_fallback:
-            logger.info("✅ Fallback OCR reader reinitialized") 
-        else:
-            logger.error("❌ Failed to reinitialize fallback OCR reader")
-        
-        return ocr_reader is not None
-        
-    except Exception as e:
-        logger.error(f"❌ Force reinit failed: {e}")
-        return False
-    
-def _iter_ocr_candidates(ocr_result):
-    """Enhanced OCR candidates iterator với deep debugging"""
-    try:
-        if ocr_result is None:
-            logger.info("_iter_ocr_candidates: ocr_result is None")
-            return
-        
-        logger.info(f"_iter_ocr_candidates: Processing {type(ocr_result)}")
-        
-        # Normalize to list
-        if not isinstance(ocr_result, (list, tuple)):
-            ocr_result = [ocr_result]
-        
-        logger.info(f"_iter_ocr_candidates: Normalized to list of {len(ocr_result)} items")
-        
-        queue = list(ocr_result)
-        processed_count = 0
-        
-        while queue:
-            item = queue.pop(0)
-            processed_count += 1
-            
-            logger.info(f"_iter_ocr_candidates: Processing item {processed_count}: {type(item)}")
-            
-            if item is None:
-                continue
-            
-            # Handle different formats
-            if isinstance(item, (list, tuple)):
-                logger.info(f"    Item is list/tuple with {len(item)} elements")
-                
-                # Format 1: [text, conf] (rec-only)
-                if len(item) == 2 and isinstance(item[0], str) and isinstance(item[1], (int, float)):
-                    text, conf = str(item[0]), float(item[1])
-                    logger.info(f"    Yielding rec-only: '{text}' (conf: {conf})")
-                    yield text, conf
-                    continue
-                
-                # Format 2: [bbox, [text, conf]] (det+rec)
-                elif len(item) >= 2 and isinstance(item[1], (list, tuple)):
-                    text_data = item[1]
-                    if len(text_data) >= 2 and isinstance(text_data[0], str) and isinstance(text_data[1], (int, float)):
-                        text, conf = str(text_data[0]), float(text_data[1])
-                        logger.info(f"    Yielding det+rec: '{text}' (conf: {conf})")
-                        yield text, conf
-                        continue
-                
-                # Format 3: Nested structure - add to queue
-                else:
-                    logger.info(f"    Adding {len(item)} subitems to queue")
-                    for subitem in item:
-                        queue.append(subitem)
-            
-            elif isinstance(item, str):
-                logger.info(f"    Yielding string: '{item}' (default conf: 0.5)")
-                yield str(item), 0.5
-            
-            else:
-                logger.info(f"    Unknown item type: {type(item)}")
-                continue
-        
-        logger.info(f"_iter_ocr_candidates: Processed {processed_count} items total")
-        
-    except Exception as e:
-        logger.error(f"_iter_ocr_candidates error: {e}")
-        return
-
-
-# ==== SỬA LỖI TOÀN DIỆN CHO OCR RECOGNITION ====
-def safe_extract_ocr_text(ocr_result):
-    try:
-        if not ocr_result:
-            return None, 0.0
-
-        all_texts = []
-        
-        def extract_texts_recursive(item, depth=0):
-            if isinstance(item, list):
-                for subitem in item:
-                    if isinstance(subitem, (list, tuple)) and len(subitem) >= 2:
-                        # Format: [bbox, [text, conf]]
-                        if (isinstance(subitem[1], (list, tuple)) and 
-                            len(subitem[1]) >= 2):
-                            text, conf = subitem[1][0], subitem[1][1]
-                            if isinstance(text, str) and text.strip():
-                                all_texts.append((text.strip(), float(conf)))
-                        # Format: [text, conf] trực tiếp
-                        elif isinstance(subitem[0], str):
-                            text, conf = subitem[0], subitem[1]
-                            if text.strip():
-                                all_texts.append((text.strip(), float(conf)))
-                    else:
-                        extract_texts_recursive(subitem, depth + 1)
-        
-        extract_texts_recursive(ocr_result)
-        
-        if all_texts:
-            # Lấy text có confidence cao nhất
-            best_text, best_conf = max(all_texts, key=lambda x: x[1])
-            return best_text, best_conf
-        
-        return None, 0.0
-        
-    except Exception as e:
-        logger.error(f"OCR extraction error: {e}")
-        return None, 0.0
-def generate_ocr_variants(plate_img: np.ndarray) -> List[np.ndarray]:
-    """Create enhanced OCR variants for better recognition"""
-    variants: List[np.ndarray] = []
-    try:
-        if plate_img is None or plate_img.size == 0:
-            return variants
-            
-        img = plate_img.copy()
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-
-        height, width = img.shape[:2]
-        
-        # Minimum size requirements for OCR
-        target_width = max(400, width * 4)  # At least 4x upscale
-        target_height = max(120, height * 4)
-            
-        logger.info(f"Generating OCR variants: {width}x{height} -> {target_width}x{target_height}")
-        
-        # 1. High-quality upscaled version with enhancement
-        try:
-            # Upscale first
-            upscaled = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_CUBIC)
-            
-            # Convert to LAB for better contrast enhancement
-            lab = cv2.cvtColor(upscaled, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            
-            # Apply CLAHE to L channel
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            l = clahe.apply(l)
-            
-            # Merge back
-            enhanced = cv2.merge([l, a, b])
-            enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-            
-            # Add white padding
-            pad_size = 20
-            padded = cv2.copyMakeBorder(enhanced, pad_size, pad_size, pad_size, pad_size, 
-                                      cv2.BORDER_CONSTANT, value=[255, 255, 255])
-            variants.append(padded)
-            
-        except Exception as e:
-            logger.debug(f"Enhanced variant failed: {e}")
-            # Fallback to simple upscale
-            simple_upscale = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_CUBIC)
-            variants.append(simple_upscale)
-        
-        # 2. Binary threshold variants
-        try:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            gray_upscaled = cv2.resize(gray, (target_width, target_height), interpolation=cv2.INTER_CUBIC)
-            
-            # OTSU threshold
-            _, otsu = cv2.threshold(gray_upscaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            otsu_bgr = cv2.cvtColor(otsu, cv2.COLOR_GRAY2BGR)
-            variants.append(otsu_bgr)
-            
-            # Inverted
-            inverted = cv2.bitwise_not(otsu)
-            inverted_bgr = cv2.cvtColor(inverted, cv2.COLOR_GRAY2BGR)
-            variants.append(inverted_bgr)
-            
-        except Exception as e:
-            logger.debug(f"Binary variants failed: {e}")
-
-        logger.info(f"Generated {len(variants)} OCR variants")
-        return variants
-        
-    except Exception as e:
-        logger.error(f"Error generating OCR variants: {e}")
-        return []
-def combine_two_row_ocr_results(upper_results, lower_results):
-    """Combine OCR results from upper and lower parts of 2-row plate"""
-    try:
-        logger.info("🔗 Combining 2-row OCR results...")
-        
-        combinations = []
-        
-        # Extract texts from results
-        upper_texts = []
-        lower_texts = []
-        
-        if upper_results:
-            for text, conf in _iter_ocr_candidates(upper_results):
-                if text and len(text.strip()) >= 2:
-                    cleaned = clean_and_preserve_structure(text)
-                    if cleaned:
-                        upper_texts.append((cleaned, conf))
-        
-        if lower_results:
-            for text, conf in _iter_ocr_candidates(lower_results):
-                if text and len(text.strip()) >= 2:
-                    cleaned = clean_and_preserve_structure(text)
-                    if cleaned:
-                        lower_texts.append((cleaned, conf))
-        
-        logger.info(f"📄 Upper texts: {upper_texts}")
-        logger.info(f"📄 Lower texts: {lower_texts}")
-        
-        # Try different combinations
-        for upper_text, upper_conf in upper_texts[:3]:  # Top 3 from upper
-            for lower_text, lower_conf in lower_texts[:3]:  # Top 3 from lower
-                
-                # Direct combination
-                combined = upper_text + lower_text
-                combined_conf = (upper_conf + lower_conf) / 2
-                combinations.append((combined, combined_conf))
-                
-                # With dash separator (Vietnamese format)
-                combined_dash = upper_text + '-' + lower_text
-                combinations.append((combined_dash, combined_conf * 0.9))  # Slightly lower conf
-                
-                # With dot separator
-                combined_dot = upper_text + '.' + lower_text
-                combinations.append((combined_dot, combined_conf * 0.8))
-        
-        # Sort by confidence
-        combinations.sort(key=lambda x: x[1], reverse=True)
-        
-        if combinations:
-            best_combined, best_conf = combinations[0]
-            logger.info(f"✅ Best 2-row combination: '{best_combined}' (conf: {best_conf:.3f})")
-            return best_combined, best_conf
-        
-        return None, 0.0
-        
-    except Exception as e:
-        logger.error(f"Error combining 2-row OCR results: {e}")
-        return None, 0.0
-def detect_license_plate_in_vehicle(vehicle_crop, plate_model):
-    """Simplified plate detection using yolov9s.pt"""
-    try:
-        if vehicle_crop is None:
-            return None, 0.0, None
-        
-        h, w = vehicle_crop.shape[:2]
-        
-        # Initialize variables
-        best_plate = None
-        best_confidence = 0.0
-        best_bbox = None
-        
-        # Use yolov9s.pt for plate detection with very low threshold
-        if plate_model is not None:
-            try:
-                # Use very low confidence threshold to catch more plates
-                results = plate_model(vehicle_crop, conf=0.01, iou=0.3, verbose=False)
-                
-                if results:
-                    for result in results:
-                        if hasattr(result, 'boxes') and result.boxes is not None:
-                            boxes = result.boxes
-                            if hasattr(boxes, 'xyxy') and hasattr(boxes, 'conf'):
-                                xyxy = boxes.xyxy.cpu().numpy()
-                                conf = boxes.conf.cpu().numpy()
-                                
-                                # Take the first detection
-                                if len(xyxy) > 0:
-                                    box = xyxy[0]
-                                    confidence = float(conf[0])
-                                    
-                                    x1, y1, x2, y2 = map(int, box)
-                                    
-                                    # Add padding
-                                    pad_x = max(5, int((x2 - x1) * 0.1))
-                                    pad_y = max(3, int((y2 - y1) * 0.1))
-                                    
-                                    x1p = max(0, x1 - pad_x)
-                                    y1p = max(0, y1 - pad_y)
-                                    x2p = min(w, x2 + pad_x)
-                                    y2p = min(h, y2 + pad_y)
-                                    
-                                    plate_crop = vehicle_crop[y1p:y2p, x1p:x2p]
-                                    
-                                    if plate_crop.size > 0:
-                                        plate_h, plate_w = plate_crop.shape[:2]
-                                        if plate_w >= 10 and plate_h >= 5:
-                                            best_plate = plate_crop
-                                            best_confidence = confidence
-                                            best_bbox = [x1p, y1p, x2p, y2p]
-                                            break
-                            
-            except Exception as e:
-                pass
-        
-        # Fallback: use bottom portion of vehicle
-        if best_plate is None:
-            try:
-                fallback_y1 = max(0, int(h * 0.7))
-                fallback_y2 = h
-                fallback_x1 = int(w * 0.1)
-                fallback_x2 = int(w * 0.9)
-                
-                bottom_portion = vehicle_crop[fallback_y1:fallback_y2, fallback_x1:fallback_x2]
-                if bottom_portion.size > 0:
-                    ph, pw = bottom_portion.shape[:2]
-                    if pw >= 10 and ph >= 5:
-                        best_plate = bottom_portion
-                        best_confidence = 0.1
-                        best_bbox = [fallback_x1, fallback_y1, fallback_x2, fallback_y2]
-            except:
-                pass
-        
-        if best_plate is not None:
-            return best_plate, best_confidence, best_bbox
-        else:
-            return None, 0.0, None
+            return result
             
     except Exception as e:
-        logger.error(f"❌ Plate detection error: {e}")
-        return None, 0.0, None
-def setup_pytorch_environment_fixed():
-    """Setup PyTorch environment với enhanced compatibility"""
-    try:
-        import os
-        import torch
-        
-        # Disable strict weights loading
-        os.environ['TORCH_WEIGHTS_ONLY'] = 'false'
-        os.environ['ULTRALYTICS_DISABLE_DOWNLOAD'] = '0'  # Cho phép download standard models
-        
-        # Set ultralytics home
-        os.environ['ULTRALYTICS_HOME'] = os.path.dirname(os.path.abspath(__file__))
-        
-        # Check PyTorch version
-        version = torch.__version__
-        logger.info(f"PyTorch version: {version}")
-        
-        # Check CUDA availability
-        if torch.cuda.is_available():
-            logger.info(f"CUDA available: {torch.cuda.device_count()} devices")
-            logger.info(f"CUDA version: {torch.version.cuda}")
-        else:
-            logger.info("CUDA not available, using CPU")
-        
-        logger.info("✅ PyTorch environment setup completed")
-        return True
-        
-    except Exception as e:
-        logger.warning(f"PyTorch environment setup failed: {e}")
-        return False
-def propose_plate_crops(vehicle_crop, max_candidates=5):
-    """Generate multiple plate crop proposals from a vehicle crop.
-    Returns list of tuples: (plate_crop, confidence_like, bbox_local [x1,y1,x2,y2])
-    """
-    try:
-        proposals = []
-        if vehicle_crop is None or vehicle_crop.size == 0:
-            return proposals
-        h, w = vehicle_crop.shape[:2]
-        # 1) Heuristic contour-based
-        try:
-            gray = cv2.cvtColor(vehicle_crop, cv2.COLOR_BGR2GRAY)
-            gray = cv2.bilateralFilter(gray, 7, 75, 75)
-            grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
-            _, bw = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((5, 15), np.uint8), iterations=2)
-            contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in contours:
-                x, y, ww, hh = cv2.boundingRect(cnt)
-                if ww < 30 or hh < 10: continue
-                aspect = float(ww) / max(1, hh)
-                area = ww * hh
-                if 1.8 <= aspect <= 10.5 and area >= 200:
-                    pad_x = max(8, int(ww * 0.3))
-                    pad_y = max(6, int(hh * 0.3))
-                    x1 = max(0, x - pad_x)
-                    y1 = max(0, y - pad_y)
-                    x2 = min(w, x + ww + pad_x)
-                    y2 = min(h, y + hh + pad_y)
-                    crop = vehicle_crop[y1:y2, x1:x2]
-                    if crop.size > 0:
-                        proposals.append((crop, 0.15, [x1, y1, x2, y2]))
-        except Exception:
-            pass
-        # 2) Bottom area proposals (common plate region)
-        try:
-            bands = [
-                (max(0, int(h*0.65)), h),
-                (max(0, int(h*0.55)), min(h, int(h*0.85))),
-            ]
-            for y1b, y2b in bands:
-                if y2b <= y1b: continue
-                crop = vehicle_crop[y1b:y2b, :]
-                if crop.size > 0 and crop.shape[1] >= 40 and crop.shape[0] >= 14:
-                    proposals.append((crop, 0.08, [0, y1b, w, y2b]))
-        except Exception:
-            pass
-        # 3) MSER proposals
-        try:
-            mser = cv2.MSER_create(_delta=5, _min_area=60, _max_area=20000)
-            gray_m = cv2.cvtColor(vehicle_crop, cv2.COLOR_BGR2GRAY)
-            regs, _ = mser.detectRegions(gray_m)
-            for p in regs:
-                x, y, ww, hh = cv2.boundingRect(p)
-                if ww < 30 or hh < 10: continue
-                aspect = float(ww) / max(1, hh)
-                if 1.6 <= aspect <= 10.5:
-                    pad_x = max(8, int(ww * 0.25))
-                    pad_y = max(6, int(hh * 0.25))
-                    x1 = max(0, x - pad_x)
-                    y1 = max(0, y - pad_y)
-                    x2 = min(w, x + ww + pad_x)
-                    y2 = min(h, y + hh + pad_y)
-                    crop = vehicle_crop[y1:y2, x1:x2]
-                    if crop.size > 0:
-                        proposals.append((crop, 0.12, [x1, y1, x2, y2]))
-        except Exception:
-            pass
-        # Sort by pseudo-confidence and area
-        ranked = []
-        for crop, conf, bb in proposals:
-            area = (bb[2]-bb[0])*(bb[3]-bb[1])
-            ranked.append((crop, conf, bb, area))
-        ranked.sort(key=lambda t: (-t[1], -t[3]))
-        return [(c, cf, bb) for c, cf, bb, _ in ranked[:max_candidates]]
-    except Exception as e:
-        logger.debug(f"propose_plate_crops error: {e}")
-        return []
-
-def safe_yolo_detection(model, frame):
-    """FIXED YOLO detection with proper model validation"""
-    try:
-        if model is None:
-            logger.warning("YOLO model is None")
-            return []
-        
-        # CRITICAL FIX: Check if model is callable and not a dummy
-        if not hasattr(model, '__call__'):
-            logger.error("YOLO model is not callable")
-            return []
-        
-        # CRITICAL FIX: Check if it's a DummyYOLO object
-        if hasattr(model, '__class__') and model.__class__.__name__ == 'DummyYOLO':
-            logger.error("❌ DummyYOLO detected - attempting recovery")
-            
-            # Try to reload from available models
-            if initialize_models_properly():
-                global yolo_model
-                model = yolo_model
-                logger.info("✅ Recovered from DummyYOLO")
-            else:
-                logger.error("❌ Failed to recover from DummyYOLO")
-                return []
-        
-        h, w = frame.shape[:2]
-        logger.info(f"Running YOLO detection on frame: {w}x{h}")
-        
-        # FIXED: Test model call before actual inference
-        try:
-            # Quick test to ensure model works
-            test_small = frame[::8, ::8]  # Downsample for quick test
-            if test_small.size > 0:
-                test_results = model(test_small, verbose=False, conf=0.1)  # Use reasonable conf for test
-                logger.debug("Model call test successful")
-        except Exception as test_error:
-            logger.error(f"Model call test failed: {test_error}")
-            
-            logger.info("🔄 Attempting model recovery...")
-            if initialize_models_properly():
-                model = yolo_model  # Use newly loaded model
-                logger.info("✅ Model recovery successful")
-            else:
-                logger.error("❌ Model recovery failed")
-                return []
-        
-        # FIXED: Run actual detection with better parameters
-        try:
-            # Use balanced parameters for real vehicle detection
-            logger.info(f"🔍 Running YOLO inference with conf={MIN_CONFIDENCE}, iou=0.45, imgsz=640")
-            results = model(frame, 
-                          conf=MIN_CONFIDENCE,  # Use higher confidence for real vehicles
-                          iou=0.45, 
-                          verbose=False, 
-                          imgsz=640,  # Standard size for better accuracy
-                          classes=VEHICLE_CLASSES,  # Only detect vehicles
-                          device='cpu' if not torch.cuda.is_available() else 'cuda')
-            
-            logger.info(f"YOLO inference completed: {len(results) if results else 0} results")
-            if results:
-                logger.info(f"🔍 First result type: {type(results[0])}")
-                if hasattr(results[0], 'boxes'):
-                    logger.info(f"🔍 First result has boxes: {results[0].boxes is not None}")
-                    if results[0].boxes is not None:
-                        logger.info(f"🔍 First result boxes attributes: xyxy={hasattr(results[0].boxes, 'xyxy')}, conf={hasattr(results[0].boxes, 'conf')}, cls={hasattr(results[0].boxes, 'cls')}")
-        except Exception as e:
-            logger.error(f"YOLO inference failed: {e}")
-            try:
-                logger.info("🔄 Trying CPU fallback...")
-                results = model(frame, conf=MIN_CONFIDENCE, iou=0.45, verbose=False, imgsz=640, classes=VEHICLE_CLASSES, device='cpu')
-                logger.info("✅ CPU fallback successful")
-            except Exception as cpu_error:
-                logger.error(f"CPU fallback also failed: {cpu_error}")
-                return []
-        
-        if not results:
-            logger.warning("YOLO returned no results")
-            return []
-        
-        detections = []
-        total_boxes = 0
-        vehicle_boxes = 0
-        
-        # Calculate ROI once for filtering
-        roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(w, h)
-        logger.info(f"🔍 ROI coordinates: ({roi_xmin}, {roi_ymin}) to ({roi_xmax}, {roi_ymax})")
-        logger.info(f"🔍 Processing {len(results)} YOLO results")
-        for result in results:
-            try:
-                if not hasattr(result, 'boxes') or result.boxes is None:
-                    continue
-                
-                boxes = result.boxes
-                if not hasattr(boxes, 'xyxy') or not hasattr(boxes, 'conf') or not hasattr(boxes, 'cls'):
-                    continue
-                
-                # Convert to numpy arrays safely
-                try:
-                    xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, 'cpu') else boxes.xyxy
-                    conf = boxes.conf.cpu().numpy() if hasattr(boxes.conf, 'cpu') else boxes.conf
-                    cls = boxes.cls.cpu().numpy() if hasattr(boxes.cls, 'cpu') else boxes.cls
-                except:
-                    continue
-                
-                if not isinstance(xyxy, np.ndarray) or xyxy.size == 0:
-                    continue
-                
-                total_boxes = len(xyxy)
-                logger.info(f"🔍 Processing {total_boxes} raw detections from result")
-                
-                for i in range(len(xyxy)):
-                    try:
-                        box = xyxy[i]
-                        confidence = float(conf[i])
-                        class_id = int(cls[i])
-                        
-                        # Filter to vehicle classes only
-                        if class_id not in VEHICLE_CLASSES:
-                            logger.debug(f"🔍 Skipping class {class_id} (not in VEHICLE_CLASSES {VEHICLE_CLASSES})")
-                            continue
-                        
-                        # Use consistent confidence threshold
-                        if confidence < MIN_CONFIDENCE:
-                            logger.debug(f"🔍 Skipping detection with low confidence {confidence:.3f} < {MIN_CONFIDENCE}")
-                            continue
-                        
-                        # Extract and validate coordinates
-                        x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
-                        
-                        if x1 >= x2 or y1 >= y2:
-                            continue
-                        
-                        # Clamp to frame bounds
-                        x1 = max(0, min(x1, w))
-                        y1 = max(0, min(y1, h))
-                        x2 = max(0, min(x2, w))
-                        y2 = max(0, min(y2, h))
-                        
-                        # ROI check - more lenient for better detection
-                        if not is_bbox_in_roi([x1, y1, x2, y2], w, h, min_overlap=0.1):
-                            logger.debug(f"🔍 Skipping detection outside ROI: bbox=[{x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}]")
-                            continue
-                        
-                        # Convert to tracking format
-                        box_w = x2 - x1
-                        box_h = y2 - y1
-                        
-                        if box_w <= 0 or box_h <= 0:
-                            continue
-                        
-                        detection = [x1, y1, box_w, box_h, confidence, class_id]
-                        detections.append(detection)
-                        vehicle_boxes += 1
-                        
-                        logger.info(f"✅ OBJECT DETECTED: class={class_id}, conf={confidence:.3f}, bbox=[{x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}]")
-                                
-                    except Exception as e:
-                        logger.debug(f"Error processing detection {i}: {e}")
-                        continue
-                        
-            except Exception as e:
-                logger.warning(f"Error processing YOLO result: {e}")
-                continue
-        logger.info(f"🎯 DETECTION SUMMARY: {vehicle_boxes}/{total_boxes} objects detected")
-        
-        # Only return real detections, no fake detections
-        if vehicle_boxes == 0:
-            logger.debug("🔄 No vehicle detections found - this is normal")
-        
-        return detections
-        
-    except Exception as e:
-        logger.error(f"Critical error in YOLO detection: {e}")
-        return []
-
-def initialize_models_properly():
-    """Simplified initialization using only yolov9s.pt"""
-    global yolo_model, plate_model, plate_model_name, ocr_reader
-    
-    try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Load yolov9s.pt for both vehicle and plate detection
-        yolo_path = os.path.join(current_dir, 'yolov9s.pt')
-        logger.info(f"Loading YOLO from: {yolo_path}")
-        
-        if os.path.exists(yolo_path):
-            yolo_model = safe_yolo_load(yolo_path)
-        else:
-            # Try download
-            yolo_model = safe_yolo_load('yolov9s.pt')
-        
-        if yolo_model is None:
-            logger.error("❌ Failed to load yolov9s.pt")
-            return False
-        
-        # Use same model for both vehicle and plate detection
-        plate_model = yolo_model
-        plate_model_name = "yolov9s.pt"
-        logger.info("✅ Using yolov9s.pt for both vehicle and plate detection")
-        
-        # Initialize OCR reader
-        if ocr_reader is None:
-            try:
-                logger.info("🔧 Initializing PaddleOCR...")
-                ocr_reader = PaddleOCR(
-                    use_angle_cls=False,
-                    lang='en',
-                    show_log=False,
-                    use_gpu=False
-                )
-                logger.info("✅ PaddleOCR initialized successfully")
-            except Exception as e:
-                logger.error(f"❌ PaddleOCR initialization failed: {e}")
-                ocr_reader = None
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Initialization error: {e}")
-        return False
-# safe_deepsort_update removed - using direct plate detection only
-    """IMPROVED DeepSORT update with better tracking accuracy"""
-    try:
-        if tracker is None:
-            logger.error("Tracker is None")
-            return []
-        
-        logger.info(f"DeepSORT update: {len(detections) if detections else 0} detections")
-        
-        if not isinstance(detections, list) or len(detections) == 0:
-            logger.info("No valid detections, updating tracker with empty list")
-            try:
-                tracks = tracker.update_tracks([], frame=frame)
-                return tracks if isinstance(tracks, list) else []
-            except Exception as e:
-                logger.error(f"Error updating tracker with empty detections: {e}")
-                return []
-        
-        # FIXED: Convert to correct DeepSORT format
-        valid_detections = []
-        
-        for i, det in enumerate(detections):
-            try:
-                if not isinstance(det, (list, tuple, np.ndarray)) or len(det) < 6:
-                    continue
-                
-                # Extract from YOLO format: [x, y, w, h, conf, class]
-                x, y, w, h, conf, class_id = det[:6]
-                
-                # Convert and validate
-                x, y, w, h, conf = float(x), float(y), float(w), float(h), float(conf)
-                class_id = int(class_id)
-                
-                # Improved validation for better tracking
-                if not all(np.isfinite([x, y, w, h, conf])) or w <= 5 or h <= 5 or conf < MIN_CONFIDENCE:
-                    continue
-                
-                # Additional size validation for license plates
-                if w < 20 or h < 8:  # Minimum size for readable license plates
-                    continue
-                
-                # CORRECT DeepSORT format: [[x, y, w, h], confidence, class_id]
-                deepsort_detection = [
-                    [float(x), float(y), float(w), float(h)],  # bbox as list
-                    float(conf),  # confidence as float
-                    int(class_id)  # class as int
-                ]
-                
-                valid_detections.append(deepsort_detection)
-                logger.debug(f"Detection {i}: converted to DeepSORT format")
-                
-            except Exception as e:
-                logger.debug(f"Detection {i} conversion error: {e}")
-                continue
-        
-        logger.info(f"DeepSORT: {len(valid_detections)}/{len(detections)} valid detections")
-        
-        if not valid_detections:
-            try:
-                tracks = tracker.update_tracks([], frame=frame)
-                return tracks if isinstance(tracks, list) else []
-            except Exception as e:
-                logger.error(f"Error with empty valid detections: {e}")
-                return []
-        
-        # Update tracker with properly formatted detections
-        try:
-            logger.info(f"Updating tracker with {len(valid_detections)} detections")
-            
-            # Handle different tracker types
-            if hasattr(tracker, 'update_tracks'):
-                tracks = tracker.update_tracks(valid_detections, frame=frame)
-            else:
-                logger.error("Tracker missing update_tracks method")
-                return []
-            
-            if not isinstance(tracks, list):
-                logger.warning(f"Tracker returned non-list: {type(tracks)}")
-                return []
-            
-            logger.info(f"DeepSORT update successful: {len(tracks)} tracks")
-            return tracks
-            
-        except Exception as e:
-            logger.error(f"DeepSORT update failed: {e}")
-            logger.error(f"Error details: {str(e)}")
-            
-            # Don't crash, return empty list
-            return []
-        
-    except Exception as e:
-        logger.error(f"Critical DeepSORT error: {e}")
-        return []
-def simple_track_processing(track, frame, original_width, original_height):
-    """Enhanced track processing with persistent OCR results and Vietnamese plate validation"""
-    global ocr_reader, tracked_objects
-    
-    try:
-        if not (hasattr(track, 'track_id') and hasattr(track, 'to_ltrb')):
-            return None
-            
-        track_id = track.track_id
-        ltrb = track.to_ltrb()
-        
-        if ltrb is None:
-            return None
-            
-        if isinstance(ltrb, np.ndarray):
-            ltrb = ltrb.flatten()
-            
-        if len(ltrb) < 4:
-            return None
-            
-        x1, y1, x2, y2 = map(int, ltrb[:4])
-        
-        # Clamp coordinates
-        x1 = max(0, min(x1, original_width-1))
-        y1 = max(0, min(y1, original_height-1))
-        x2 = max(x1+1, min(x2, original_width))
-        y2 = max(y1+1, min(y2, original_height))
-        
-        # Extract vehicle crop
-        try:
-            vehicle_crop = frame[y1:y2, x1:x2]
-            if vehicle_crop.size == 0:
-                return None
-        except Exception:
-            return None
-        
-        # Check if we already have a valid result for this track
-        if track_id in tracked_objects:
-            existing_obj = tracked_objects[track_id]
-            if (existing_obj.get('plate_number') and 
-                existing_obj.get('plate_number') != 'Đang nhận diện...' and
-                existing_obj.get('validation_passed', False)):
-                # Return existing valid result
-                return {
-                    'track_id': track_id,
-                    'bbox': [x1, y1, x2, y2],
-                    'plate_number': existing_obj['plate_number'],
-                    'raw_text': existing_obj.get('raw_text', ''),
-                    'confidence': existing_obj.get('confidence', 0.0),
-                    'vehicle_crop': vehicle_crop,
-                    'plate_crop': None,
-                    'plate_frame_bbox': None,
-                    'has_plate': True,
-                    'validation_passed': True,
-                    'class_id': getattr(track, 'class_id', -1)
-                }
-        
-        # Run OCR every 3 frames for better results
-        if frame_count % 3 == 0:
-            # Simple plate detection
-            plate_crop, plate_conf, plate_bbox_local = None, 0.0, None
-            
-            try:
-                logger.info(f"🔍 Running plate detection on track {track_id}, vehicle crop: {vehicle_crop.shape}")
-                plate_crop, plate_conf, plate_bbox_local = detect_license_plate_in_vehicle(vehicle_crop, plate_model)
-                logger.info(f"🔍 Plate detection result for track {track_id}: crop={plate_crop is not None}, conf={plate_conf:.3f}")
-            except Exception as e:
-                logger.error(f"Plate detection failed for track {track_id}: {e}")
-                plate_crop = None
-            
-            # OCR if we have plate
-            plate_text = None
-            confidence = 0.0
-            plate_frame_bbox = None
-            
-            if plate_crop is not None and ocr_reader is not None:
-                try:
-                    logger.info(f"🔤 Running OCR on track {track_id}, plate crop: {plate_crop.shape}")
-                    # Run OCR on plate crop
-                    ocr_result = ocr_reader.ocr(plate_crop, det=True, rec=True, cls=False)
-                    plate_text, confidence = safe_extract_ocr_text(ocr_result)
-                    logger.info(f"🔤 OCR result for track {track_id}: text='{plate_text}', conf={confidence:.3f}")
-                    
-                    if plate_text and plate_bbox_local:
-                        # Convert local bbox to frame coordinates
-                        px1, py1, px2, py2 = map(int, plate_bbox_local)
-                        plate_frame_bbox = [x1 + px1, y1 + py1, x1 + px2, y1 + py2]
-                        
-                except Exception as e:
-                    logger.error(f"OCR failed for track {track_id}: {e}")
-            else:
-                logger.info(f"🔤 No plate crop or OCR reader for track {track_id}")
-            
-            # Validate Vietnamese plate format and high confidence
-            is_valid_vn_plate = False
-            if plate_text and confidence > 0.5:  # Lower confidence threshold for testing
-                logger.info(f"🔍 Validating plate: '{plate_text}' (conf: {confidence:.3f})")
-                
-                # Try strict validation first
-                is_valid_vn_plate = _is_valid_vn_plate_format(plate_text)
-                logger.info(f"🔍 Strict validation result: {is_valid_vn_plate}")
-                
-                if not is_valid_vn_plate:
-                    # Try relaxed validation
-                    is_valid_vn_plate = _is_valid_vn_plate_format_relaxed(plate_text)
-                    logger.info(f"🔍 Relaxed validation result: {is_valid_vn_plate}")
-                
-                if is_valid_vn_plate:
-                    logger.info(f"✅ Valid Vietnamese plate detected: {plate_text} (conf: {confidence:.3f})")
-                else:
-                    logger.info(f"❌ Invalid plate format: {plate_text} (conf: {confidence:.3f})")
-                    # Don't clear the text, just mark as invalid for display
-                    # plate_text = None
-                    # confidence = 0.0
-            else:
-                logger.info(f"🔍 Plate text or confidence too low: text='{plate_text}', conf={confidence:.3f}")
-            
-            # Update tracked objects with new result
-            if track_id not in tracked_objects:
-                tracked_objects[track_id] = {
-                    'track_id': track_id,
-                    'bbox': [x1, y1, x2, y2],
-                    'plate_number': 'Đang nhận diện...',
-                    'confidence': 0.0,
-                    'first_seen': time.time(),
-                    'last_seen': time.time(),
-                    'disappeared': 0,
-                    'validation_passed': False,
-                    'saved_to_db': False
-                }
-            
-            # Update with new result (always update, but mark validation status)
-            if plate_text:
-                tracked_objects[track_id].update({
-                    'plate_number': plate_text,
-                    'raw_text': plate_text,
-                    'confidence': confidence,
-                    'last_seen': time.time(),
-                    'validation_passed': is_valid_vn_plate,
-                    'plate_crop_filename': '',
-                    'is_consistent': is_valid_vn_plate,
-                    'ocr_attempts': tracked_objects[track_id].get('ocr_attempts', 0) + 1
-                })
-                if is_valid_vn_plate:
-                    logger.info(f"💾 Updated track {track_id} with valid plate: {plate_text}")
-                else:
-                    logger.info(f"💾 Updated track {track_id} with detected plate (not validated): {plate_text}")
-        
-        # Return current result (either existing or new)
-        current_obj = tracked_objects.get(track_id, {})
-        return {
-            'track_id': track_id,
-            'bbox': [x1, y1, x2, y2],
-            'plate_number': current_obj.get('plate_number', 'Đang nhận diện...'),
-            'raw_text': current_obj.get('raw_text', ''),
-            'confidence': current_obj.get('confidence', 0.0),
-            'vehicle_crop': vehicle_crop,
-            'plate_crop': None,
-            'plate_frame_bbox': None,
-            'has_plate': current_obj.get('validation_passed', False),
-            'validation_passed': current_obj.get('validation_passed', False),
-            'class_id': getattr(track, 'class_id', -1)
-        }
-        
-    except Exception as e:
-        logger.error(f"Simple track processing error: {e}")
-        return None
-
-def safe_track_processing(track, frame, original_width, original_height):
-    """ENHANCED: Track processing with timeout protection and comprehensive error handling"""
-    global track_consistency, ocr_attempts_per_track
-    
-    processing_start = time.time()
-    PROCESSING_TIMEOUT = 2.0
-    
-    try:
-        # Basic timeout check
-        if time.time() - processing_start > PROCESSING_TIMEOUT:
-            logger.warning("Track processing timeout in validation")
-            return None
-            
-        # Validate track with comprehensive checks
-        if not all([hasattr(track, attr) for attr in ['is_confirmed', 'track_id', 'to_ltrb']]):
-            logger.debug("Track missing required attributes")
-            return None
-        
-        try:
-            track_id = int(track.track_id)
-        except (ValueError, TypeError, AttributeError):
-            logger.debug("Invalid track_id")
-            return None
-        
-        # Get bbox with comprehensive error handling
-        try:
-            ltrb = track.to_ltrb()
-            if ltrb is None:
-                logger.debug(f"Track {track_id}: ltrb is None")
-                return None
-            
-            if isinstance(ltrb, np.ndarray):
-                ltrb = ltrb.flatten()
-            
-            if len(ltrb) < 4:
-                logger.debug(f"Track {track_id}: insufficient bbox coordinates")
-                return None
-                
-            x1, y1, x2, y2 = map(int, ltrb[:4])
-            
-            # Clamp coordinates with bounds checking
-            x1 = max(0, min(x1, original_width - 1))
-            y1 = max(0, min(y1, original_height - 1))
-            x2 = max(x1 + 1, min(x2, original_width))
-            y2 = max(y1 + 1, min(y2, original_height))
-            
-            if x1 >= x2 or y1 >= y2:
-                logger.debug(f"Track {track_id}: invalid bbox coordinates")
-                return None
-                
-        except Exception as bbox_error:
-            logger.debug(f"Track {track_id} bbox error: {bbox_error}")
-            return None
-        
-        # Safe vehicle crop with bounds checking
-        try:
-            if y1 >= original_height or y2 > original_height or x1 >= original_width or x2 > original_width:
-                logger.debug(f"Track {track_id}: crop coordinates out of bounds")
-                return None
-                
-            vehicle_crop = frame[y1:y2, x1:x2]
-            if vehicle_crop.size == 0:
-                logger.debug(f"Track {track_id}: empty vehicle crop")
-                return None
-        except Exception as crop_error:
-            logger.error(f"Track {track_id} crop error: {crop_error}")
-            return None
-        
-        logger.debug(f"Processing track {track_id}: bbox=[{x1},{y1},{x2},{y2}]")
-        
-        # Consistency check with timeout
-        if time.time() - processing_start > PROCESSING_TIMEOUT * 0.3:
-            logger.warning(f"Track {track_id}: timeout during consistency check")
-            return None
-            
-        if track_id in track_consistency:
-            consistency_data = track_consistency[track_id]
-            if (consistency_data.get('best_result') and 
-                consistency_data.get('consistent_count', 0) >= consistency_threshold):
-                
-                logger.debug(f"Using consistent result for track {track_id}: '{consistency_data['best_result']}'")
-                return {
-                    'track_id': track_id,
-                    'bbox': [x1, y1, x2, y2],
-                    'plate_number': consistency_data['best_result'],
-                    'raw_text': consistency_data['best_result'],
-                    'confidence': consistency_data.get('best_confidence', 0.0),
-                    'vehicle_crop': vehicle_crop,
-                    'plate_crop': None,
-                    'plate_frame_bbox': None,
-                    'has_plate': True,
-                    'validation_passed': True,
-                    'consistent_result': True
-                }
-        
-        # OCR attempt limiting with timeout
-        if track_id not in ocr_attempts_per_track:
-            ocr_attempts_per_track[track_id] = 0
-        
-        max_attempts = 3  # Reduced for performance
-        if ocr_attempts_per_track[track_id] >= max_attempts:
-            if track_id in track_consistency and track_consistency[track_id].get('best_result'):
-                best_result = track_consistency[track_id]['best_result']
-                best_conf = track_consistency[track_id].get('best_confidence', 0.0)
-                logger.debug(f"Using best result after max attempts for track {track_id}: '{best_result}'")
-                return {
-                    'track_id': track_id,
-                    'bbox': [x1, y1, x2, y2],
-                    'plate_number': best_result,
-                    'raw_text': best_result,
-                    'confidence': best_conf,
-                    'vehicle_crop': vehicle_crop,
-                    'plate_crop': None,
-                    'plate_frame_bbox': None,
-                    'has_plate': True,
-                    'validation_passed': True,
-                    'max_attempts_reached': True
-                }
-            else:
-                logger.debug(f"Max OCR attempts reached for track {track_id}, no good result")
-                return {
-                    'track_id': track_id,
-                    'bbox': [x1, y1, x2, y2],
-                    'plate_number': 'Đang nhận diện...',
-                    'raw_text': None,
-                    'confidence': 0.0,
-                    'vehicle_crop': vehicle_crop,
-                    'plate_crop': None,
-                    'plate_frame_bbox': None,
-                    'has_plate': False,
-                    'validation_passed': False,
-                    'max_attempts_reached': True
-                }
-        
-        # Increment OCR attempts
-        ocr_attempts_per_track[track_id] += 1
-        
-        # Plate detection with timeout protection
-        plate_crop, plate_conf, plate_bbox_local = None, 0.0, None
-        
-        try:
-            if time.time() - processing_start > PROCESSING_TIMEOUT * 0.6:
-                logger.warning(f"Track {track_id}: timeout before plate detection")
-                plate_crop = None
-            else:
-                plate_detection_start = time.time()
-                plate_crop, plate_conf, plate_bbox_local = detect_license_plate_in_vehicle(vehicle_crop, plate_model)
-                plate_detection_time = time.time() - plate_detection_start
-                
-                if plate_detection_time > 1.0:
-                    logger.warning(f"Track {track_id}: plate detection timeout: {plate_detection_time:.2f}s")
-                    plate_crop = None
-                    
-        except Exception as plate_error:
-            logger.error(f"Track {track_id} plate detection error: {plate_error}")
-            plate_crop = None
-            plate_conf = 0.0
-            plate_bbox_local = None
-        
-        # OCR processing with strict timeout
-        plate_text, ocr_confidence = None, 0.0
-        
-        if plate_crop is not None and ocr_reader is not None:
-            try:
-                # Check remaining time budget
-                time_remaining = PROCESSING_TIMEOUT - (time.time() - processing_start)
-                if time_remaining < 0.5:
-                    logger.warning(f"Track {track_id}: skipping OCR due to time budget")
-                else:
-                    logger.debug(f"Track {track_id}: running OCR on plate crop: {plate_crop.shape}")
-                    
-                    ocr_start = time.time()
-                    
-                    # Single OCR attempt with timeout
-                    try:
-                        ocr_result = ocr_reader.ocr(plate_crop, det=False, rec=True, cls=False)
-                        ocr_time = time.time() - ocr_start
-                        
-                        if ocr_time > 1.0:  # OCR timeout
-                            logger.warning(f"Track {track_id}: OCR timeout: {ocr_time:.2f}s")
-                            plate_text = None
-                            ocr_confidence = 0.0
-                        elif ocr_result:
-                            plate_text, ocr_confidence = safe_extract_ocr_text(ocr_result)
-                            
-                            if plate_text:
-                                processed_text = process_plate_text(plate_text)
-                                if processed_text:
-                                    plate_text = processed_text
-                                    logger.debug(f"Track {track_id}: OCR success: '{plate_text}' (conf: {ocr_confidence:.3f})")
-                                else:
-                                    logger.debug(f"Track {track_id}: text validation failed")
-                                    plate_text = None
-                                    ocr_confidence = 0.0
-                        else:
-                            logger.debug(f"Track {track_id}: OCR returned no result")
-                            
-                    except Exception as ocr_exec_error:
-                        logger.error(f"Track {track_id}: OCR execution error: {ocr_exec_error}")
-                        plate_text = None
-                        ocr_confidence = 0.0
-                        
-            except Exception as ocr_error:
-                logger.error(f"Track {track_id}: OCR processing error: {ocr_error}")
-                plate_text = None
-                ocr_confidence = 0.0
-        
-        # Compute plate frame bbox safely
-        plate_frame_bbox = None
-        if plate_bbox_local and len(plate_bbox_local) >= 4:
-            try:
-                px1, py1, px2, py2 = map(int, plate_bbox_local[:4])
-                plate_frame_bbox = [x1 + px1, y1 + py1, x1 + px2, y1 + py2]
-            except Exception as bbox_error:
-                logger.debug(f"Track {track_id}: plate frame bbox error: {bbox_error}")
-                plate_frame_bbox = None
-        
-        # Return result
-        vehicle_class_id = getattr(track, 'class_id', -1)
-        
-        result = {
-            'track_id': track_id,
-            'bbox': [x1, y1, x2, y2],  # Fixed: use computed bbox
-            'plate_number': plate_text,
-            'raw_text': plate_text,
-            'confidence': ocr_confidence,
-            'vehicle_crop': vehicle_crop,
-            'plate_crop': plate_crop,
-            'plate_frame_bbox': plate_frame_bbox,
-            'has_plate': plate_crop is not None,
-            'validation_passed': bool(plate_text and ocr_confidence > 0.05),
-            'ocr_attempt': ocr_attempts_per_track[track_id],
-            'class_id': vehicle_class_id,
-            'processing_time': time.time() - processing_start
-        }
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Critical error in track processing: {e}")
-        # Always return a safe fallback
-        try:
-            return {
-                'track_id': getattr(track, 'track_id', -1),
-                'bbox': [0, 0, 100, 100],
-                'plate_number': 'Lỗi xử lý',
-                'raw_text': None,
-                'confidence': 0.0,
-                'vehicle_crop': None,
-                'plate_crop': None,
-                'plate_frame_bbox': None,
-                'has_plate': False,
-                'validation_passed': False,
-                'error': True
-            }
-        except:
-            return None
-    finally:
-        total_time = time.time() - processing_start
-        if total_time > PROCESSING_TIMEOUT:
-            logger.warning(f"Track processing exceeded timeout: {total_time:.2f}s")
-def run_ocr_on_plate(plate_crop):
-    """Optimized OCR for license plate text recognition"""
-    global ocr_reader
-    
-    try:
-        if ocr_reader is None or plate_crop is None or plate_crop.size == 0:
-            return "", 0.0
-        
-        # Enhance plate crop for better OCR
-        enhanced_crop = enhance_plate_for_ocr(plate_crop)
-        
-        # Run OCR
-        ocr_result = ocr_reader.ocr(enhanced_crop, det=True, rec=True, cls=False)
-        
-        if ocr_result and len(ocr_result) > 0:
-            # Extract text and confidence
-            text, confidence = safe_extract_ocr_text(ocr_result)
-            
-            if text and len(text.strip()) > 0:
-                # Clean and validate plate text
-                cleaned_text = clean_and_validate_plate_text(text)
-                if cleaned_text:
-                    return cleaned_text, confidence
-        
-        return "", 0.0
-        
-    except Exception as e:
-        logger.error(f"OCR failed: {e}")
-        return "", 0.0
-
-def enhance_plate_for_ocr(plate_crop):
-    """Enhance plate crop for better OCR accuracy"""
-    try:
-        if plate_crop is None or plate_crop.size == 0:
-            return plate_crop
-        
-        # Resize to optimal size for OCR (reduced for faster processing)
-        height, width = plate_crop.shape[:2]
-        if width < 200 or height < 60:
-            scale_factor = max(200/width, 60/height)
-            new_width = int(width * scale_factor)
-            new_height = int(height * scale_factor)
-            plate_crop = cv2.resize(plate_crop, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
-        
-        # Convert to grayscale
-        if len(plate_crop.shape) == 3:
-            gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = plate_crop
-        
-        # Apply multiple enhancement techniques
-        # 1. Apply CLAHE for better contrast
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        
-        # 2. Apply bilateral filter to reduce noise while preserving edges
-        enhanced = cv2.bilateralFilter(enhanced, 9, 75, 75)
-        
-        # 3. Apply morphological operations to clean up the image
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        enhanced = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
-        
-        # 4. Apply sharpening filter
-        kernel_sharpen = np.array([[-1,-1,-1],
-                                  [-1, 9,-1],
-                                  [-1,-1,-1]])
-        enhanced = cv2.filter2D(enhanced, -1, kernel_sharpen)
-        
-        # 5. Normalize the image
-        enhanced = cv2.normalize(enhanced, None, 0, 255, cv2.NORM_MINMAX)
-        
-        # Convert back to BGR for PaddleOCR
-        enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-        
-        return enhanced_bgr
-        
-    except Exception as e:
-        logger.error(f"Plate enhancement failed: {e}")
-        return plate_crop
-
-def clean_and_validate_plate_text(text):
-    """Clean and validate Vietnamese license plate text"""
-    try:
-        if not text:
-            return ""
-        
-        # Convert to uppercase
-        cleaned = text.upper().strip()
-        
-        # Common OCR error corrections
-        ocr_corrections = {
-            'O': '0',  # Letter O to number 0
-            'I': '1',  # Letter I to number 1
-            'S': '5',  # Letter S to number 5 (in some contexts)
-            'B': '8',  # Letter B to number 8 (in some contexts)
-            'G': '6',  # Letter G to number 6 (in some contexts)
-            ' ': '',   # Remove spaces
-            '_': '',   # Remove underscores
-            '|': '',   # Remove pipes
-            'l': '1',  # Lowercase l to 1
-            'o': '0',  # Lowercase o to 0
-        }
-        
-        # Apply OCR corrections
-        for wrong, correct in ocr_corrections.items():
-            cleaned = cleaned.replace(wrong, correct)
-        
-        # Remove non-alphanumeric characters except dash and dot
-        cleaned = re.sub(r'[^0-9A-Z\-\.]', '', cleaned)
-        
-        # Basic validation for Vietnamese plates
-        if len(cleaned) < 5 or len(cleaned) > 12:
-            return ""
-        
-        # Try to fix common formatting issues
-        # Add missing dashes if pattern suggests it
-        if re.match(r'^\d{2}[A-Z]\d{3,5}$', cleaned):
-            # 30A1234 -> 30A-1234
-            cleaned = re.sub(r'^(\d{2}[A-Z])(\d{3,5})$', r'\1-\2', cleaned)
-        elif re.match(r'^\d{2}[A-Z]{2}\d{2,4}$', cleaned):
-            # 30AB123 -> 30AB-123
-            cleaned = re.sub(r'^(\d{2}[A-Z]{2})(\d{2,4})$', r'\1-\2', cleaned)
-        
-        # Try to add missing dots for decimal parts
-        if re.match(r'^\d{2}[A-Z]-\d{5}$', cleaned):
-            # 30A-12345 -> 30A-123.45
-            cleaned = re.sub(r'^(\d{2}[A-Z]-\d{3})(\d{2})$', r'\1.\2', cleaned)
-        elif re.match(r'^\d{2}[A-Z]-\d{6}$', cleaned):
-            # 30A-123456 -> 30A-1234.56
-            cleaned = re.sub(r'^(\d{2}[A-Z]-\d{4})(\d{2})$', r'\1.\2', cleaned)
-        
-        return cleaned
-        
-    except Exception as e:
-        logger.error(f"Text cleaning failed: {e}")
-        return ""
-
-def is_valid_vietnamese_plate(plate_text):
-    """Validate Vietnamese license plate format"""
-    try:
-        if not plate_text:
-            return False
-        
-        # Clean the text
-        cleaned = clean_and_validate_plate_text(plate_text)
-        if not cleaned:
-            return False
-        
-        # Comprehensive Vietnamese plate patterns (all current formats)
-        patterns = [
-            # Standard formats
-            r'^\d{2}[A-Z]-\d{3}\.\d{2}$',  # 30A-123.45
-            r'^\d{2}[A-Z]-\d{4}\.\d{2}$',  # 30A-1234.56
-            r'^\d{2}[A-Z]-\d{3}$',  # 30A-123
-            r'^\d{2}[A-Z]-\d{4}$',  # 30A-1234
-            r'^\d{2}[A-Z]-\d{5}$',  # 30A-12345
-            
-            # Two-letter formats
-            r'^\d{2}[A-Z]{2}-\d{2}\.\d{2}$',  # 30AB-12.34
-            r'^\d{2}[A-Z]{2}-\d{3}\.\d{2}$',  # 30AB-123.45
-            r'^\d{2}[A-Z]{2}-\d{2}$',  # 30AB-12
-            r'^\d{2}[A-Z]{2}-\d{3}$',  # 30AB-123
-            r'^\d{2}[A-Z]{2}-\d{4}$',  # 30AB-1234
-            
-            # Mixed formats
-            r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',  # 30A1-123.45
-            r'^\d{2}[A-Z]\d-\d{3}$',  # 30A1-123
-            r'^\d{2}[A-Z]\d-\d{4}$',  # 30A1-1234
-            
-            # Without dots (common OCR errors)
-            r'^\d{2}[A-Z]-\d{3}\d{2}$',  # 30A-12345
-            r'^\d{2}[A-Z]-\d{4}\d{2}$',  # 30A-123456
-            r'^\d{2}[A-Z]{2}-\d{2}\d{2}$',  # 30AB-1234
-            r'^\d{2}[A-Z]{2}-\d{3}\d{2}$',  # 30AB-12345
-            
-            # With spaces instead of dashes
-            r'^\d{2}[A-Z] \d{3}\.\d{2}$',  # 30A 123.45
-            r'^\d{2}[A-Z] \d{4}\.\d{2}$',  # 30A 1234.56
-            r'^\d{2}[A-Z] \d{3}$',  # 30A 123
-            r'^\d{2}[A-Z] \d{4}$',  # 30A 1234
-            
-            # Without separators (common OCR errors)
-            r'^\d{2}[A-Z]\d{3}\.\d{2}$',  # 30A123.45
-            r'^\d{2}[A-Z]\d{4}\.\d{2}$',  # 30A1234.56
-            r'^\d{2}[A-Z]\d{3}$',  # 30A123
-            r'^\d{2}[A-Z]\d{4}$',  # 30A1234
-            r'^\d{2}[A-Z]\d{5}$',  # 30A12345
-            
-            # Two-letter without separators
-            r'^\d{2}[A-Z]{2}\d{2}\.\d{2}$',  # 30AB12.34
-            r'^\d{2}[A-Z]{2}\d{3}\.\d{2}$',  # 30AB123.45
-            r'^\d{2}[A-Z]{2}\d{2}$',  # 30AB12
-            r'^\d{2}[A-Z]{2}\d{3}$',  # 30AB123
-            r'^\d{2}[A-Z]{2}\d{4}$',  # 30AB1234
-        ]
-        
-        for pattern in patterns:
-            if re.match(pattern, cleaned):
-                logger.info(f"✅ Valid plate pattern matched: {cleaned}")
-                return True
-        
-        # Additional flexible validation for common OCR errors
-        # Check if it contains at least 2 digits, 1 letter, and reasonable length
-        if (len(cleaned) >= 5 and len(cleaned) <= 12 and 
-            re.search(r'\d', cleaned) and 
-            re.search(r'[A-Z]', cleaned) and
-            re.match(r'^[0-9A-Z\-\.\s]+$', cleaned)):
-            logger.info(f"✅ Flexible validation passed: {cleaned}")
-            return True
-        
-        logger.warning(f"❌ Invalid plate format: {cleaned}")
-        return False
-        
-    except Exception as e:
-        logger.error(f"Plate validation failed: {e}")
-        return False
-
-def detect_license_plate_simple(vehicle_crop):
-    """Simple and fast license plate detection"""
-    try:
-        if vehicle_crop is None or vehicle_crop.size == 0:
-            return None
-        
-        height, width = vehicle_crop.shape[:2]
-        
-        # Convert to grayscale
-        if len(vehicle_crop.shape) == 3:
-            gray = cv2.cvtColor(vehicle_crop, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = vehicle_crop
-        
-        # Simple edge detection
-        edges = cv2.Canny(gray, 50, 150)
-        
-        # Find contours
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Find best plate candidate
-        best_plate = None
-        best_score = 0
-        
-        for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            
-            # Basic filters
-            if w < 50 or h < 15 or w > width * 0.8 or h > height * 0.5:
-                continue
-            
-            aspect_ratio = w / h
-            if aspect_ratio < 2.0 or aspect_ratio > 6.0:
-                continue
-            
-            # Score based on position and size
-            position_score = 1.0 - (y / height)  # Prefer lower positions
-            size_score = min((w * h) / (width * height * 0.1), 1.0)  # Prefer medium sizes
-            aspect_score = 1.0 - abs(aspect_ratio - 3.0) / 3.0  # Prefer aspect ratio around 3.0
-            
-            total_score = position_score * 0.4 + size_score * 0.3 + aspect_score * 0.3
-            
-            if total_score > best_score:
-                best_score = total_score
-                best_plate = (x, y, x + w, y + h)
-        
-        return best_plate if best_score > 0.3 else None
-        
-    except Exception as e:
-        logger.error(f"Simple plate detection failed: {e}")
-        return None
-
-# run_ocr_simple removed - using run_ocr_on_plate instead
-
-def detect_license_plate_in_vehicle_optimized(vehicle_crop):
-    """Optimized license plate detection within vehicle crop"""
-    try:
-        if vehicle_crop is None or vehicle_crop.size == 0:
-            return None
-        
-        height, width = vehicle_crop.shape[:2]
-        
-        # Convert to grayscale
-        if len(vehicle_crop.shape) == 3:
-            gray = cv2.cvtColor(vehicle_crop, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = vehicle_crop
-        
-        # Apply multiple preprocessing techniques
-        # 1. Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-        
-        # 2. Apply CLAHE for better contrast
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(blurred)
-        
-        # 3. Apply morphological operations to connect text regions
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        morphed = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
-        
-        # 4. Apply adaptive threshold
-        thresh = cv2.adaptiveThreshold(morphed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        
-        # 5. Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Filter contours for license plate characteristics
-        plate_candidates = []
-        for contour in contours:
-            # Get bounding rectangle
-            x, y, w, h = cv2.boundingRect(contour)
-            
-            # Skip very small contours
-            if w < 20 or h < 8:
-                continue
-            
-            # Filter by aspect ratio (license plates are typically wider than tall)
-            aspect_ratio = w / h
-            if 1.5 <= aspect_ratio <= 8.0:  # More flexible aspect ratio
-                # Filter by size (relative to vehicle)
-                area = w * h
-                if area > (width * height * 0.005) and area < (width * height * 0.4):  # 0.5-40% of vehicle area
-                    # Filter by position (plates are usually in lower part of vehicle)
-                    if y > height * 0.2:  # Lower 80% of vehicle
-                        # Calculate score based on multiple factors
-                        position_score = 1.0 - (y / height)  # Prefer lower positions
-                        size_score = min(area / (width * height * 0.1), 1.0)  # Prefer medium sizes
-                        aspect_score = 1.0 - abs(aspect_ratio - 3.0) / 3.0  # Prefer aspect ratio around 3.0
-                        
-                        total_score = position_score * 0.4 + size_score * 0.3 + aspect_score * 0.3
-                        plate_candidates.append((x, y, w, h, area, total_score))
-        
-        # Sort by score (highest first) and return the best candidate
-        if plate_candidates:
-            plate_candidates.sort(key=lambda x: x[5], reverse=True)
-            x, y, w, h, _, score = plate_candidates[0]
-            
-            # Only return if score is above threshold (lowered for faster detection)
-            if score > 0.2:
-                # Add some padding to the detected region
-                padding = 5
-                x = max(0, x - padding)
-                y = max(0, y - padding)
-                w = min(width - x, w + 2 * padding)
-                h = min(height - y, h + 2 * padding)
-                
-                return (x, y, x + w, y + h)
-        
-        return None
-        
-    except Exception as e:
-        logger.error(f"License plate detection in vehicle failed: {e}")
-        return None
-
-def check_plate_lists(plate_text):
-    """Check if plate is in BlackList or WhiteList - synchronized with app.py"""
-    try:
-        if not plate_text:
-            return False, False
-        
-        # Clean the plate text
-        cleaned_plate = clean_and_validate_plate_text(plate_text)
-        if not cleaned_plate:
-            return False, False
-        
-        # Import get_db_connection from app
-        try:
-            from app import get_db_connection
-            connection = get_db_connection()
-        except ImportError:
-            logger.error("Cannot import get_db_connection from app")
-            return False, False
-            
-        if not connection:
-            return False, False
-        
-        cursor = connection.cursor(dictionary=True)
-        
-        # Check whitelist (synchronized with app.py)
-        whitelist_query = """
-        SELECT id FROM vehicle_whitelist 
-        WHERE plate_number = %s AND is_active = 1 
-        AND (valid_from IS NULL OR valid_from <= NOW()) 
-        AND (valid_to IS NULL OR valid_to >= NOW())
-        """
-        cursor.execute(whitelist_query, (cleaned_plate,))
-        is_whitelist = cursor.fetchone() is not None
-        
-        # Check blacklist (synchronized with app.py)
-        blacklist_query = """
-        SELECT id FROM vehicle_blacklist 
-        WHERE plate_number = %s AND is_active = 1 
-        AND (valid_from IS NULL OR valid_from <= NOW()) 
-        AND (valid_to IS NULL OR valid_to >= NOW())
-        """
-        cursor.execute(blacklist_query, (cleaned_plate,))
-        is_blacklist = cursor.fetchone() is not None
-        
-        cursor.close()
-        connection.close()
-        
-        return is_blacklist, is_whitelist
-        
-    except Exception as e:
-        logger.error(f"Plate list check failed: {e}")
-        return False, False
-
-def save_plate_crop(plate_crop, plate_text, frame_count):
-    """Save plate crop image to static/crops directory"""
-    try:
-        if plate_crop is None or plate_crop.size == 0:
-            return ""
-        
-        # Create crops directory if it doesn't exist
-        crops_dir = "static/crops"
-        os.makedirs(crops_dir, exist_ok=True)
-        
-        # Generate filename with timestamp and plate number
-        timestamp = int(time.time() * 1000)
-        clean_plate = clean_and_validate_plate_text(plate_text)
-        if not clean_plate:
-            clean_plate = "unknown"
-        
-        # Create unique filename
-        filename = f"plate_{timestamp}_{clean_plate}_{frame_count}.jpg"
-        filepath = os.path.join(crops_dir, filename)
-        
-        # Save the image
-        success = cv2.imwrite(filepath, plate_crop)
-        if success:
-            logger.info(f"✅ Saved plate crop: {filename}")
-            return filename
-        else:
-            logger.error(f"Failed to save plate crop: {filename}")
-            return ""
-            
-    except Exception as e:
-        logger.error(f"Error saving plate crop: {e}")
-        return ""
-
-def detect_and_ocr(frame, video_processing=True):
-    """Simplified plate detection and OCR with YOLOv9s and PaddleOCR"""
-    global yolo_model, ocr_reader, frame_count, tracked_objects
-    
-    try:
-        # Initialize models if needed
-        if yolo_model is None:
-            yolo_model = safe_yolo_load('yolov9s.pt')
-        
-        if ocr_reader is None:
-            try:
-                from paddleocr import PaddleOCR
-                ocr_reader = PaddleOCR(use_angle_cls=False, lang='en', show_log=False, use_gpu=False)
-            except:
-                ocr_reader = None
-
-        if frame is None or frame.size == 0:
-            return {'frame': b'', 'boxes': [], 'labels': [], 'ocr_results': [], 'tracked_objects': {}, 'ids': []}
-
-        original_height, original_width = frame.shape[:2]
-        display_frame = frame.copy()
-        frame_count += 1
-        
-        # Draw ROI zone
-        roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
-        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
-        cv2.putText(display_frame, "PLATE DETECTION ZONE", (roi_xmin + 10, roi_ymin - 15), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-        # Initialize response arrays
-        boxes = []
-        labels = []
-        ocr_results = []
-        tracked_objects = {}
-        
-        # Simple plate detection with YOLOv9s
-        if yolo_model is not None:
-            try:
-                # Run YOLO detection for vehicles
-                results = yolo_model(frame, conf=0.3, verbose=False, classes=VEHICLE_CLASSES)
-                
-                for result in results:
-                    if result.boxes is not None:
-                        for box in result.boxes:
-                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                            conf = box.conf[0].cpu().numpy()
-                            class_id = int(box.cls[0].cpu().numpy())
-                            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                            
-                            # Check if vehicle is in ROI
-                            if is_bbox_in_roi([x1, y1, x2, y2], original_width, original_height):
-                                # Draw vehicle bounding box first
-                                vehicle_color = (0, 255, 255)  # Cyan for vehicle
-                                cv2.rectangle(display_frame, (x1, y1), (x2, y2), vehicle_color, 2)
-                                
-                                # Add vehicle label
-                                vehicle_type = get_vehicle_type_from_class(class_id)
-                                vehicle_text = f"Vehicle: {vehicle_type} ({conf:.2f})"
-                                cv2.putText(display_frame, vehicle_text, (x1, max(25, y1 - 10)),
-                                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                                
-                                # Crop vehicle region
-                                vehicle_crop = frame[y1:y2, x1:x2]
-                                
-                                if vehicle_crop.size > 0:
-                                    # Simple plate detection in vehicle
-                                    plate_bbox = detect_license_plate_simple(vehicle_crop)
-                                    
-                                    if plate_bbox:
-                                        px1, py1, px2, py2 = plate_bbox
-                                        frame_px1 = x1 + px1
-                                        frame_py1 = y1 + py1
-                                        frame_px2 = x1 + px2
-                                        frame_py2 = y1 + py2
-                                        
-                                        # Crop plate region
-                                        plate_crop = frame[frame_py1:frame_py2, frame_px1:frame_px2]
-                                        
-                                        if plate_crop.size > 0:
-                                            plate_height, plate_width = plate_crop.shape[:2]
-                                            if plate_width > 50 and plate_height > 15:
-                                                # Run OCR on plate
-                                                plate_text, ocr_conf = run_ocr_on_plate(plate_crop)
-                                                
-                                                if plate_text and is_valid_vietnamese_plate(plate_text):
-                                                    # Check whitelist/blacklist
-                                                    is_blacklist, is_whitelist = check_plate_lists(plate_text)
-                                                    
-                                                    # Determine colors and status
-                                                    if is_blacklist:
-                                                        box_color = (0, 0, 255)  # Red
-                                                        status = "BLACKLIST"
-                                                    elif is_whitelist:
-                                                        box_color = (0, 255, 0)  # Green
-                                                        status = "WHITELIST"
-                                                    else:
-                                                        box_color = (255, 255, 0)  # Yellow
-                                                        status = "NORMAL"
-                                                    
-                                                    # Draw plate bounding box with thicker line
-                                                    cv2.rectangle(display_frame, (frame_px1, frame_py1), (frame_px2, frame_py2), box_color, 4)
-                                                    
-                                                    # Draw background rectangle for text with better positioning
-                                                    text = f"{plate_text} ({status})"
-                                                    text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-                                                    
-                                                    # Position text above the plate bounding box
-                                                    text_x = frame_px1
-                                                    text_y = max(30, frame_py1 - 15)
-                                                    
-                                                    # Ensure text doesn't go off screen
-                                                    if text_x + text_size[0] > original_width:
-                                                        text_x = original_width - text_size[0] - 10
-                                                    if text_y - text_size[1] < 0:
-                                                        text_y = frame_py2 + text_size[1] + 15
-                                                    
-                                                    # Draw background rectangle with border
-                                                    cv2.rectangle(display_frame, 
-                                                                (text_x - 8, text_y - text_size[1] - 8),
-                                                                (text_x + text_size[0] + 8, text_y + 8),
-                                                                (0, 0, 0), -1)  # Black background
-                                                    cv2.rectangle(display_frame, 
-                                                                (text_x - 8, text_y - text_size[1] - 8),
-                                                                (text_x + text_size[0] + 8, text_y + 8),
-                                                                box_color, 2)  # Colored border
-                                                    
-                                                    # Draw plate text with better visibility
-                                                    cv2.putText(display_frame, text, (text_x, text_y),
-                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                                                    
-                                                    # Add confidence score below the plate
-                                                    conf_text = f"Conf: {ocr_conf:.2f}"
-                                                    conf_size = cv2.getTextSize(conf_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-                                                    conf_x = frame_px1
-                                                    conf_y = frame_py2 + 20
-                                                    
-                                                    # Draw confidence background
-                                                    cv2.rectangle(display_frame, 
-                                                                (conf_x - 5, conf_y - conf_size[1] - 5),
-                                                                (conf_x + conf_size[0] + 5, conf_y + 5),
-                                                                (0, 0, 0), -1)
-                                                    
-                                                    # Draw confidence text
-                                                    cv2.putText(display_frame, conf_text, (conf_x, conf_y),
-                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                                                    
-                                                    # Add to results
-                                                    boxes.append([frame_px1, frame_py1, frame_px2, frame_py2])
-                                                    labels.append(plate_text)
-                                                    ocr_results.append([plate_text, float(ocr_conf)])
-                                                    
-                                                    # Create detection object
-                                                    detection_id = f"plate_{frame_count}_{len(boxes)}"
-                                                    tracked_objects[detection_id] = {
-                                                        'plate_number': plate_text,
-                                                        'confidence': float(conf),
-                                                        'bbox': [frame_px1, frame_py1, frame_px2, frame_py2],
-                                                        'first_seen': time.time(),
-                                                        'last_seen': time.time(),
-                                                        'ocr_confidence': float(ocr_conf),
-                                                        'is_blacklist': is_blacklist,
-                                                        'is_whitelist': is_whitelist,
-                                                        'status': status,
-                                                        'vehicle_type': get_vehicle_type_from_class(class_id)
-                                                    }
-                                                    
-                                                    logger.info(f"✅ Plate detected: {plate_text} ({status})")
-                                                else:
-                                                    # No valid plate detected, show vehicle only
-                                                    no_plate_text = "No Plate Detected"
-                                                    no_plate_size = cv2.getTextSize(no_plate_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                                                    no_plate_x = frame_px1
-                                                    no_plate_y = max(30, frame_py1 - 10)
-                                                    
-                                                    # Draw background for "No Plate" text
-                                                    cv2.rectangle(display_frame, 
-                                                                (no_plate_x - 5, no_plate_y - no_plate_size[1] - 5),
-                                                                (no_plate_x + no_plate_size[0] + 5, no_plate_y + 5),
-                                                                (128, 128, 128), -1)  # Gray background
-                                                    
-                                                    # Draw "No Plate" text
-                                                    cv2.putText(display_frame, no_plate_text, (no_plate_x, no_plate_y),
-                                                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                                        
-            except Exception as e:
-                logger.error(f"Detection failed: {e}")
-
-        # Encode frame and return results
-        try:
-            _, buffer = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            frame_bytes = buffer.tobytes()
-        except Exception as e:
-            logger.error(f"Frame encoding failed: {e}")
-            frame_bytes = b''
-
-        return {
-            'frame': frame_bytes,
-            'boxes': boxes,
-            'labels': labels,
-            'ocr_results': ocr_results,
-            'tracked_objects': tracked_objects,
-            'ids': list(tracked_objects.keys())
-        }
-        
-    except Exception as e:
-        logger.error(f"detect_and_ocr failed: {e}")
-        return {'frame': b'', 'boxes': [], 'labels': [], 'ocr_results': [], 'tracked_objects': {}, 'ids': []}
-
-
-def get_detection_stats():
-    """Get detection statistics for monitoring"""
-    try:
-        current_time = time.time()
-        consistent_plates = len([obj for obj in tracked_objects.values() if obj.get('is_consistent', False)])
-        
-        stats = {
-            'total_tracks': len(tracked_objects),
-            'plates_detected': len([obj for obj in tracked_objects.values() if obj.get('plate_number')]),
-            'consistent_plates': consistent_plates,
-            'plates_saved': len([obj for obj in tracked_objects.values() if obj.get('saved_to_db')]),
-            'current_fps': smoothed_fps,
-            'frame_count': frame_count,
-            'plate_history_size': len(plate_history),
-            'duplicates_prevented': duplicate_counter,
-            'consistency_records': len(track_consistency),
-            'ocr_attempts': len(ocr_attempts_per_track),
-            'consistency_threshold': consistency_threshold,
-            'max_ocr_attempts': max_ocr_attempts,
-            'last_cleanup': last_cleanup_time,
-            'uptime': current_time - (getattr(get_detection_stats, 'start_time', current_time))
-        }
-        
-        # Initialize start time if not set
-        if not hasattr(get_detection_stats, 'start_time'):
-            get_detection_stats.start_time = current_time
-            
-        return stats
-        
-    except Exception as e:
-        logger.error(f"Error getting detection stats: {e}")
-        return {'error': str(e)}
-
-def adjust_consistency_settings(new_threshold=None, new_max_attempts=None, new_window=None):
-    """Adjust consistency tracking settings"""
-    global consistency_threshold, max_ocr_attempts, consistency_window
-    
-    old_settings = {
-        'consistency_threshold': consistency_threshold,
-        'max_ocr_attempts': max_ocr_attempts,
-        'consistency_window': consistency_window
-    }
-    
-    if new_threshold is not None:
-        consistency_threshold = max(1, min(10, new_threshold))  # Between 1-10
-        logger.info(f"Consistency threshold adjusted: {old_settings['consistency_threshold']} -> {consistency_threshold}")
-    
-    if new_max_attempts is not None:
-        max_ocr_attempts = max(1, min(20, new_max_attempts))  # Between 1-20
-        logger.info(f"Max OCR attempts adjusted: {old_settings['max_ocr_attempts']} -> {max_ocr_attempts}")
-    
-    if new_window is not None:
-        consistency_window = max(5, min(30, new_window))  # Between 5-30
-        logger.info(f"Consistency window adjusted: {old_settings['consistency_window']} -> {consistency_window}")
-    
-    return {
-        'success': True,
-        'old_settings': old_settings,
-        'new_settings': {
-            'consistency_threshold': consistency_threshold,
-            'max_ocr_attempts': max_ocr_attempts,
-            'consistency_window': consistency_window
-        }
-    }
-
-# Initialize OCR reader on module load
-def initialize_ocr():
-    """Initialize OCR với comprehensive error handling"""
-    global ocr_reader, ocr_reader_fallback, ocr_initialization_attempts
-    
-    try:
-        logger.info("🚀 INITIALIZING OCR WITH COMPREHENSIVE ERROR HANDLING...")
-        
-        # Reset initialization attempts
-        ocr_initialization_attempts = 0
-        
-        # Use safe OCR initialization
-        if safe_ocr_initialization():
-            logger.info("🎉 OCR INITIALIZATION SUCCESSFUL!")
-            return True
-        else:
-            logger.error("❌ OCR initialization failed")
-            return False
-        
-    except Exception as e:
-        logger.error(f"❌ Critical error in OCR initialization: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return False
-
-def analyze_debug_crops():
-    """Analyze debug crops saved when OCR fails"""
-    try:
-        debug_dir = os.path.join(os.path.dirname(__file__), 'debug_crops')
-        if not os.path.exists(debug_dir):
-            logger.info("No debug crops directory found")
-            return
-        
-        crop_files = [f for f in os.listdir(debug_dir) if f.endswith('.jpg')]
-        if not crop_files:
-            logger.info("No debug crop files found")
-            return
-        
-        logger.info(f"Found {len(crop_files)} debug crop files:")
-        for crop_file in sorted(crop_files)[-5:]:  # Show last 5 files
-            crop_path = os.path.join(debug_dir, crop_file)
-            try:
-                img = cv2.imread(crop_path)
-                if img is not None:
-                    h, w = img.shape[:2]
-                    logger.info(f"  {crop_file}: {w}x{h} pixels")
-                    
-                    # Try OCR on the debug crop
-                    if ocr_reader is not None:
-                        result = ocr_reader.ocr(img, det=True, rec=True, cls=False)
-                        text, conf = safe_extract_ocr_text(result)
-                        if text:
-                            logger.info(f"    OCR result: '{text}' (conf: {conf:.3f})")
-                        else:
-                            logger.info(f"    OCR failed: no text detected")
-                else:
-                    logger.warning(f"  {crop_file}: Could not read image")
-            except Exception as e:
-                logger.error(f"  {crop_file}: Error analyzing - {e}")
-                
-    except Exception as e:
-        logger.error(f"Error analyzing debug crops: {e}")
-
-# Initialize OCR when module is loaded
-if __name__ != "__main__":
-    # Setup PyTorch environment first
-    try:
-        setup_pytorch_environment_fixed()
-    except Exception as e:
-        logger.warning(f"Could not setup PyTorch environment: {e}")
-    
-    # Check PyTorch compatibility
-    try:
-        check_pytorch_compatibility()
-    except Exception as e:
-        logger.warning(f"Could not check PyTorch compatibility: {e}")
-    
-    # Check model availability
-    try:
-        model_status = check_model_availability()
-        logger.info(f"Model availability: {model_status['total_available']} models found")
-    except Exception as e:
-        logger.warning(f"Could not check model availability: {e}")
-    
-    # Initialize models
-    try:
-        if initialize_models_properly():
-            logger.info("✅ Module initialization successful")
-        else:
-            logger.warning("⚠️ Module initialization partial success")
-    except Exception as e:
-        logger.error(f"Module initialization error: {e}")
-    
-    # Initialize OCR
-    try:
-        initialize_ocr()
-    except Exception as e:
-        logger.warning(f"OCR initialization error: {e}")
-
-# Auto-initialization when imported
-try:
-    logger.info("🚀 Auto-initializing detector_fixed...")
-    if initialize_models_properly():
-        logger.info("✅ Auto-initialization successful")
-    else:
-        logger.warning("⚠️ Auto-initialization failed")
-except Exception as e:
-    logger.error(f"❌ Auto-initialization error: {e}")
-
-# Main function for testing
-if __name__ == "__main__":
-    try:
-        logger.info("🧪 Testing detector_fixed.py...")
-        
-        # Check PyTorch compatibility first
-        check_pytorch_compatibility()
-        
-        # Check model availability
-        check_model_availability()
-        
-        # Test safe_yolo_load function with comprehensive error handling
-        logger.info("🔄 Testing safe_yolo_load function...")
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Test only yolov9s.pt
-        test_paths = [
-            'yolov9s.pt'  # Only yolov9s.pt
-        ]
-        
-        test_model = None
-        for test_path in test_paths:
-            logger.info(f"🔄 Testing path: {test_path}")
-            try:
-                test_model = safe_yolo_load(test_path)
-                if test_model:
-                    logger.info(f"✅ Model loaded successfully from: {test_path}")
-                    break
-                else:
-                    logger.warning(f"⚠️ Failed to load from: {test_path}")
-            except Exception as e:
-                logger.warning(f"⚠️ Error testing {test_path}: {e}")
-                continue
-        
-        if test_model:
-            logger.info("✅ safe_yolo_load test successful")
-        else:
-            logger.error("❌ All safe_yolo_load tests failed")
-            # Try force download as last resort
-            logger.info("🔄 Trying force model download...")
-            try:
-                from ultralytics import YOLO
-                test_model = YOLO('yolov9s.pt')
-                logger.info("✅ Force download successful")
-            except Exception as e:
-                logger.error(f"❌ Force download failed: {e}")
-        
-        # Test OCR initialization
-        logger.info("🔄 Testing OCR initialization...")
-        try:
-            initialize_ocr()
-            logger.info("✅ OCR initialization test successful")
-        except Exception as e:
-            logger.error(f"❌ OCR initialization test failed: {e}")
-        
-        # Test basic model loading
-        logger.info("🔄 Testing basic model loading...")
-        try:
-            if yolo_model is None:
-                logger.info("Loading test vehicle model...")
-                yolo_model = safe_yolo_load('yolov9s.pt')
-            
-            if plate_model is None:
-                logger.info("Loading test plate model...")
-                plate_model = safe_yolo_load('yolov9s.pt')
-                
-            if yolo_model or plate_model:
-                logger.info("✅ Basic model loading test successful")
-            else:
-                logger.warning("⚠️ Basic model loading test failed")
-                
-        except Exception as e:
-            logger.error(f"❌ Basic model loading test failed: {e}")
-        
-        # Create and test simple frame
-        logger.info("🔄 Testing frame creation...")
-        try:
-            test_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(test_frame, "TEST FRAME", (200, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            logger.info("✅ Test frame created successfully")
-            
-            # Only test detection if we have a working model
-            if yolo_model or plate_model:
-                logger.info("🔄 Testing detection on test frame...")
-                result = detect_and_ocr(test_frame)
-                
-                if result:
-                    logger.info("✅ Detection test successful!")
-                    logger.info(f"Result keys: {list(result.keys())}")
-                    logger.info(f"Boxes: {len(result.get('boxes', []))}")
-                    logger.info(f"Labels: {len(result.get('labels', []))}")
-                else:
-                    logger.warning("⚠️ Detection test returned no result")
-            else:
-                logger.warning("⚠️ Skipping detection test - no working models")
-                
-        except Exception as e:
-            logger.error(f"❌ Frame/detection test failed: {e}")
-            
-        logger.info("🧪 Testing completed!")
-            
-    except Exception as e:
-        logger.error(f"❌ Test failed: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-# Thêm function debug này vào cuối file detector_fixed.py:
-
-# detect_and_ocr_debug_mode removed - using detect_and_ocr instead
-
-# Debug wrapper functions removed - using detect_and_ocr directly
-
-def force_enable_detection():
-    """Force enable detection by resetting settings"""
-    global ENABLE_FRAME_SKIP, FRAME_SKIP, MIN_CONFIDENCE
-    
-    logger.info("🔧 FORCE ENABLING DETECTION")
-    
-    # Disable frame skipping
-    ENABLE_FRAME_SKIP = False
-    FRAME_SKIP = 1
-    
-    # Lower confidence for better detection
-    MIN_CONFIDENCE = 0.2
-    
-    # Force model initialization
-    if not initialize_models_properly():
-        logger.error("❌ Failed to initialize models")
-        return False
-    
-    logger.info("✅ Detection force enabled")
-    return True
-
-def get_detection_status():
-    """Get current detection status"""
-    return {
-        'yolo_model_ready': yolo_model is not None,
-        'plate_model_ready': plate_model is not None,
-        'ocr_reader_ready': ocr_reader is not None,
-        'tracker_ready': tracker is not None,
-        'min_confidence': MIN_CONFIDENCE,
-        'frame_skip_enabled': ENABLE_FRAME_SKIP,
-        'frame_skip_value': FRAME_SKIP,
-        'plate_model_name': plate_model_name
-    }
+        logger.error(f"Error in legacy detect_and_ocr: {e}")
+        return frame
 
 # Export main functions
 __all__ = [
+    'detect_and_ocr_stable',
     'detect_and_ocr',
-    'detect_and_ocr_debug_mode', 
-    'detectand_ocr_with_debug_toggle',
     'calculate_roi_coordinates',
     'tracked_objects',
     'cleanup_tracked_objects',
-    'safe_yolo_load',
-    'check_model_availability'
+    'get_detection_stats',
+    'reset_anti_duplicate_system',
+    'get_tracked_objects_status'
 ]

@@ -1,460 +1,1059 @@
-from flask import Flask, request, jsonify, send_from_directory, Response
+import os
+# Cấu hình môi trường cho FastALPR GPU
+os.environ['OMP_NUM_THREADS'] = '4'
+os.environ['ORT_LOGGING_LEVEL'] = '3'  # Suppress ONNX Runtime warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
+# Cho phép GPU nhưng fallback về CPU nếu có lỗi
+
+# Thiết lập ONNX Runtime providers trước khi import bất kỳ thư viện nào khác
+import onnxruntime as ort
+# Force CPU-only execution
+ort.set_default_logger_severity(3)
+
+from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_sock import Sock
 from flask_cors import CORS
+import cv2
+import numpy as np
+from detector import detect_and_ocr_stable
 import json
 import logging
 import time
-import traceback
-import cv2
-import numpy as np
-import sys
-import os
-import mysql.connector
-from datetime import datetime
+from urllib.parse import urlparse
+import requests
+from tempfile import NamedTemporaryFile
+from queue import Queue
+import subprocess
 import uuid
-import re
+import threading
 
-# ROI Configuration
-ROI_PERCENT_XMIN = 0.0
-ROI_PERCENT_YMIN = 0.25
-ROI_PERCENT_XMAX = 1.0
-ROI_PERCENT_YMAX = 0.75
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
-
-# Import optimized detector
-try:
-    from detector_simple import detect_and_ocr_simple as detect_and_ocr, calculate_roi_coordinates, is_valid_license_plate
-    print("✅ Optimized License Plate Detector imported successfully")
-except ImportError as e:
-    print(f"❌ Error importing detector: {e}")
-    sys.exit(1)
-
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Reduce log spam
-logging.getLogger('ultralytics').setLevel(logging.WARNING)
-logging.getLogger('paddleocr').setLevel(logging.WARNING)
-
 app = Flask(__name__)
-CORS(app, origins=["*"])
+CORS(app)
 sock = Sock(app)
 
-# Database configuration
-DB_CONFIG = {
-    'host': '127.0.0.1',
-    'user': 'root',
-    'password': '22022001',
-    'database': 'lpdb',
-    'charset': 'utf8mb4'
-}
+# Global variable to store detected plates for database saving
+detected_plates_queue = []
+detected_plates_lock = threading.Lock()
 
-def get_db_connection():
+def save_detection_to_database(plate_data):
+    """Save detection to database via API call"""
     try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except mysql.connector.Error as e:
-        logger.error(f"Database connection error: {e}")
-        return None
-
-def save_detection_to_db(detection_data):
-    """Enhanced database save function with crop image support"""
-    try:
-        connection = get_db_connection()
-        if not connection:
+        # API endpoint for saving plate recognitions
+        api_url = "http://localhost:5000/api/plate-recognitions/detected-plates"
+        
+        # Prepare data for API
+        payload = {
+            "detection_uuid": plate_data.get('detection_uuid', f"detection_{int(time.time())}"),
+            "plate_number": plate_data.get('plate_number', ''),
+            "raw_plate_text": plate_data.get('raw_plate_text', ''),
+            "camera_id": plate_data.get('camera_id', 'default'),
+            "location_id": plate_data.get('location_id'),
+            "detected_at": plate_data.get('detected_at', time.time()),
+            "confidence_score": plate_data.get('confidence_score', 0.0),
+            "ocr_confidence": plate_data.get('ocr_confidence', 0.0),
+            "detection_confidence": plate_data.get('detection_confidence', 0.0),
+            "bbox": plate_data.get('bbox', [0, 0, 0, 0]),
+            "frame_path": plate_data.get('frame_path', ''),
+            "detected_vehicle_type": plate_data.get('detected_vehicle_type', 'unknown'),
+            "source_type": plate_data.get('source_type', 'camera_stream')
+        }
+        
+        # Make API call
+        response = requests.post(api_url, json=payload, timeout=5)
+        
+        if response.status_code == 200:
+            logger.info(f"Successfully saved plate detection: {plate_data.get('plate_number')}")
+            return True
+        else:
+            logger.error(f"Failed to save detection. Status: {response.status_code}, Response: {response.text}")
             return False
-        
-        cursor = connection.cursor()
-        
-        query = """
-        INSERT INTO license_plate_detections (
-            detection_uuid, plate_number, raw_plate_text, camera_id, location_id,
-            detected_at, confidence_score, ocr_confidence, detected_vehicle_type,
-            bbox_x1, bbox_y1, bbox_x2, bbox_y2, cropped_plate_image_path, ai_model_version,
-            is_verified, is_whitelist_match, is_blacklist_match, alert_triggered
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-        )
-        """
-        
-        # Enhanced data validation
-        detection_uuid = str(uuid.uuid4())
-        plate_number = str(detection_data.get('plate_number', ''))[:50]
-        confidence = max(0.0, min(1.0, float(detection_data.get('confidence', 0.0))))
-        ocr_confidence = max(0.0, min(1.0, float(detection_data.get('ocr_confidence', confidence))))
-        bbox = detection_data.get('bbox', [0, 0, 0, 0])
-        crop_filename = detection_data.get('crop_filename', '')
-        
-        # Create full path for crop image
-        crop_image_path = f"/static/crops/{crop_filename}" if crop_filename else None
-        
-        values = (
-            detection_uuid,
-            plate_number,
-            plate_number,  # raw_plate_text same as plate_number
-            1,  # camera_id
-            1,  # location_id
-            datetime.now(),
-            confidence,
-            ocr_confidence,  # Use actual OCR confidence
-            'car',  # detected_vehicle_type
-            int(bbox[0]) if len(bbox) > 0 else 0,
-            int(bbox[1]) if len(bbox) > 1 else 0,
-            int(bbox[2]) if len(bbox) > 2 else 0,
-            int(bbox[3]) if len(bbox) > 3 else 0,
-            crop_image_path,  # cropped_plate_image_path
-            'yolov9s-optimized-v2.0',
-            False,  # is_verified
-            False,  # is_whitelist_match
-            False,  # is_blacklist_match
-            False   # alert_triggered
-        )
-        
-        cursor.execute(query, values)
-        connection.commit()
-        
-        detection_id = cursor.lastrowid
-        cursor.close()
-        connection.close()
-        
-        logger.info(f"Saved detection to database: {plate_number} (ID: {detection_id}, Crop: {crop_filename})")
-        return detection_id
-        
+            
     except Exception as e:
-        logger.error(f"Database save error: {e}")
-        if 'connection' in locals():
-            try:
-                connection.close()
-            except:
-                pass
+        logger.error(f"Error saving detection to database: {str(e)}")
         return False
 
-# Initialize models in background
-def initialize_models_background():
-    try:
-        from detector_simple import initialize_models
-        initialize_models()
-        logger.info("✅ Models initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Model initialization failed: {e}")
+def process_detected_plates():
+    """Background thread to process detected plates and save to database"""
+    global detected_plates_queue
+    
+    while True:
+        try:
+            if detected_plates_queue:
+                with detected_plates_lock:
+                    plate_data = detected_plates_queue.pop(0)
+                
+                # Save to database
+                save_detection_to_database(plate_data)
+                
+            time.sleep(0.1)  # Small delay to prevent busy waiting
+            
+        except Exception as e:
+            logger.error(f"Error in process_detected_plates: {str(e)}")
+            time.sleep(1)
 
-import threading
-model_init_thread = threading.Thread(target=initialize_models_background, daemon=True)
-model_init_thread.start()
+# Start background thread for database saving
+db_thread = threading.Thread(target=process_detected_plates, daemon=True)
+db_thread.start()
 
-# WebSocket endpoint - SIMPLIFIED
+# Trong hàm recognize_ws, thêm xử lý cho HLS stream nếu RTSP không khả dụng
 @sock.route('/recognize-ws')
 def recognize_ws(ws):
-    logger.info("WebSocket connection established")
-    
-    ws.send(json.dumps({
-        'status': 'connected',
-        'message': 'WebSocket ready for license plate detection'
-    }))
-    
-    frame_count = 0
-    last_save_time = 0
-    save_interval = 1.0  # Save to DB every 1 second for better responsiveness
-    
+    logger.info("Kết nối WebSocket mới được thiết lập")
+    cap = None
+    camera_id = "default"  # Khởi tạo camera_id mặc định
+
     try:
         while True:
-            try:
-                # Receive frame with shorter timeout for better responsiveness
-                message = ws.receive(timeout=0.1)
-                if message is None or not isinstance(message, bytes):
-                    continue
-                
-                frame_count += 1
-                current_time = time.time()
-                
-                # Decode frame
-                nparr = np.frombuffer(message, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
-                if frame is None:
-                    continue
-                
-                # Process with optimized detector
-                result = detect_and_ocr(frame)
-                
-                if not result:
-                    continue
-                
-                # Send processed frame
-                frame_data = result.get('frame')
-                if frame_data:
-                    ws.send(frame_data)
-                
-                # Save to database (throttled)
-                should_save = (current_time - last_save_time) >= save_interval
-                if should_save:
-                    tracked_objects = result.get('tracked_objects', {})
-                    for track_id, obj in tracked_objects.items():
-                        plate_number = obj.get('plate_number', '')
-                        confidence = obj.get('confidence', 0.0)
-                        crop_filename = obj.get('crop_filename', '')
-                        
-                        # Only save high confidence valid plates with crop images
-                        if plate_number and confidence > 0.6 and len(plate_number) >= 4 and crop_filename:
-                            save_detection_to_db(obj)
-                            last_save_time = current_time
-                            break  # Save only one per interval
-                
-                # Send metadata
+            message = ws.receive()
+            if message is None:
+                logger.info("Kết nối WebSocket bị đóng bởi client")
+                break
+
+            if isinstance(message, bytes):
+                # Xử lý frame từ frontend
                 try:
-                    metadata = {
-                        'type': 'detection_result',
-                        'frame_count': frame_count,
-                        'timestamp': current_time,
-                        'detections': len(result.get('tracked_objects', {}))
-                    }
-                    ws.send(json.dumps(metadata))
-                except:
-                    pass  # Metadata is optional
-                
-            except Exception as receive_err:
-                if "timeout" in str(receive_err).lower():
-                    continue
-                if "Connection closed" in str(receive_err):
-                    break
-                logger.warning(f"WebSocket error: {receive_err}")
+                    # Chuyển đổi bytes thành numpy array
+                    nparr = np.frombuffer(message, np.uint8)
+                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    
+                    if frame is not None:
+                        logger.info(f"Received frame from frontend: {frame.shape}")
+                        # Xử lý frame với detect_and_ocr_stable
+                        result = detect_and_ocr_stable(frame, camera_id=camera_id)
+                        
+                        if isinstance(result, dict):
+                            processed_frame_bytes = result.get('frame', b'')
+                            tracked_objects = result.get('tracked_objects', {})
+                            
+                            # Process tracked objects for database saving
+                            for track_id, obj_data in tracked_objects.items():
+                                if (obj_data.get('validation_passed') and 
+                                    not obj_data.get('saved_to_db', False) and
+                                    obj_data.get('plate_number') != 'Đang nhận diện...'):
+                                    
+                                    # Prepare plate data for database
+                                    plate_data = {
+                                        'detection_uuid': f"ws_{camera_id}_{track_id}_{int(time.time())}",
+                                        'plate_number': obj_data.get('plate_number', ''),
+                                        'raw_plate_text': obj_data.get('raw_text', ''),
+                                        'camera_id': camera_id,
+                                        'detected_at': time.time(),
+                                        'confidence_score': obj_data.get('confidence', 0.0),
+                                        'ocr_confidence': obj_data.get('confidence', 0.0),
+                                        'detection_confidence': obj_data.get('confidence', 0.0),
+                                        'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
+                                        'frame_path': obj_data.get('crop_filename', ''),
+                                        'detected_vehicle_type': 'unknown',
+                                        'source_type': 'websocket_stream'
+                                    }
+                                    
+                                    # Add to queue for database saving
+                                    with detected_plates_lock:
+                                        detected_plates_queue.append(plate_data)
+                                    
+                                    # Mark as saved to avoid duplicate saving
+                                    obj_data['saved_to_db'] = True
+                            
+                            # Send processed frame
+                            if processed_frame_bytes:
+                                ws.send(processed_frame_bytes)
+                            else:
+                                # Fallback: encode frame manually
+                                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                ws.send(buffer.tobytes())
+                                
+                        else:
+                            # Legacy support: result is direct frame
+                            if isinstance(result, np.ndarray):
+                                _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                frame_bytes = buffer.tobytes()
+                            else:
+                                frame_bytes = result
+                            ws.send(frame_bytes)
+                        
+                        logger.info(f"Processed frame sent back")
+                        
+                    else:
+                        logger.warning("Failed to decode frame from frontend")
+                except Exception as e:
+                    logger.error(f"Error processing frame from frontend: {str(e)}")
                 continue
-                
+            else:
+                try:
+                    data = json.loads(message)
+                    logger.info(f"Received message: {data}")
+                    
+                    # Xử lý thông tin nguồn từ frontend
+                    if data.get('type') == 'source_info':
+                        logger.info(f"Received source info: {data}")
+                        # Lưu thông tin camera để sử dụng sau
+                        camera_id = data.get('camera_id') or "default"
+                        camera_name = data.get('camera_name')
+                        source_type = data.get('source_type')
+                        logger.info(f"Camera info: ID={camera_id}, Name={camera_name}, Type={source_type}")
+                        continue
+                    
+                    # Xử lý RTSP URL
+                    elif data.get('type') == 'rtsp_url' and 'url' in data:
+                        stream_url = data['url']
+                        camera_id = data.get('cameraId')
+
+                        # Đóng stream hiện tại nếu có
+                        if cap is not None:
+                            cap.release()
+                            cap = None
+
+                        # Mở stream RTSP mới với tối ưu hóa
+                        cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Giảm buffer để tránh lag
+                        cap.set(cv2.CAP_PROP_HW_ACCELERATION, 1)  # Bật hardware acceleration
+                        
+                        if not cap.isOpened():
+                            logger.error(f"Không thể mở RTSP stream: {stream_url}")
+                            ws.send(json.dumps({"error": "Cannot open RTSP stream"}))
+                            continue
+
+                        logger.info(f"Bắt đầu xử lý RTSP stream: {stream_url}")
+
+                        # Xử lý stream và gửi frames đã xử lý
+                        while cap.isOpened():
+                            ret, frame = cap.read()
+                            if not ret:
+                                logger.warning("Không thể đọc frame từ RTSP stream")
+                                break
+                            
+                            # Xử lý frame với detect_and_ocr_stable
+                            logger.info(f"Processing frame for camera {camera_id}")
+                            result = detect_and_ocr_stable(frame, camera_id=camera_id)
+                            
+                            if isinstance(result, dict):
+                                processed_frame_bytes = result.get('frame', b'')
+                                tracked_objects = result.get('tracked_objects', {})
+                                
+                                # Process tracked objects for database saving
+                                for track_id, obj_data in tracked_objects.items():
+                                    if (obj_data.get('validation_passed') and 
+                                        not obj_data.get('saved_to_db', False) and
+                                        obj_data.get('plate_number') != 'Đang nhận diện...'):
+                                        
+                                        # Prepare plate data for database
+                                        plate_data = {
+                                            'detection_uuid': f"rtsp_{camera_id}_{track_id}_{int(time.time())}",
+                                            'plate_number': obj_data.get('plate_number', ''),
+                                            'raw_plate_text': obj_data.get('raw_text', ''),
+                                            'camera_id': camera_id,
+                                            'detected_at': time.time(),
+                                            'confidence_score': obj_data.get('confidence', 0.0),
+                                            'ocr_confidence': obj_data.get('confidence', 0.0),
+                                            'detection_confidence': obj_data.get('confidence', 0.0),
+                                            'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
+                                            'frame_path': obj_data.get('crop_filename', ''),
+                                            'detected_vehicle_type': 'unknown',
+                                            'source_type': 'rtsp_stream'
+                                        }
+                                        
+                                        # Add to queue for database saving
+                                        with detected_plates_lock:
+                                            detected_plates_queue.append(plate_data)
+                                        
+                                        # Mark as saved to avoid duplicate saving
+                                        obj_data['saved_to_db'] = True
+                                
+                                # Send processed frame
+                                if processed_frame_bytes:
+                                    ws.send(processed_frame_bytes)
+                                else:
+                                    # Fallback
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                    ws.send(buffer.tobytes())
+                            else:
+                                # Legacy support
+                                if isinstance(result, np.ndarray):
+                                    _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                    frame_bytes = buffer.tobytes()
+                                else:
+                                    frame_bytes = result
+                                ws.send(frame_bytes)
+
+                except json.JSONDecodeError:
+                    logger.warning("Nhận được thông điệp không hợp lệ")
+                    continue
+
     except Exception as e:
-        logger.error(f"WebSocket critical error: {e}")
+        logger.error(f"Lỗi trong xử lý video WebSocket: {str(e)}")
     finally:
-        logger.info("WebSocket connection closed")
+        if cap is not None:
+            cap.release()
+        logger.info("Kết nối WebSocket đã kết thúc")
 
-# Basic API endpoints
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({
-        'success': True,
-        'message': 'Server is running',
-        'timestamp': datetime.now().isoformat()
-    })
 
-@app.route('/')
-def home():
-    return jsonify({
-        "message": "Optimized License Plate Recognition Server", 
-        "status": "running"
-    })
-
-# Serve static crop images
-@app.route('/static/crops/<filename>')
-def serve_crop_image(filename):
-    """Serve cropped license plate images"""
-    try:
-        return send_from_directory('static/crops', filename)
-    except Exception as e:
-        logger.error(f"Error serving crop image {filename}: {e}")
-        return "Image not found", 404
-
-@app.route('/api/detected-plates', methods=['GET'])
-def get_detected_plates():
-    """Get detected plates from database"""
-    try:
-        connection = get_db_connection()
-        if not connection:
-            return jsonify({'success': False, 'message': 'Database connection failed'}), 500
-        
-        cursor = connection.cursor(dictionary=True)
-        
-        # Get recent detections with crop image paths
-        query = """
-        SELECT id, plate_number, confidence_score, ocr_confidence, detected_at, 
-               bbox_x1, bbox_y1, bbox_x2, bbox_y2, cropped_plate_image_path
-        FROM license_plate_detections 
-        ORDER BY detected_at DESC 
-        LIMIT 50
-        """
-        
-        cursor.execute(query)
-        detections = cursor.fetchall()
-        
-        # Convert datetime to string
-        for detection in detections:
-            if detection['detected_at']:
-                detection['detected_at'] = detection['detected_at'].isoformat()
-        
-        cursor.close()
-        connection.close()
-        
-        return jsonify({
-            'success': True,
-            'data': detections,
-            'total': len(detections)
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting detected plates: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/clear-detected-plates', methods=['POST'])
-def clear_detected_plates():
-    """Clear detected plates from memory"""
-    try:
-        # Clear memory cache if exists
-        try:
-            from detector_simple import tracked_objects
-            if 'tracked_objects' in globals():
-                tracked_objects.clear()
-        except:
-            pass
-        
-        return jsonify({"status": "cleared"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# Video processing endpoints - SIMPLIFIED
-current_video_path = None
-video_processing = False
-
-@app.route('/upload_video', methods=['POST'])
-def upload_video():
-    global current_video_path, video_processing
+def cleanup_crops():
+    """Thêm hàm cleanup_crops để xóa crop cũ (giữ chỉ 50 crop mới nhất)"""
+    crops_dir = 'static/crops'
+    if not os.path.exists(crops_dir):
+        return
     
+    try:
+        files = sorted(os.listdir(crops_dir),
+                       key=lambda f: os.path.getmtime(os.path.join(crops_dir, f)))
+        if len(files) > 50:
+            for file in files[:-50]:  # Xóa tất cả trừ 50 mới nhất
+                try:
+                    os.remove(os.path.join(crops_dir, file))
+                except Exception as e:
+                    logger.error(f"Lỗi khi xóa file {file}: {str(e)}")
+            logger.info(f"Đã xóa {len(files) - 50} crop files cũ")
+    except Exception as e:
+        logger.error(f"Lỗi trong cleanup_crops: {str(e)}")
+
+
+@app.route('/api/process-local-video', methods=['POST'])
+def process_local_video():
     try:
         if 'video' not in request.files:
-            return jsonify({"success": False, "message": "No video file"}), 400
-        
+            return jsonify({"error": "Không có file video được tải lên"}), 400
+
         video_file = request.files['video']
         if video_file.filename == '':
-            return jsonify({"success": False, "message": "No file selected"}), 400
-        
-        # Save video
-        upload_dir = os.path.join(current_dir, 'static', 'uploads')
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        filename = f"upload_{int(time.time())}_{video_file.filename}"
-        filepath = os.path.join(upload_dir, filename)
-        video_file.save(filepath)
-        
-        current_video_path = filepath
-        video_processing = False  # Start paused
-        
-        return jsonify({
-            "success": True,
-            "message": "Video uploaded successfully",
-            "filename": filename
-        })
-        
-    except Exception as e:
-        logger.error(f"Video upload error: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+            return jsonify({"error": "Không có file được chọn"}), 400
 
-@app.route('/process_video', methods=['POST'])
-def process_video():
-    global video_processing
-    
-    try:
-        data = request.get_json()
-        action = data.get('action', 'start')
-        
-        if action == 'start':
-            video_processing = True
-            message = "Video processing started"
-        else:
-            video_processing = False
-            message = "Video processing stopped"
-        
-        return jsonify({
-            "success": True,
-            "message": message,
-            "processing": video_processing
-        })
-        
-    except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 500
+        # Lưu file video tạm thời
+        temp_filename = f"{uuid.uuid4().hex}_{video_file.filename}"
+        temp_video_path = os.path.join('temp_videos', temp_filename)
+        os.makedirs('temp_videos', exist_ok=True)
 
-@app.route('/video_feed')
-def video_feed():
-    """Simple video feed with detection"""
-    global current_video_path, video_processing
-    
-    try:
-        if not current_video_path or not os.path.exists(current_video_path):
-            # Return placeholder
-            placeholder = np.ones((480, 640, 3), dtype=np.uint8) * 128
-            cv2.putText(placeholder, "No Video Loaded", (200, 240), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            _, buffer = cv2.imencode('.jpg', placeholder)
-            return Response(buffer.tobytes(), mimetype='image/jpeg')
-        
-        # Read video frame
-        cap = cv2.VideoCapture(current_video_path)
+        video_file.save(temp_video_path)
+        logger.info(f"Đã lưu video tạm: {temp_video_path}")
+
+        # Trả về WebSocket URL để client có thể kết nối
+        ws_url = f"ws://localhost:5002/processed-video-ws/{temp_filename}"
+        return jsonify({"wsUrl": ws_url})
+
+    except Exception as e:
+        logger.error(f"Lỗi xử lý video: {str(e)}")
+        return jsonify({"error": f"Lỗi xử lý video: {str(e)}"}), 500
+
+
+@app.route('/api/video-stream/<video_id>')
+def video_stream(video_id):
+    temp_video_path = os.path.join('temp_videos', video_id)
+    if not os.path.exists(temp_video_path):
+        return jsonify({"error": "Video không tồn tại"}), 404
+
+    def generate():
+        cap = cv2.VideoCapture(temp_video_path)
         if not cap.isOpened():
-            return jsonify({'error': 'Cannot open video'}), 500
+            logger.error("Không thể mở video file")
+            yield b''
+            return
+
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Xử lý frame với detection/OCR
+                try:
+                    result = detect_and_ocr_stable(frame)
+
+                    # Handle both dict and direct frame results
+                    if isinstance(result, dict):
+                        frame_bytes = result.get('frame', b'')
+                        if not frame_bytes:
+                            # Fallback: encode manually
+                            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame_bytes = buffer.tobytes()
+                    else:
+                        # Legacy support
+                        if isinstance(result, np.ndarray):
+                            _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame_bytes = buffer.tobytes()
+                        else:
+                            frame_bytes = result
+
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+                    # Giới hạn tốc độ frame (~30 FPS)
+                    time.sleep(0.033)
+
+                except Exception as e:
+                    logger.error(f"Lỗi xử lý frame: {str(e)}")
+                    continue
+        finally:
+            cap.release()
+
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/api/start-llhls-processing', methods=['POST'])
+def start_llhls_processing():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+            
+        rtsp_url = data.get('rtsp_url')
         
-        ret, frame = cap.read()
-        if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Loop to start
-            ret, frame = cap.read()
-            if not ret:
-                cap.release()
-                return jsonify({'error': 'Cannot read frame'}), 500
-        
-        # Process frame if detection is active
-        if video_processing:
+        if not rtsp_url:
+            return jsonify({"error": "RTSP URL is required"}), 400
+
+        # Generate unique stream ID
+        stream_id = str(uuid.uuid4())
+        output_dir = os.path.join('llhls_output', stream_id)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Start processing in background thread
+        thread = threading.Thread(
+            target=process_rtsp_to_llhls,
+            args=(rtsp_url, output_dir, stream_id)
+        )
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            "success": True,
+            "stream_id": stream_id,
+            "hls_url": f"/llhls/{stream_id}/playlist.m3u8"
+        })
+
+    except Exception as e:
+        logger.error(f"LL-HLS processing error: {str(e)}")
+        return jsonify({"error": f"LL-HLS processing error: {str(e)}"}), 500
+
+
+def process_rtsp_to_llhls(rtsp_url, output_dir, stream_id):
+    """Xử lý RTSP stream và tạo LL-HLS output"""
+    try:
+        # Open RTSP stream
+        cap = cv2.VideoCapture(rtsp_url)
+        if not cap.isOpened():
+            logger.error(f"Cannot open RTSP stream: {rtsp_url}")
+            return
+
+        # Get video properties
+        fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
+
+        # FFmpeg command for LL-HLS
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-y',
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-s', f'{width}x{height}',
+            '-pix_fmt', 'bgr24',
+            '-r', str(fps),
+            '-i', '-',
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-tune', 'zerolatency',
+            '-crf', '23',
+            '-f', 'hls',
+            '-hls_time', '2',
+            '-hls_list_size', '5',
+            '-hls_flags', 'delete_segments+independent_segments',
+            '-hls_segment_type', 'mpegts',
+            '-hls_segment_filename', os.path.join(output_dir, 'segment_%03d.ts'),
+            os.path.join(output_dir, 'playlist.m3u8')
+        ]
+
+        process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, 
+                                 stderr=subprocess.PIPE)
+
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Process frame with license plate recognition
+                result = detect_and_ocr_stable(frame)
+                
+                # Handle both dict and direct frame results
+                if isinstance(result, dict):
+                    # Extract frame bytes from result
+                    frame_bytes = result.get('frame', b'')
+                    if frame_bytes:
+                        # Decode frame bytes back to numpy array
+                        nparr = np.frombuffer(frame_bytes, np.uint8)
+                        processed_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    else:
+                        processed_frame = frame
+                else:
+                    # Legacy support
+                    processed_frame = result if isinstance(result, np.ndarray) else frame
+                
+                # Write processed frame to FFmpeg
+                try:
+                    process.stdin.write(processed_frame.tobytes())
+                except Exception as e:
+                    logger.error(f"Error writing to FFmpeg: {str(e)}")
+                    break
+
+        except Exception as e:
+            logger.error(f"Error in processing loop: {str(e)}")
+        finally:
+            # Cleanup
+            cap.release()
             try:
-                result = detect_and_ocr(frame)
-                if result and result.get('frame'):
-                    cap.release()
-                    return Response(result['frame'], mimetype='image/jpeg')
-            except Exception as e:
-                logger.warning(f"Detection failed: {e}")
-        
-        # Return original frame with status
-        display_frame = frame.copy()
-        status_text = "DETECTING" if video_processing else "PAUSED"
-        status_color = (0, 255, 0) if video_processing else (0, 255, 255)
-        cv2.putText(display_frame, status_text, (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
-        
-        _, buffer = cv2.imencode('.jpg', display_frame)
-        cap.release()
-        
-        return Response(buffer.tobytes(), mimetype='image/jpeg')
+                process.stdin.close()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait()
         
     except Exception as e:
-        logger.error(f"Video feed error: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error in LL-HLS processing: {str(e)}")
 
-@app.route('/video_status', methods=['GET'])
-def video_status():
-    global current_video_path, video_processing
-    
+
+@app.route('/llhls/<stream_id>/<path:filename>')
+def serve_llhls(stream_id, filename):
+    """Serve LL-HLS files"""
+    llhls_dir = os.path.join('llhls_output', stream_id)
+    if not os.path.exists(llhls_dir):
+        return jsonify({"error": "Stream not found"}), 404
+    return send_from_directory(llhls_dir, filename)
+
+
+@app.route('/static/crops/<filename>')
+def serve_crops(filename):
+    """Serve crop images"""
+    crops_dir = 'static/crops'
+    if not os.path.exists(crops_dir):
+        return jsonify({"error": "Crops directory not found"}), 404
+    return send_from_directory(crops_dir, filename)
+
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
     return jsonify({
-        "success": True,
-        "has_video": bool(current_video_path and os.path.exists(current_video_path)),
-        "processing": video_processing
+        "status": "healthy",
+        "timestamp": time.time(),
+        "service": "license-plate-recognition"
     })
 
-# Error handlers
+@app.route('/test-detection', methods=['GET'])
+def test_detection():
+    """Test detection với frame đen để kiểm tra ROI"""
+    try:
+        # Tạo frame test đen
+        test_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        
+        # Thêm một số hình chữ nhật giả để test
+        cv2.rectangle(test_frame, (100, 100), (200, 150), (255, 255, 255), -1)
+        cv2.rectangle(test_frame, (300, 200), (400, 250), (255, 255, 255), -1)
+        
+        # Xử lý với detector
+        result = detect_and_ocr_stable(test_frame, camera_id="test")
+        
+        # Handle both dict and direct frame results
+        if isinstance(result, dict):
+            frame_bytes = result.get('frame', b'')
+            if not frame_bytes:
+                # Fallback: encode manually
+                _, buffer = cv2.imencode('.jpg', test_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_bytes = buffer.tobytes()
+        else:
+            # Legacy support
+            if isinstance(result, np.ndarray):
+                _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_bytes = buffer.tobytes()
+            else:
+                frame_bytes = result
+        
+        return Response(frame_bytes, mimetype='image/jpeg')
+    except Exception as e:
+        logger.error(f"Test detection error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/test-real-detection', methods=['GET'])
+def test_real_detection():
+    """Test detection với ảnh thật để kiểm tra bounding box"""
+    try:
+        # Tạo frame test với màu xanh
+        test_frame = np.full((360, 640, 3), (0, 255, 0), dtype=np.uint8)
+        
+        # Thêm text để test
+        cv2.putText(test_frame, "TEST FRAME", (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
+        cv2.putText(test_frame, "Should show ROI and debug info", (50, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        
+        # Xử lý với detector
+        result = detect_and_ocr_stable(test_frame, camera_id="test")
+        
+        # Handle both dict and direct frame results
+        if isinstance(result, dict):
+            frame_bytes = result.get('frame', b'')
+            if not frame_bytes:
+                # Fallback: encode manually
+                _, buffer = cv2.imencode('.jpg', test_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_bytes = buffer.tobytes()
+        else:
+            # Legacy support
+            if isinstance(result, np.ndarray):
+                _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                frame_bytes = buffer.tobytes()
+            else:
+                frame_bytes = result
+        
+        return Response(frame_bytes, mimetype='image/jpeg')
+    except Exception as e:
+        logger.error(f"Test real detection error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+# API endpoints for database management
+@app.route('/api/detection-stats', methods=['GET'])
+def get_detection_stats():
+    """Get detection statistics"""
+    try:
+        from detector import get_detection_stats
+        stats = get_detection_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting detection stats: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tracked-objects', methods=['GET'])
+def get_tracked_objects():
+    """Get current tracked objects"""
+    try:
+        from detector import tracked_objects
+        return jsonify({
+            "tracked_objects": tracked_objects,
+            "total_count": len(tracked_objects)
+        })
+    except Exception as e:
+        logger.error(f"Error getting tracked objects: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/reset-system', methods=['POST'])
+def reset_detection_system():
+    """Reset the anti-duplicate system"""
+    try:
+        from detector import reset_anti_duplicate_system
+        result = reset_anti_duplicate_system()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error resetting system: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/cleanup', methods=['POST'])
+def cleanup_system():
+    """Manual cleanup of tracked objects"""
+    try:
+        from detector import cleanup_tracked_objects
+        cleanup_tracked_objects()
+        return jsonify({"success": True, "message": "Cleanup completed"})
+    except Exception as e:
+        logger.error(f"Error in cleanup: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.errorhandler(404)
-def not_found(e):
-    return jsonify({'success': False, 'message': 'Endpoint not found'}), 404
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
+
 
 @app.errorhandler(500)
-def internal_error(e):
-    return jsonify({'success': False, 'message': 'Internal server error'}), 500
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
 
-if __name__ == '__main__':
-    logger.info("Starting optimized license plate recognition server...")
+
+@app.route('/recognize', methods=['POST'])
+def recognize():
+    logger.info("Nhận yêu cầu HTTP tới /recognize")
+    request_start = time.time()
+    
+    if 'image' in request.files:
+        file_read_start = time.time()
+        file = request.files['image']
+        bytes_data = file.read()
+        logger.info(f"File read time: {time.time() - file_read_start:.3f} seconds")
+
+        decode_start = time.time()
+        np_img = np.frombuffer(bytes_data, np.uint8)
+        img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+        logger.info(f"Image decode time: {time.time() - decode_start:.3f} seconds")
+        
+    elif request.json and 'rtsp_url' in request.json:
+        rtsp_url = request.json['rtsp_url']
+        if not rtsp_url.startswith("rtsp"):
+            logger.error(f"URL không hợp lệ: {rtsp_url}. Yêu cầu RTSP URL.")
+            return jsonify({"error": "URL không hợp lệ. Yêu cầu RTSP URL."}), 400
+            
+        rtsp_start = time.time()
+        cap = cv2.VideoCapture(rtsp_url)
+        if not cap.isOpened():
+            logger.error(f"Không thể mở stream RTSP: {rtsp_url}")
+            return jsonify({"error": "Không thể mở stream RTSP"}), 400
+            
+        ret, img = cap.read()
+        cap.release()
+        logger.info(f"RTSP capture time: {time.time() - rtsp_start:.3f} seconds")
+        
+        if not ret:
+            logger.error(f"Không thể đọc frame từ stream RTSP: {rtsp_url}")
+            return jsonify({"error": "Không thể chụp ảnh từ stream RTSP"}), 400
+    else:
+        logger.error("Không cung cấp ảnh hoặc RTSP URL")
+        return jsonify({"error": "Cần cung cấp ảnh hoặc RTSP URL"}), 400
+
+    detect_start = time.time()
+    result = detect_and_ocr_stable(img)
+    
+    # Handle both dict and direct frame results
+    if isinstance(result, dict):
+        frame_bytes = result.get('frame', b'')
+        tracked_objects = result.get('tracked_objects', {})
+        
+        # Process tracked objects for database saving
+        for track_id, obj_data in tracked_objects.items():
+            if (obj_data.get('validation_passed') and 
+                not obj_data.get('saved_to_db', False) and
+                obj_data.get('plate_number') != 'Đang nhận diện...'):
+                
+                # Prepare plate data for database
+                plate_data = {
+                    'detection_uuid': f"http_{track_id}_{int(time.time())}",
+                    'plate_number': obj_data.get('plate_number', ''),
+                    'raw_plate_text': obj_data.get('raw_text', ''),
+                    'camera_id': 'http_upload',
+                    'detected_at': time.time(),
+                    'confidence_score': obj_data.get('confidence', 0.0),
+                    'ocr_confidence': obj_data.get('confidence', 0.0),
+                    'detection_confidence': obj_data.get('confidence', 0.0),
+                    'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
+                    'frame_path': obj_data.get('crop_filename', ''),
+                    'detected_vehicle_type': 'unknown',
+                    'source_type': 'http_upload'
+                }
+                
+                # Add to queue for database saving
+                with detected_plates_lock:
+                    detected_plates_queue.append(plate_data)
+                
+                # Mark as saved to avoid duplicate saving
+                obj_data['saved_to_db'] = True
+        
+        if not frame_bytes:
+            # Fallback: encode manually
+            _, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            frame_bytes = buffer.tobytes()
+    else:
+        # Legacy support: result is direct frame
+        if isinstance(result, np.ndarray):
+            _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            frame_bytes = buffer.tobytes()
+        else:
+            frame_bytes = result
+    
+    logger.info(f"Detect and OCR time: {time.time() - detect_start:.3f} seconds")
+    logger.info(f"Total recognize endpoint time: {time.time() - request_start:.3f} seconds")
+    
+    return Response(frame_bytes, mimetype='image/jpeg')
+
+
+@app.route('/api/process-video', methods=['POST'])
+def process_video():
+    try:
+        if 'video' not in request.files:
+            return jsonify({"error": "Không có file video được tải lên"}), 400
+
+        video_file = request.files['video']
+        if video_file.filename == '':
+            return jsonify({"error": "Không có file được chọn"}), 400
+
+        # Lưu file video tạm thời
+        temp_filename = f"{uuid.uuid4().hex}_{video_file.filename}"
+        temp_video_path = os.path.join('temp_videos', temp_filename)
+        os.makedirs('temp_videos', exist_ok=True)
+
+        video_file.save(temp_video_path)
+        logger.info(f"Đã lưu video tạm: {temp_video_path}")
+
+        # Xử lý video với detector
+        detected_plates = process_video_file(temp_video_path, temp_filename)
+
+        # Xóa file tạm
+        try:
+            os.remove(temp_video_path)
+        except Exception as e:
+            logger.error(f"Lỗi khi xóa file tạm: {str(e)}")
+
+        return jsonify({
+            "success": True,
+            "message": "Xử lý video hoàn tất",
+            "data": {
+                "video_id": temp_filename,
+                "detected_plates": detected_plates,
+                "total_detections": len(detected_plates)
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Lỗi xử lý video: {str(e)}")
+        return jsonify({"error": f"Lỗi xử lý video: {str(e)}"}), 500
+
+
+def process_video_file(video_path, video_id):
+    """Xử lý file video và trả về danh sách biển số được phát hiện"""
+    detected_plates = []
     
     try:
-        app.run(
-            debug=False,
-            host='127.0.0.1',
-            port=5002,
-            threaded=True
-        )
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            logger.error("Không thể mở video file")
+            return detected_plates
+
+        frame_count = 0
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Xử lý frame với detection/OCR
+            result = detect_and_ocr_stable(frame, camera_id=video_id)
+            
+            if isinstance(result, dict):
+                tracked_objects = result.get('tracked_objects', {})
+                
+                # Process tracked objects for database saving
+                for track_id, obj_data in tracked_objects.items():
+                    if (obj_data.get('validation_passed') and 
+                        not obj_data.get('saved_to_db', False) and
+                        obj_data.get('plate_number') != 'Đang nhận diện...'):
+                        
+                        # Prepare plate data for database
+                        plate_data = {
+                            'detection_uuid': f"video_{video_id}_{track_id}_{frame_count}",
+                            'plate_number': obj_data.get('plate_number', ''),
+                            'raw_plate_text': obj_data.get('raw_text', ''),
+                            'camera_id': video_id,
+                            'detected_at': time.time(),
+                            'confidence_score': obj_data.get('confidence', 0.0),
+                            'ocr_confidence': obj_data.get('confidence', 0.0),
+                            'detection_confidence': obj_data.get('confidence', 0.0),
+                            'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
+                            'frame_path': obj_data.get('crop_filename', ''),
+                            'detected_vehicle_type': 'unknown',
+                            'source_type': 'video_file'
+                        }
+                        
+                        # Add to queue for database saving
+                        with detected_plates_lock:
+                            detected_plates_queue.append(plate_data)
+                        
+                        # Add to return list
+                        detected_plates.append(plate_data)
+                        
+                        # Mark as saved to avoid duplicate saving
+                        obj_data['saved_to_db'] = True
+            
+            # Lưu frame đã xử lý (tùy chọn)
+            if frame_count % 30 == 0:  # Lưu mỗi 30 frame
+                frame_filename = f"frame_{video_id}_{frame_count}.jpg"
+                frame_path = os.path.join('static/crops', frame_filename)
+                os.makedirs('static/crops', exist_ok=True)
+                if isinstance(result, dict):
+                    processed_frame_bytes = result.get('frame', b'')
+                    if processed_frame_bytes:
+                        with open(frame_path, 'wb') as f:
+                            f.write(processed_frame_bytes)
+                elif isinstance(result, np.ndarray):
+                    cv2.imwrite(frame_path, result)
+
+            frame_count += 1
+
+        cap.release()
+        
     except Exception as e:
-        logger.error(f"Server error: {e}")
-        sys.exit(1)
+        logger.error(f"Lỗi xử lý video file: {str(e)}")
+    
+    return detected_plates
+
+
+@app.route('/recognize-stream', methods=['POST', 'OPTIONS'])
+def recognize_stream():
+    if request.method == 'OPTIONS':
+        # Xử lý preflight request
+        response = Response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST')
+        return response
+
+    def generate():
+        try:
+            while True:
+                # Đọc khung hình từ luồng request
+                frame_data = request.stream.read()
+                if not frame_data:
+                    break
+
+                # Xử lý khung hình
+                np_frame = np.frombuffer(frame_data, np.uint8)
+                frame = cv2.imdecode(np_frame, cv2.IMREAD_COLOR)
+
+                if frame is None:
+                    continue
+
+                result = detect_and_ocr_stable(frame)  # Nhận frame numpy array
+                
+                # Handle both dict and direct frame results
+                if isinstance(result, dict):
+                    frame_bytes = result.get('frame', b'')
+                    if not frame_bytes:
+                        # Fallback: encode manually
+                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        frame_bytes = buffer.tobytes()
+                else:
+                    # Legacy support
+                    if isinstance(result, np.ndarray):
+                        _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        frame_bytes = buffer.tobytes()
+                    else:
+                        frame_bytes = result
+
+                # Trả về kết quả dưới dạng multipart response
+                yield (b'--frame\r\n' +
+                       b'Content-Type: image/jpeg\r\n\r\n' +
+                       frame_bytes +
+                       b'\r\n')
+
+        except Exception as e:
+            logger.error(f"Lỗi trong xử lý stream: {str(e)}")
+
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@sock.route('/processed-video-ws/<video_id>')
+def processed_video_ws(ws, video_id):
+    logger.info(f"Kết nối WebSocket cho video đã xử lý: {video_id}")
+
+    temp_video_path = os.path.join('temp_videos', video_id)
+    if not os.path.exists(temp_video_path):
+        logger.error(f"Video không tồn tại: {video_id}")
+        ws.close()
+        return
+
+    cap = None
+    try:
+        cap = cv2.VideoCapture(temp_video_path)
+        if not cap.isOpened():
+            logger.error("Không thể mở video file")
+            ws.close()
+            return
+
+        # Lấy FPS của video gốc, nhưng giới hạn max 15fps để tránh overload
+        fps = min(cap.get(cv2.CAP_PROP_FPS), 15)
+        if fps <= 0:
+            fps = 15
+        frame_delay = 1.0 / fps
+
+        frame_count = 0
+        last_cleanup_time = time.time()
+
+        while cap.isOpened():
+            start_time = time.time()
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Xử lý frame với detection/OCR
+            result = detect_and_ocr_stable(frame, camera_id="1")
+
+            # Handle both dict and direct frame results
+            if isinstance(result, dict):
+                frame_bytes = result.get('frame', b'')
+                tracked_objects = result.get('tracked_objects', {})
+                
+                # Process tracked objects for database saving
+                for track_id, obj_data in tracked_objects.items():
+                    if (obj_data.get('validation_passed') and 
+                        not obj_data.get('saved_to_db', False) and
+                        obj_data.get('plate_number') != 'Đang nhận diện...'):
+                        
+                        # Prepare plate data for database
+                        plate_data = {
+                            'detection_uuid': f"ws_video_{video_id}_{track_id}_{frame_count}",
+                            'plate_number': obj_data.get('plate_number', ''),
+                            'raw_plate_text': obj_data.get('raw_text', ''),
+                            'camera_id': video_id,
+                            'detected_at': time.time(),
+                            'confidence_score': obj_data.get('confidence', 0.0),
+                            'ocr_confidence': obj_data.get('confidence', 0.0),
+                            'detection_confidence': obj_data.get('confidence', 0.0),
+                            'bbox': obj_data.get('bbox', [0, 0, 0, 0]),
+                            'frame_path': obj_data.get('crop_filename', ''),
+                            'detected_vehicle_type': 'unknown',
+                            'source_type': 'websocket_video'
+                        }
+                        
+                        # Add to queue for database saving
+                        with detected_plates_lock:
+                            detected_plates_queue.append(plate_data)
+                        
+                        # Mark as saved to avoid duplicate saving
+                        obj_data['saved_to_db'] = True
+                
+                if not frame_bytes:
+                    # Fallback: encode manually
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    frame_bytes = buffer.tobytes()
+            else:
+                # Legacy support
+                if isinstance(result, np.ndarray):
+                    _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    frame_bytes = buffer.tobytes()
+                else:
+                    frame_bytes = result
+
+            # Gửi frame qua WebSocket
+            ws.send(frame_bytes)
+
+            # Tính toán thời gian xử lý và điều chỉnh delay
+            processing_time = time.time() - start_time
+            sleep_time = max(0, frame_delay - processing_time)
+            time.sleep(sleep_time)
+
+            # Cleanup định kỳ: Mỗi 100 frame hoặc 30 giây, dọn crop files cũ
+            frame_count += 1
+            current_time = time.time()
+            if frame_count % 100 == 0 or (current_time - last_cleanup_time > 30):
+                cleanup_crops()  # Hàm mới để xóa crop cũ
+                last_cleanup_time = current_time
+
+    except Exception as e:
+        logger.error(f"Lỗi trong xử lý video WebSocket: {str(e)}")
+    finally:
+        if cap is not None:
+            cap.release()
+        logger.info(f"Kết thúc stream video: {video_id}")
+        # Xóa file tạm ngay lập tức
+        try:
+            os.remove(temp_video_path)
+            logger.info(f"Đã xóa file tạm: {temp_video_path}")
+        except Exception as e:
+            logger.error(f"Lỗi khi xóa file tạm: {str(e)}")
+        # Đóng WS nếu còn mở
+        try:
+            ws.close()
+        except:
+            pass
+
+
+if __name__ == "__main__":
+    # Tạo các thư mục cần thiết
+    os.makedirs('static/crops', exist_ok=True)
+    os.makedirs('temp_videos', exist_ok=True)
+    os.makedirs('llhls_output', exist_ok=True)
+    
+    logger.info("Khởi động server trên http://0.0.0.0:5002...")
+    app.run(host='0.0.0.0', port=5002, debug=False, threaded=True)
