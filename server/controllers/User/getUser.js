@@ -77,23 +77,24 @@ const getAllUsers = async (req, res) => {
         console.log('Total users:', totalUsers);
 
         // Get users basic info with proper column names from schema
-        const userQuery = 
-            "SELECT " +
-                "u.id, " +
-                "u.name, " +
-                "u.email, " +
-                "u.phone, " +
-                "u.status, " +
-                "u.last_login_at, " +
-                "u.failed_login_attempts, " +
-                "u.is_account_locked, " +
-                "u.locked_until, " +
-                "u.created_at, " +
-                "u.updated_at " +
-            "FROM users u " +
-            whereClause + " " +
-            "ORDER BY u." + sortColumn + " " + sortOrder + " " +
-            "LIMIT " + limitNum + " OFFSET " + offset;
+        const userQuery = `
+            SELECT 
+                u.id,
+                u.name,
+                u.email,
+                u.phone,
+                u.status,
+                u.last_login_at,
+                u.failed_login_attempts,
+                u.is_account_locked,
+                u.locked_until,
+                u.created_at,
+                u.updated_at
+            FROM users u
+            ${whereClause}
+            ORDER BY u.${sortColumn} ${sortOrder}
+            LIMIT ${limitNum} OFFSET ${offset}
+        `;
 
         console.log('User query:', userQuery);
         console.log('Query params:', params);

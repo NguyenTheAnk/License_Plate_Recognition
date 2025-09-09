@@ -100,7 +100,7 @@ const getAllWhitelist = async (req, res) => {
         LIMIT ${parsedLimit} OFFSET ${offset}`;
 
         // Execute with only filter parameters (no LIMIT/OFFSET params)
-        const [whitelistEntries] = await connection.query(dataQuery, queryParams);
+        const [whitelistEntries] = await connection.execute(dataQuery, queryParams);
 
         // Log access for audit trail
         try {

@@ -130,10 +130,12 @@ const updateRole = async (req, res) => {
             }
         }
 
-        // Start transaction
-        await connection.beginTransaction();
-
+        // Start transaction - get a connection from pool
+        const transactionConnection = await db.promise().getConnection();
+        
         try {
+            await transactionConnection.beginTransaction();
+
             // Build update query dynamically
             let updateFields = [];
             let updateValues = [];
@@ -169,7 +171,7 @@ const updateRole = async (req, res) => {
 
             // Update role if there are fields to update
             if (updateFields.length > 1) { // > 1 because updated_at is always included
-                await connection.execute(
+                await transactionConnection.execute(
                     `UPDATE roles SET ${updateFields.join(', ')} WHERE id = ?`,
                     updateValues
                 );
@@ -177,7 +179,7 @@ const updateRole = async (req, res) => {
 
             // Update permissions
             // First, delete all existing permissions for this role
-            await connection.execute(
+            await transactionConnection.execute(
                 'DELETE FROM role_permissions WHERE role_id = ?',
                 [roleId]
             );
@@ -188,18 +190,21 @@ const updateRole = async (req, res) => {
                     `(${roleId}, ${permissionId}, 1, NOW())`
                 ).join(', ');
                 
-                await connection.execute(
+                await transactionConnection.execute(
                     `INSERT INTO role_permissions (role_id, permission_id, granted, created_at) VALUES ${permissionValues}`
                 );
             }
 
             // Commit transaction
-            await connection.commit();
+            await transactionConnection.commit();
 
         } catch (transactionError) {
             // Rollback transaction on error
-            await connection.rollback();
+            await transactionConnection.rollback();
             throw transactionError;
+        } finally {
+            // Always release the connection back to the pool
+            transactionConnection.release();
         }
 
         // Get updated role with permissions using the same method as getRoles
@@ -364,12 +369,14 @@ const updateRolePermissions = async (req, res) => {
             [parseInt(id)]
         );
 
-        // Start transaction
-        await connection.beginTransaction();
-
+        // Start transaction - get a connection from pool
+        const transactionConnection = await db.promise().getConnection();
+        
         try {
+            await transactionConnection.beginTransaction();
+
             // Remove all existing permissions for this role
-            await connection.execute(
+            await transactionConnection.execute(
                 'DELETE FROM role_permissions WHERE role_id = ?',
                 [parseInt(id)]
             );
@@ -380,69 +387,72 @@ const updateRolePermissions = async (req, res) => {
                     `(${parseInt(id)}, ${parseInt(permissionId)}, 1, NOW())`
                 ).join(', ');
                 
-                await connection.execute(
+                await transactionConnection.execute(
                     `INSERT INTO role_permissions (role_id, permission_id, granted, created_at) VALUES ${permissionValues}`
                 );
             }
 
-            await connection.commit();
-
-            // Get updated role with new permissions
-            const [updatedRole] = await connection.execute(`
-                SELECT 
-                    r.id,
-                    r.name,
-                    r.description,
-                    r.level,
-                    COALESCE(
-                        JSON_ARRAYAGG(
-                            CASE WHEN p.id IS NOT NULL THEN
-                                JSON_OBJECT(
-                                    'id', p.id,
-                                    'module', p.module,
-                                    'action', p.action,
-                                    'code', p.code,
-                                    'description', p.description,
-                                    'granted', rp.granted
-                                )
-                            END
-                        ),
-                        JSON_ARRAY()
-                    ) as permissions
-                FROM roles r
-                LEFT JOIN role_permissions rp ON r.id = rp.role_id
-                LEFT JOIN permissions p ON rp.permission_id = p.id AND p.is_active = 1
-                WHERE r.id = ?
-                GROUP BY r.id
-            `, [parseInt(id)]);
-
-            // Log access
-            await connection.execute(
-                `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
-                 VALUES (?, ?, 'UPDATE', 'ROLE_PERMISSIONS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
-                [
-                    req.user.userId,
-                    req.user.username,
-                    id,
-                    JSON.stringify({ permissions: oldPermissions.map(p => p.permission_id) }),
-                    JSON.stringify({ permissions: permissionIds }),
-                    req.ip,
-                    req.get('User-Agent')
-                ]
-            );
-
-            res.json({
-                success: true,
-                message: 'Cập nhật quyền cho vai trò thành công',
-                data: {
-                    role: updatedRole[0]
-                }
-            });
+            await transactionConnection.commit();
 
         } catch (transactionError) {
-            await connection.rollback();
+            await transactionConnection.rollback();
             throw transactionError;
+        } finally {
+            // Always release the connection back to the pool
+            transactionConnection.release();
         }
+
+        // Get updated role with new permissions
+        const [updatedRole] = await connection.execute(`
+            SELECT 
+                r.id,
+                r.name,
+                r.description,
+                r.level,
+                COALESCE(
+                    JSON_ARRAYAGG(
+                        CASE WHEN p.id IS NOT NULL THEN
+                            JSON_OBJECT(
+                                'id', p.id,
+                                'module', p.module,
+                                'action', p.action,
+                                'code', p.code,
+                                'description', p.description,
+                                'granted', rp.granted
+                            )
+                        END
+                    ),
+                    JSON_ARRAY()
+                ) as permissions
+            FROM roles r
+            LEFT JOIN role_permissions rp ON r.id = rp.role_id
+            LEFT JOIN permissions p ON rp.permission_id = p.id AND p.is_active = 1
+            WHERE r.id = ?
+            GROUP BY r.id
+        `, [parseInt(id)]);
+
+        // Log access
+        await connection.execute(
+            `INSERT INTO access_logs (user_id, username, action_type, object_type, object_id, old_values, new_values, status, ip_address, user_agent, created_at)
+             VALUES (?, ?, 'UPDATE', 'ROLE_PERMISSIONS', ?, ?, ?, 'SUCCESS', ?, ?, NOW())`,
+            [
+                req.user.userId,
+                req.user.username,
+                id,
+                JSON.stringify({ permissions: oldPermissions.map(p => p.permission_id) }),
+                JSON.stringify({ permissions: permissionIds }),
+                req.ip,
+                req.get('User-Agent')
+            ]
+        );
+
+        res.json({
+            success: true,
+            message: 'Cập nhật quyền cho vai trò thành công',
+            data: {
+                role: updatedRole[0]
+            }
+        });
 
     } catch (error) {
         console.error('Error updating role permissions:', error);

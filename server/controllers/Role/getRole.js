@@ -63,7 +63,7 @@ const getRoles = async (req, res) => {
             SELECT COUNT(DISTINCT r.id) as total
             FROM roles r
             LEFT JOIN roles pr ON r.parent_role_id = pr.id
-            ` + whereClause + `
+            ${whereClause}
         `;
         
         console.log('Count Query:', countQuery);
@@ -73,34 +73,35 @@ const getRoles = async (req, res) => {
         const total = countResult[0].total;
 
         // Get roles with pagination - lấy danh sách permission_ids trước
-        const rolesQuery = 
-            "SELECT " +
-                "r.id, " +
-                "r.name, " +
-                "r.description, " +
-                "r.parent_role_id, " +
-                "pr.name as parent_role_name, " +
-                "r.is_default_role, " +
-                "r.level, " +
-                "r.is_active, " +
-                "r.created_at, " +
-                "r.updated_at, " +
-                "COUNT(DISTINCT ur.user_id) as users_count, " +
-                "COUNT(DISTINCT CASE WHEN rp.granted = 1 THEN rp.permission_id END) as permissions_count, " +
-                "GROUP_CONCAT( " +
-                    "DISTINCT CASE " +
-                        "WHEN rp.granted = 1 THEN rp.permission_id " +
-                        "END " +
-                    "SEPARATOR ',' " +
-                ") as permission_ids " +
-            "FROM roles r " +
-            "LEFT JOIN roles pr ON r.parent_role_id = pr.id " +
-            "LEFT JOIN user_roles ur ON r.id = ur.role_id AND ur.is_active = 1 " +
-            "LEFT JOIN role_permissions rp ON r.id = rp.role_id " +
-            whereClause + " " +
-            "GROUP BY r.id, r.name, r.description, r.parent_role_id, pr.name, r.is_default_role, r.level, r.is_active, r.created_at, r.updated_at " +
-            "ORDER BY r." + validSortBy + " " + validSortOrder + " " +
-            "LIMIT " + parseInt(limit) + " OFFSET " + offset;
+        const rolesQuery = `
+            SELECT 
+                r.id,
+                r.name,
+                r.description,
+                r.parent_role_id,
+                pr.name as parent_role_name,
+                r.is_default_role,
+                r.level,
+                r.is_active,
+                r.created_at,
+                r.updated_at,
+                COUNT(DISTINCT ur.user_id) as users_count,
+                COUNT(DISTINCT CASE WHEN rp.granted = 1 THEN rp.permission_id END) as permissions_count,
+                GROUP_CONCAT(
+                    DISTINCT CASE 
+                        WHEN rp.granted = 1 THEN rp.permission_id
+                        END 
+                    SEPARATOR ','
+                ) as permission_ids
+            FROM roles r
+            LEFT JOIN roles pr ON r.parent_role_id = pr.id
+            LEFT JOIN user_roles ur ON r.id = ur.role_id AND ur.is_active = 1
+            LEFT JOIN role_permissions rp ON r.id = rp.role_id
+            ${whereClause}
+            GROUP BY r.id, r.name, r.description, r.parent_role_id, pr.name, r.is_default_role, r.level, r.is_active, r.created_at, r.updated_at
+            ORDER BY r.${validSortBy} ${validSortOrder}
+            LIMIT ${parseInt(limit)} OFFSET ${offset}
+        `;
 
         console.log('Roles Query:', rolesQuery);
         console.log('Where Params:', whereParams);
