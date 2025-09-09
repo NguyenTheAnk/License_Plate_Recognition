@@ -1013,6 +1013,42 @@ const createLicensePlateRecognition = async (req, res) => {
             [bbox_x1, bbox_y1, bbox_x2, bbox_y2] = bbox;
         }
         
+        // Check BlackList and WhiteList from database
+        let actual_whitelist_match = false;
+        let actual_blacklist_match = false;
+        
+        try {
+            // Check whitelist
+            const whitelistQuery = 'SELECT id FROM vehicle_whitelist WHERE plate_number = ? AND is_active = 1';
+            const whitelistResult = await new Promise((resolve, reject) => {
+                db.query(whitelistQuery, [plateValidation.normalized], (error, results) => {
+                    if (error) reject(error);
+                    else resolve(results);
+                });
+            });
+            actual_whitelist_match = whitelistResult.length > 0;
+            
+            // Check blacklist
+            const blacklistQuery = 'SELECT id FROM vehicle_blacklist WHERE plate_number = ? AND is_active = 1';
+            const blacklistResult = await new Promise((resolve, reject) => {
+                db.query(blacklistQuery, [plateValidation.normalized], (error, results) => {
+                    if (error) reject(error);
+                    else resolve(results);
+                });
+            });
+            actual_blacklist_match = blacklistResult.length > 0;
+            
+            console.log(`🔍 BlackList/WhiteList check for ${plateValidation.normalized}:`, {
+                whitelist_match: actual_whitelist_match,
+                blacklist_match: actual_blacklist_match
+            });
+        } catch (error) {
+            console.error('❌ Error checking BlackList/WhiteList:', error);
+            // Keep original values if database check fails
+            actual_whitelist_match = is_whitelist_match;
+            actual_blacklist_match = is_blacklist_match;
+        }
+
         // Enhanced logging for debugging
         console.log('🔍 Received plate detection data:', {
             detection_uuid: detectionUuid,
@@ -1020,7 +1056,9 @@ const createLicensePlateRecognition = async (req, res) => {
             camera_id: camera_id,
             location_id: location_id,
             confidence_score: confidence_score,
-            bbox: bbox
+            bbox: bbox,
+            whitelist_match: actual_whitelist_match,
+            blacklist_match: actual_blacklist_match
         });
 
         // Prepare data for insertion
@@ -1043,8 +1081,8 @@ const createLicensePlateRecognition = async (req, res) => {
             source_type: source_type || 'camera',
             video_filename: video_filename,
             camera_name: camera_name || null,
-            is_whitelist_match: is_whitelist_match ? 1 : 0,
-            is_blacklist_match: is_blacklist_match ? 1 : 0,
+            is_whitelist_match: actual_whitelist_match ? 1 : 0,
+            is_blacklist_match: actual_blacklist_match ? 1 : 0,
             is_verified: 0,
             alert_triggered: 0
         };
