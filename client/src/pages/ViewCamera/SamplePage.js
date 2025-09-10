@@ -418,6 +418,27 @@ const SamplePage = () => {
     return dateString;
   };
 
+  // Hàm format ngày giờ cho hiển thị (dd/mm/yyyy HH:mm)
+  const formatDateTimeForDisplay = (dateString) => {
+    if (!dateString) return 'N/A';
+    
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'N/A';
+      
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
+    } catch (error) {
+      console.error('Error formatting date for display:', error);
+      return 'N/A';
+    }
+  };
+
   // Hàm chuyển đổi từ dd/MM/yyyy HH:mm sang yyyy-MM-ddTHH:mm
   const convertToDateTimeLocal = (dateString) => {
     if (!dateString) return '';
@@ -506,7 +527,23 @@ const SamplePage = () => {
   };
 
   const handleDateTimeChange = (field, value, event) => {
-    handleFilterChange(field, value);
+    // Chuyển đổi từ dd/mm/yyyy hh:mm sang yyyy-mm-ddThh:mm
+    let convertedValue = value;
+    if (value && value.match(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/)) {
+      const [datePart, timePart] = value.split(' ');
+      const [day, month, year] = datePart.split('/');
+      convertedValue = `${year}-${month}-${day}T${timePart}`;
+    }
+    
+    // Cập nhật cả giá trị hiển thị và giá trị thực
+    if (field === 'start_date') {
+      handleFilterChange('start_date', convertedValue);
+      handleFilterChange('start_date_display', value);
+    } else if (field === 'end_date') {
+      handleFilterChange('end_date', convertedValue);
+      handleFilterChange('end_date_display', value);
+    }
+    
     // Ẩn placeholder nếu có giá trị
     const input = event.target;
     if (input) {
@@ -517,12 +554,139 @@ const SamplePage = () => {
     }
   };
 
+  // Hàm xử lý click vào icon calendar
+  const handleCalendarClick = (field) => {
+    // Tìm input field tương ứng để lấy vị trí
+    const inputs = document.querySelectorAll('input[placeholder="dd/mm/yyyy hh:mm"]');
+    const inputField = field === 'start_date' ? inputs[0] : inputs[1];
+    if (!inputField) {
+      console.log('Input field not found for field:', field);
+      return;
+    }
+    
+    // Lấy vị trí của input field
+    const rect = inputField.getBoundingClientRect();
+    
+    // Tạo một input datetime-local ẩn để mở date picker
+    const hiddenInput = document.createElement('input');
+    hiddenInput.type = 'datetime-local';
+    hiddenInput.style.position = 'fixed';
+    hiddenInput.style.left = `${rect.left}px`;
+    hiddenInput.style.top = `${rect.bottom + 5}px`;
+    hiddenInput.style.width = `${rect.width}px`;
+    hiddenInput.style.height = '40px';
+    hiddenInput.style.zIndex = '9999';
+    hiddenInput.style.opacity = '0.01';
+    hiddenInput.style.pointerEvents = 'none';
+    hiddenInput.style.border = 'none';
+    hiddenInput.style.outline = 'none';
+    
+    // Set giá trị hiện tại nếu có
+    const currentValue = field === 'start_date' ? searchFilters.start_date : searchFilters.end_date;
+    if (currentValue) {
+      hiddenInput.value = currentValue;
+    }
+    
+    document.body.appendChild(hiddenInput);
+    
+    // Focus và mở date picker
+    hiddenInput.focus();
+    
+    // Sử dụng setTimeout để đảm bảo input được render trước khi gọi showPicker
+    setTimeout(() => {
+      try {
+        hiddenInput.showPicker();
+      } catch (error) {
+        console.log('showPicker not supported, using click method');
+        hiddenInput.click();
+      }
+    }, 10);
+    
+    // Xử lý khi chọn ngày
+    const handleChange = (e) => {
+      const selectedValue = e.target.value;
+      console.log('Date selected:', selectedValue, 'for field:', field);
+      
+      if (selectedValue) {
+        // Chuyển đổi từ yyyy-mm-ddThh:mm sang dd/mm/yyyy hh:mm
+        const [datePart, timePart] = selectedValue.split('T');
+        const [year, month, day] = datePart.split('-');
+        const displayValue = `${day}/${month}/${year} ${timePart}`;
+        
+        console.log('Updating field:', field, 'with value:', displayValue);
+        
+        // Cập nhật giá trị ngay lập tức
+        if (field === 'start_date') {
+          console.log('Setting start_date to:', selectedValue);
+          console.log('Setting start_date_display to:', displayValue);
+          handleFilterChange('start_date', selectedValue);
+          handleFilterChange('start_date_display', displayValue);
+        } else if (field === 'end_date') {
+          console.log('Setting end_date to:', selectedValue);
+          console.log('Setting end_date_display to:', displayValue);
+          handleFilterChange('end_date', selectedValue);
+          handleFilterChange('end_date_display', displayValue);
+        }
+        
+        // Focus vào input field thực
+        inputField.focus();
+        
+        // Delay cleanup để đảm bảo state được cập nhật
+        setTimeout(() => {
+          cleanup();
+        }, 100);
+      } else {
+        // Nếu không có giá trị, cleanup ngay
+        cleanup();
+      }
+    };
+    
+    // Xử lý khi blur (click ra ngoài)
+    const handleBlur = () => {
+      console.log('Calendar blurred, cleaning up');
+      cleanup();
+    };
+    
+    // Xử lý khi input bị hủy
+    const handleCancel = () => {
+      console.log('Calendar cancelled, cleaning up');
+      cleanup();
+    };
+    
+    // Cleanup function
+    const cleanup = () => {
+      try {
+        hiddenInput.removeEventListener('change', handleChange);
+        hiddenInput.removeEventListener('input', handleChange);
+        hiddenInput.removeEventListener('blur', handleBlur);
+        hiddenInput.removeEventListener('cancel', handleCancel);
+        if (document.body.contains(hiddenInput)) {
+          document.body.removeChild(hiddenInput);
+        }
+        console.log('Calendar cleaned up');
+      } catch (error) {
+        console.log('Error during cleanup:', error);
+      }
+    };
+    
+    // Thêm event listeners
+    hiddenInput.addEventListener('change', handleChange);
+    hiddenInput.addEventListener('input', handleChange);
+    hiddenInput.addEventListener('blur', handleBlur);
+    hiddenInput.addEventListener('cancel', handleCancel);
+    
+    // Auto cleanup sau 10 giây
+    setTimeout(() => {
+      cleanup();
+    }, 10000);
+  };
+
 
   // Khởi tạo trạng thái placeholder text
   useEffect(() => {
     const updatePlaceholderVisibility = () => {
-      const startDateInput = document.querySelector('input[type="datetime-local"]');
-      const endDateInput = document.querySelectorAll('input[type="datetime-local"]')[1];
+      const startDateInput = document.querySelector('input[placeholder="dd/mm/yyyy hh:mm"]');
+      const endDateInput = document.querySelectorAll('input[placeholder="dd/mm/yyyy hh:mm"]')[1];
       
       if (startDateInput) {
         const startPlaceholder = startDateInput.parentElement.querySelector('.placeholder-text');
@@ -551,8 +715,8 @@ const SamplePage = () => {
   // Thêm useEffect để theo dõi thay đổi giá trị input
   useEffect(() => {
     const handleInputChange = () => {
-      const startDateInput = document.querySelector('input[type="datetime-local"]');
-      const endDateInput = document.querySelectorAll('input[type="datetime-local"]')[1];
+      const startDateInput = document.querySelector('input[placeholder="dd/mm/yyyy hh:mm"]');
+      const endDateInput = document.querySelectorAll('input[placeholder="dd/mm/yyyy hh:mm"]')[1];
       
       if (startDateInput) {
         const startPlaceholder = startDateInput.parentElement.querySelector('.placeholder-text');
@@ -1065,7 +1229,7 @@ useEffect(() => {
           result.source_type === 'video_upload' 
             ? `🎬 Video: ${result.video_filename || 'Video Upload'}`
             : `📹 Camera: ${result.camera_name || `Camera ${result.camera_id}` || 'N/A'}`,
-          `🕐 Thời gian: ${result.detected_at ? new Date(result.detected_at).toLocaleString('vi-VN') : 'N/A'}`,
+          `🕐 Thời gian: ${result.detected_at ? formatDateTimeForDisplay(result.detected_at) : 'N/A'}`,
           `🎯 Độ tin cậy: ${result.ocr_confidence ? `${(parseFloat(result.ocr_confidence) * 100).toFixed(1)}%` : 'N/A'}`
         ],
         onConfirm: () => performVerify(resultId),
@@ -1222,32 +1386,15 @@ useEffect(() => {
       width: 100%;
     }
     
-    .custom-datetime-input input[type="datetime-local"] {
+    .custom-datetime-input input[type="text"] {
       padding-right: 40px;
       color: #666;
       font-weight: 400;
     }
     
-    /* Icon calendar positioning */
-    .custom-datetime-input input[type="datetime-local"]::-webkit-calendar-picker-indicator {
-      position: absolute;
-      right: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      cursor: pointer;
-      border-radius: 4px;
-      width: 20px;
-      height: 20px;
-      background: #1976d2;
-      opacity: 0.8;
-      transition: all 0.2s ease;
-      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z'/%3E%3C/svg%3E") no-repeat center;
-      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z'/%3E%3C/svg%3E") no-repeat center;
-    }
-    
-    .custom-datetime-input input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
-      opacity: 1;
-      background: #1565c0;
+    /* Calendar icon styling */
+    .calendar-icon:hover {
+      opacity: 1 !important;
     }
     
     /* Placeholder text tùy chỉnh */
@@ -1265,7 +1412,7 @@ useEffect(() => {
     }
     
     /* Ẩn placeholder khi có giá trị */
-    .custom-datetime-input input[type="datetime-local"]:not(:placeholder-shown) + .placeholder-text {
+    .custom-datetime-input input[type="text"]:not(:placeholder-shown) + .placeholder-text {
       display: none;
     }
     
@@ -1636,13 +1783,18 @@ useEffect(() => {
                   <div className="custom-datetime-input">
                     <TextField
                       label="Từ ngày giờ"
-                      type="datetime-local"
-                      value={searchFilters.start_date}
+                      type="text"
+                      value={searchFilters.start_date_display || ''}
                       onChange={e => handleDateTimeChange('start_date', e.target.value, e)}
                       onFocus={handleDateTimeFocus}
                       onBlur={handleDateTimeBlur}
                       fullWidth
                       size="medium"
+                      placeholder="dd/mm/yyyy hh:mm"
+                      inputProps={{
+                        pattern: "\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}",
+                        title: "Định dạng: dd/mm/yyyy hh:mm"
+                      }}
                       InputLabelProps={{ 
                         shrink: true,
                         sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } 
@@ -1657,9 +1809,29 @@ useEffect(() => {
                         },
                       }}
                     />
-                    <div className="placeholder-text">
-  dd/mm/yyyy hh:mm
-</div>
+                    <div 
+                      className="placeholder-text"
+                      onClick={() => handleCalendarClick('start_date')}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      dd/mm/yyyy hh:mm
+                    </div>
+                    <div 
+                      className="calendar-icon"
+                      onClick={() => handleCalendarClick('start_date')}
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        cursor: 'pointer',
+                        opacity: 0.6,
+                        fontSize: '16px',
+                        zIndex: 10
+                      }}
+                    >
+                      📅
+                    </div>
                   </div>
                 </Grid>
                 
@@ -1667,13 +1839,18 @@ useEffect(() => {
                   <div className="custom-datetime-input">
                     <TextField
                       label="Đến ngày giờ"
-                      type="datetime-local"
-                      value={searchFilters.end_date}
+                      type="text"
+                      value={searchFilters.end_date_display || ''}
                       onChange={e => handleDateTimeChange('end_date', e.target.value, e)}
                       onFocus={handleDateTimeFocus}
                       onBlur={handleDateTimeBlur}
                       fullWidth
                       size="medium"
+                      placeholder="dd/mm/yyyy hh:mm"
+                      inputProps={{
+                        pattern: "\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}",
+                        title: "Định dạng: dd/mm/yyyy hh:mm"
+                      }}
                       InputLabelProps={{ 
                         shrink: true,
                         sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } 
@@ -1688,8 +1865,28 @@ useEffect(() => {
                         },
                       }}
                     />
-                    <div className="placeholder-text">
+                    <div 
+                      className="placeholder-text"
+                      onClick={() => handleCalendarClick('end_date')}
+                      style={{ cursor: 'pointer' }}
+                    >
                       dd/mm/yyyy hh:mm
+                    </div>
+                    <div 
+                      className="calendar-icon"
+                      onClick={() => handleCalendarClick('end_date')}
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        cursor: 'pointer',
+                        opacity: 0.6,
+                        fontSize: '16px',
+                        zIndex: 10
+                      }}
+                    >
+                      📅
                     </div>
                   </div>
                 </Grid>
@@ -2128,7 +2325,7 @@ useEffect(() => {
                       <Box>
                         <Typography variant="body2">
                           {result.detected_at ? 
-                            new Date(result.detected_at).toLocaleString('vi-VN') : 
+                            formatDateTimeForDisplay(result.detected_at) : 
                             'N/A'
                         }
                         </Typography>
@@ -2962,7 +3159,7 @@ useEffect(() => {
                       </div>
                       <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
                         {selectedResult.detected_at ? 
-                          new Date(selectedResult.detected_at).toLocaleString('vi-VN') : 
+                          formatDateTimeForDisplay(selectedResult.detected_at) : 
                           'N/A'
                         }
                       </div>
