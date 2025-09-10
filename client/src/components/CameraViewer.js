@@ -17,6 +17,8 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   const [isRecognizing, setIsRecognizing] = useState(externalIsRecognizing || false);
   const [databaseResults, setDatabaseResults] = useState([]);
   const [isLoadingDatabase, setIsLoadingDatabase] = useState(false);
+  const [realtimeDetections, setRealtimeDetections] = useState([]);
+  const [lastDetectionTime, setLastDetectionTime] = useState(null);
   const [videoReady, setVideoReady] = useState(false); // Thêm state để track video readiness
   const wsRef = useRef(null);
   const wsRetryCount = useRef(0);
@@ -31,6 +33,50 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
   // Dùng để tránh cảnh báo biến không dùng
   useEffect(() => {}, [recognitionResults]);
+
+  // Function to fetch realtime detections
+  const fetchRealtimeDetections = useCallback(async () => {
+    try {
+      const response = await fetchDataFromAPI('/api/plate-recognitions/realtime?limit=5');
+      if (response.success && response.data) {
+        setRealtimeDetections(response.data);
+        
+        // Check for new detections
+        if (response.data.length > 0) {
+          const latestDetection = response.data[0];
+          const detectionTime = new Date(latestDetection.detected_at).getTime();
+          
+          if (!lastDetectionTime || detectionTime > lastDetectionTime) {
+            setLastDetectionTime(detectionTime);
+            
+            // Show notification for new detection
+            if (latestDetection.is_whitelist_match) {
+              console.log('✅ WHITELIST MATCH:', latestDetection.plate_number);
+              // You can add toast notification here
+            } else if (latestDetection.is_blacklist_match) {
+              console.log('🚨 BLACKLIST MATCH:', latestDetection.plate_number);
+              // You can add alert notification here
+            } else {
+              console.log('🔍 NEW DETECTION:', latestDetection.plate_number);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching realtime detections:', error);
+    }
+  }, [lastDetectionTime]);
+
+  // Poll for realtime detections every 2 seconds when recognizing
+  useEffect(() => {
+    let interval;
+    if (isRecognizing) {
+      interval = setInterval(fetchRealtimeDetections, 2000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isRecognizing, fetchRealtimeDetections]);
 
   const forcePlayVideo = useCallback(async () => {
     const video = videoRef.current;
@@ -848,6 +894,54 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         >
           FPS: {fps.toFixed(1)}
         </div>
+        
+        {/* Realtime Detections Overlay */}
+        {isRecognizing && realtimeDetections.length > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              top: "10px",
+              right: "10px",
+              background: "rgba(0, 0, 0, 0.8)",
+              color: "white",
+              padding: "10px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              maxWidth: "300px",
+              maxHeight: "200px",
+              overflowY: "auto",
+              pointerEvents: "none",
+            }}
+          >
+            <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+              🔍 Realtime Detections
+            </div>
+            {realtimeDetections.slice(0, 3).map((detection, index) => (
+              <div 
+                key={detection.id}
+                style={{
+                  marginBottom: "6px",
+                  padding: "4px 6px",
+                  borderRadius: "4px",
+                  backgroundColor: detection.is_whitelist_match ? "rgba(0, 255, 0, 0.2)" :
+                                 detection.is_blacklist_match ? "rgba(255, 0, 0, 0.2)" : "rgba(128, 128, 128, 0.2)",
+                  border: detection.is_whitelist_match ? "1px solid #00ff00" :
+                         detection.is_blacklist_match ? "1px solid #ff0000" : "1px solid #808080",
+                }}
+              >
+                <div style={{ fontWeight: "bold", fontSize: "14px" }}>
+                  {detection.plate_number}
+                </div>
+                <div style={{ fontSize: "10px", opacity: 0.8 }}>
+                  {Math.round(detection.confidence_score * 100)}% • {
+                    detection.is_whitelist_match ? '✅ Whitelist' : 
+                    detection.is_blacklist_match ? '🚨 Blacklist' : '❓ Unknown'
+                  } • {new Date(detection.detected_at).toLocaleTimeString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         
         {/* Hiển thị trạng thái recognition */}
         {isRecognizing && (
