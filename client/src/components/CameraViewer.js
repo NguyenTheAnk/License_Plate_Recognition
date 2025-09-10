@@ -59,6 +59,12 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             } else {
               console.log('🔍 NEW DETECTION:', latestDetection.plate_number);
             }
+            
+            // Trigger refresh of main detection list
+            if (window.refreshDetectionResults) {
+              console.log('🔄 Triggering main list refresh...');
+              window.refreshDetectionResults();
+            }
           }
         }
       }
