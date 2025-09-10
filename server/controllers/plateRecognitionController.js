@@ -1018,8 +1018,15 @@ const createLicensePlateRecognition = async (req, res) => {
         let actual_blacklist_match = false;
         
         try {
-            // Check whitelist
-            const whitelistQuery = 'SELECT id FROM vehicle_whitelist WHERE plate_number = ? AND is_active = 1';
+            // Check whitelist - ENHANCED with validity and approval checks
+            const whitelistQuery = `
+                SELECT id FROM vehicle_whitelist 
+                WHERE plate_number = ? 
+                AND is_active = 1 
+                AND approval_status = 'approved'
+                AND (valid_from IS NULL OR valid_from <= CURDATE())
+                AND (valid_to IS NULL OR valid_to >= CURDATE())
+            `;
             const whitelistResult = await new Promise((resolve, reject) => {
                 db.query(whitelistQuery, [plateValidation.normalized], (error, results) => {
                     if (error) reject(error);
@@ -1028,8 +1035,14 @@ const createLicensePlateRecognition = async (req, res) => {
             });
             actual_whitelist_match = whitelistResult.length > 0;
             
-            // Check blacklist
-            const blacklistQuery = 'SELECT id FROM vehicle_blacklist WHERE plate_number = ? AND is_active = 1';
+            // Check blacklist - ENHANCED with validity checks
+            const blacklistQuery = `
+                SELECT id FROM vehicle_blacklist 
+                WHERE plate_number = ? 
+                AND is_active = 1 
+                AND (valid_from IS NULL OR valid_from <= CURDATE())
+                AND (valid_to IS NULL OR valid_to >= CURDATE())
+            `;
             const blacklistResult = await new Promise((resolve, reject) => {
                 db.query(blacklistQuery, [plateValidation.normalized], (error, results) => {
                     if (error) reject(error);
@@ -1038,9 +1051,11 @@ const createLicensePlateRecognition = async (req, res) => {
             });
             actual_blacklist_match = blacklistResult.length > 0;
             
-            console.log(`🔍 BlackList/WhiteList check for ${plateValidation.normalized}:`, {
+            console.log(`🔍 ENHANCED BlackList/WhiteList check for ${plateValidation.normalized}:`, {
                 whitelist_match: actual_whitelist_match,
-                blacklist_match: actual_blacklist_match
+                blacklist_match: actual_blacklist_match,
+                whitelist_criteria: 'is_active=1 AND approval_status=approved AND valid_dates',
+                blacklist_criteria: 'is_active=1 AND valid_dates'
             });
         } catch (error) {
             console.error('❌ Error checking BlackList/WhiteList:', error);
