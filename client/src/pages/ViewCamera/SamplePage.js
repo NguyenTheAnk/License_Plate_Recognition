@@ -264,7 +264,10 @@ const SamplePage = () => {
       const token = localStorage.getItem("token");
       const params = new URLSearchParams({
         page: currentPage.toString(),
-        limit: itemsPerPage.toString()
+        limit: itemsPerPage.toString(),
+        // Thêm filter độ tin cậy mặc định
+        detection_confidence_min: '0.8',  // >= 80%
+        ocr_confidence_min: '0.9'         // >= 90%
       });
       
       // Thêm các tham số tìm kiếm với xử lý đặc biệt cho ngày và confidence
@@ -654,6 +657,18 @@ useEffect(() => {
   useEffect(() => {
     loadDetectionResults();
   }, [loadDetectionResults]);
+
+  // Realtime polling cho detection results
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Chỉ refresh khi đang ở trang đầu tiên để tránh làm mất pagination
+      if (currentPage === 1) {
+        loadDetectionResults();
+      }
+    }, 3000); // Poll mỗi 3 giây
+
+    return () => clearInterval(interval);
+  }, [loadDetectionResults, currentPage]);
 
   // Load locations và cameras khi component mount
   useEffect(() => {
