@@ -72,7 +72,10 @@ const SamplePage = () => {
   const [detectionResults, setDetectionResults] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [lastNotificationTime, setLastNotificationTime] = useState(new Date());
   const [totalItems, setTotalItems] = useState(0);
+  const [isPolling, setIsPolling] = useState(false);
+  const lastNotificationTimeRef = useRef(new Date());
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [gotoPage, setGotoPage] = useState('');
   const [isLoadingDetections, setIsLoadingDetections] = useState(false);
@@ -188,6 +191,7 @@ const SamplePage = () => {
   
   // State cho thông báo BlackList/WhiteList (thay đổi thành Snackbar)
   const [toastNotifications, setToastNotifications] = useState([]);
+  const [notifiedPlates, setNotifiedPlates] = useState(new Set());
   
   // State cho loading và actions
   const [actionLoading, setActionLoading] = useState({
@@ -300,18 +304,21 @@ const SamplePage = () => {
         // Kiểm tra và hiển thị thông báo cho kết quả mới có BlackList/WhiteList
         newResults.forEach(result => {
           if (result.is_blacklist_match || result.is_whitelist_match) {
-            // Chỉ hiển thị thông báo cho kết quả mới (trong 5 phút gần đây)
+            // Chỉ hiển thị thông báo cho kết quả mới (sau lần load cuối)
             const resultTime = new Date(result.detected_at);
-            const now = new Date();
-            const timeDiff = now - resultTime;
+            const plateKey = `${result.plate_number}_${result.is_blacklist_match ? 'blacklist' : 'whitelist'}`;
             
-            if (timeDiff < 5 * 60 * 1000) { // 5 phút
+            if (resultTime > lastNotificationTimeRef.current && !notifiedPlates.has(plateKey)) {
               setTimeout(() => {
                 showToastNotification(result);
+                setNotifiedPlates(prev => new Set([...prev, plateKey]));
               }, 1000); // Delay 1 giây để đảm bảo UI đã render
             }
           }
         });
+        
+        // Cập nhật thời gian cuối cùng để tránh hiển thị thông báo trùng lặp
+        lastNotificationTimeRef.current = new Date();
         
         if (response.pagination) {
           setTotalPages(response.pagination.total_pages || 1);
@@ -327,7 +334,7 @@ const SamplePage = () => {
     } finally {
       setIsLoadingDetections(false);
     }
-  }, [currentPage, itemsPerPage, searchFilters]);
+  }, [currentPage, itemsPerPage, searchFilters, notifiedPlates]);
 
   // Load locations và cameras cho dropdown
   const loadLocationsAndCameras = useCallback(async () => {
@@ -653,22 +660,60 @@ useEffect(() => {
     };
   }, [loadDetectionResults]);
 
-  // Load detection results khi component mount và khi pagination thay đổi
+  // Load detection results khi component mount
   useEffect(() => {
     loadDetectionResults();
-  }, [loadDetectionResults]);
+  }, [loadDetectionResults]); // Chỉ chạy một lần khi mount
 
-  // Realtime polling cho detection results
+  // Load lại khi có thay đổi pagination
   useEffect(() => {
-    const interval = setInterval(() => {
-      // Chỉ refresh khi đang ở trang đầu tiên để tránh làm mất pagination
-      if (currentPage === 1) {
-        loadDetectionResults();
-      }
-    }, 3000); // Poll mỗi 3 giây
+    if (currentPage > 1 || itemsPerPage !== 10) {
+      loadDetectionResults();
+    }
+  }, [currentPage, itemsPerPage, loadDetectionResults]);
 
-    return () => clearInterval(interval);
-  }, [loadDetectionResults, currentPage]);
+  // Auto refresh function - chỉ refresh khi có sự kiện từ CameraViewer
+  const handleAutoRefresh = useCallback(async () => {
+    if (isPolling || isLoadingDetections) return;
+    
+    setIsPolling(true);
+    try {
+      console.log("🔄 Auto refresh triggered by new detection...");
+      await loadDetectionResults();
+    } catch (error) {
+      console.error("Error in auto refresh:", error);
+    } finally {
+      setIsPolling(false);
+    }
+  }, [isPolling, isLoadingDetections, loadDetectionResults]);
+
+  // Tạo global function để CameraViewer có thể gọi
+  useEffect(() => {
+    window.refreshDetectionResults = handleAutoRefresh;
+    
+    return () => {
+      delete window.refreshDetectionResults;
+    };
+  }, [handleAutoRefresh]);
+
+  // Cleanup thông báo cũ mỗi 30 giây
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      // Xóa thông báo cũ hơn 2 phút
+      setToastNotifications(prev => 
+        prev.filter(notification => {
+          const notificationTime = new Date(notification.details?.detected_at || 0);
+          const now = new Date();
+          return (now - notificationTime) < 2 * 60 * 1000; // 2 phút
+        })
+      );
+      
+      // Reset danh sách biển số đã thông báo để tránh tích lũy
+      setNotifiedPlates(new Set());
+    }, 30000); // Cleanup mỗi 30 giây
+
+    return () => clearInterval(cleanupInterval);
+  }, []);
 
   // Load locations và cameras khi component mount
   useEffect(() => {
