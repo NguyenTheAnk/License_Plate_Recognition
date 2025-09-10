@@ -65,7 +65,7 @@ const uploadFields = upload.fields([
 ]);
 
 const updateWhitelist = async (req, res) => {
-    const connection = await db.promise();
+    const connection = await db.promise().getConnection();
     
     try {
         const { id } = req.params;
@@ -461,12 +461,14 @@ const updateWhitelist = async (req, res) => {
         
         // Handle duplicate key error
         if (error.code === 'ER_DUP_ENTRY') {
+            connection.release();
             return res.status(409).json({
                 success: false,
                 message: 'Biển số này đã có trong danh sách trắng tại vị trí này'
             });
         }
 
+        connection.release();
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật whitelist entry',
@@ -476,7 +478,7 @@ const updateWhitelist = async (req, res) => {
 };
 
 const updateWhitelistStatus = async (req, res) => {
-    const connection = await db.promise();
+    const connection = await db.promise().getConnection();
     
     try {
         const { id } = req.params;
@@ -554,6 +556,7 @@ const updateWhitelistStatus = async (req, res) => {
 
     } catch (error) {
         console.error('Error updating whitelist status:', error);
+        connection.release();
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật trạng thái whitelist entry',
@@ -563,7 +566,7 @@ const updateWhitelistStatus = async (req, res) => {
 };
 
 const updateWhitelistApproval = async (req, res) => {
-    const connection = await db.promise();
+    const connection = await db.promise().getConnection();
     
     try {
         const { id } = req.params;
@@ -647,6 +650,7 @@ const updateWhitelistApproval = async (req, res) => {
 
     } catch (error) {
         console.error('Error updating whitelist approval:', error);
+        connection.release();
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật phê duyệt whitelist entry',
@@ -656,7 +660,7 @@ const updateWhitelistApproval = async (req, res) => {
 };
 
 const bulkUpdateWhitelist = async (req, res) => {
-    const connection = await db.promise();
+    const connection = await db.promise().getConnection();
     
     try {
         const { ids, update_data } = req.body;
@@ -801,6 +805,7 @@ const bulkUpdateWhitelist = async (req, res) => {
 
     } catch (error) {
         console.error('Error bulk updating whitelist:', error);
+        connection.release();
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật nhiều whitelist entries',
@@ -810,7 +815,7 @@ const bulkUpdateWhitelist = async (req, res) => {
 };
 
 const extendWhitelistValidity = async (req, res) => {
-    const connection = await db.promise();
+    const connection = await db.promise().getConnection();
     
     try {
         const { id } = req.params;
@@ -907,6 +912,7 @@ const extendWhitelistValidity = async (req, res) => {
 
     } catch (error) {
         console.error('Error extending whitelist validity:', error);
+        connection.release();
         res.status(500).json({
             success: false,
             message: 'Lỗi khi gia hạn whitelist entry',
@@ -916,7 +922,7 @@ const extendWhitelistValidity = async (req, res) => {
 };
 
 const updateWhitelistOCRData = async (req, res) => {
-    const connection = await db.promise();
+    const connection = await db.promise().getConnection();
     
     try {
         const { id } = req.params;
@@ -1046,6 +1052,7 @@ const updateWhitelistOCRData = async (req, res) => {
 
     } catch (error) {
         console.error('Error updating OCR data:', error);
+        connection.release();
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật OCR data',
@@ -1055,7 +1062,7 @@ const updateWhitelistOCRData = async (req, res) => {
 };
 
 const replaceWhitelistImages = async (req, res) => {
-    const connection = await db.promise();
+    const connection = await db.promise().getConnection();
     
     try {
         const { id } = req.params;
@@ -1211,6 +1218,7 @@ const replaceWhitelistImages = async (req, res) => {
 
     } catch (error) {
         console.error('Error replacing whitelist images:', error);
+        connection.release();
         res.status(500).json({
             success: false,
             message: 'Lỗi khi thay thế ảnh whitelist',
