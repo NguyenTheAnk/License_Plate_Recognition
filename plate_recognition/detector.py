@@ -635,7 +635,8 @@ ROI_PERCENT_XMIN = 0.0    # Bắt đầu từ 0% chiều rộng (toàn bộ chi�
 ROI_PERCENT_YMIN = 0.15   # Bắt đầu từ 15% chiều cao (mở rộng lên trên)
 ROI_PERCENT_XMAX = 1.0    # Kết thúc ở 100% chiều rộng (toàn bộ chiều rộng)
 ROI_PERCENT_YMAX = 0.85   # Kết thúc ở 85% chiều cao (mở rộng xuống dưới)
-MIN_CONFIDENCE = 0.4     # Giảm confidence để phát hiện sớm hơn
+MIN_CONFIDENCE = 0.8     # Chỉ lưu biển số có độ tin cậy >= 80%
+MIN_OCR_CONFIDENCE = 0.9 # Chỉ lưu biển số có OCR confidence >= 90%
 MIN_PLATE_LENGTH = 6     # Tăng minimum length từ 4 lên 6
 MAX_PLATE_LENGTH = 12    # Giảm maximum length từ 15 xuống 12
 
@@ -1314,13 +1315,13 @@ def process_plate_text(text):
         logger.error(f"❌ Error processing plate text: {e}")
         return None
 
-def validate_ocr_result_strictly(plate_text, confidence, track_id):
+def validate_ocr_result_strictly(plate_text, confidence, track_id, ocr_confidence=None):
     """STRICT validation for OCR results - YÊU CẦU CAO HƠN"""
     if not plate_text or not isinstance(plate_text, str):
         return False, "No text"
     
     clean_text = plate_text.upper().strip()
-    logger.info(f"🔍 STRICT Validating: '{clean_text}' (conf: {confidence:.3f})")
+    logger.info(f"🔍 STRICT Validating: '{clean_text}' (det_conf: {confidence:.3f}, ocr_conf: {ocr_confidence:.3f if ocr_confidence else 'N/A'})")
     
     # Length check - STRICT
     if len(clean_text) < MIN_PLATE_LENGTH:
@@ -1329,9 +1330,13 @@ def validate_ocr_result_strictly(plate_text, confidence, track_id):
     if len(clean_text) > MAX_PLATE_LENGTH:
         return False, f"Too long: {len(clean_text)} > {MAX_PLATE_LENGTH}"
     
-    # Confidence check - STRICT
+    # Detection confidence check - STRICT
     if confidence < MIN_CONFIDENCE:
-        return False, f"Confidence too low: {confidence:.3f} < {MIN_CONFIDENCE}"
+        return False, f"Detection confidence too low: {confidence:.3f} < {MIN_CONFIDENCE}"
+    
+    # OCR confidence check - STRICT (nếu có)
+    if ocr_confidence is not None and ocr_confidence < MIN_OCR_CONFIDENCE:
+        return False, f"OCR confidence too low: {ocr_confidence:.3f} < {MIN_OCR_CONFIDENCE}"
     
     # Must contain both letters and numbers
     has_letters = any(c.isalpha() for c in clean_text)
@@ -1363,7 +1368,7 @@ def validate_ocr_result_strictly(plate_text, confidence, track_id):
     logger.info(f"✅ STRICT VALIDATION PASSED: '{clean_text}' (conf: {confidence:.3f})")
     return True, "Strict validation passed"
 
-def should_save_plate(plate_text, confidence, track_id=None):
+def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None):
     """Enhanced save logic with STRICT consistency tracking"""
     global duplicate_counter, plate_history, track_consistency, ocr_attempts_per_track
     
@@ -1373,7 +1378,7 @@ def should_save_plate(plate_text, confidence, track_id=None):
     clean_text = plate_text.upper().strip()
     
     # STRICT validation - chỉ chấp nhận format chính xác
-    is_valid, reason = validate_ocr_result_strictly(plate_text, confidence, 0)
+    is_valid, reason = validate_ocr_result_strictly(plate_text, confidence, 0, ocr_confidence)
     
     if not is_valid:
         logger.info(f"❌ Not saving '{clean_text}': {reason}")
@@ -1857,7 +1862,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         plate_text = detection['plate_text']
         confidence = detection['confidence']
         
-        if plate_text and confidence > MIN_CONFIDENCE:
+        # Kiểm tra cả detection confidence và OCR confidence
+        detection_conf = detection.get('detection_conf', confidence)
+        ocr_conf = detection.get('ocr_conf', confidence)
+        
+        if plate_text and confidence > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
             # Process plate text
             processed_text = process_plate_text(plate_text)
             if processed_text:
@@ -1977,7 +1986,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         # Process plate text - ENHANCED
         processed_text = process_plate_text(plate_text) if plate_text else None
         
-        if processed_text and confidence > MIN_CONFIDENCE:
+        # Kiểm tra cả detection confidence và OCR confidence
+        detection_conf = detection.get('detection_conf', confidence)
+        ocr_conf = detection.get('ocr_conf', confidence)
+        
+        if processed_text and confidence > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
             # Draw plate text - SIMPLIFIED DISPLAY
             label = f"{processed_text}"
             cv2.putText(display_frame, label, (x1, y1 - 10),
@@ -2065,13 +2078,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 if processed_text:
                     plate_text = processed_text
 
-        # Filter plates
-        logger.info(f"🔍 Processing track {current_track_id}: plate='{plate_text}', conf={conf_val:.3f}, MIN_CONFIDENCE={MIN_CONFIDENCE}")
+        # Filter plates - kiểm tra cả detection và OCR confidence
+        ocr_conf = best_plate_match.get('ocr_conf', conf_val) if 'best_plate_match' in locals() else conf_val
+        logger.info(f"🔍 Processing track {current_track_id}: plate='{plate_text}', det_conf={conf_val:.3f}, ocr_conf={ocr_conf:.3f}, MIN_CONFIDENCE={MIN_CONFIDENCE}, MIN_OCR_CONFIDENCE={MIN_OCR_CONFIDENCE}")
         
-        if not plate_text or conf_val < MIN_CONFIDENCE:
+        if not plate_text or conf_val < MIN_CONFIDENCE or ocr_conf < MIN_OCR_CONFIDENCE:
             plate_text = "Đang nhận diện..."
             conf_val = 0.0
-            logger.info(f"⏭️ Skipping track {current_track_id} - invalid plate or low confidence")
+            logger.info(f"⏭️ Skipping track {current_track_id} - invalid plate or low confidence (det: {conf_val:.3f}, ocr: {ocr_conf:.3f})")
 
         # Find existing track_id for similar plates
         existing_track_id = find_existing_track_id(plate_text) if plate_text != "Đang nhận diện..." else None
@@ -2128,7 +2142,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 'last_seen': curr_time,
                 'crop_filename': '',
                 'disappeared': 0,
-                'validation_passed': plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE,
+                'validation_passed': plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE,
                 'is_consistent': True if processed_text else False,
                 'ocr_attempts': 1,
                 'saved_to_db': False,
@@ -2136,7 +2150,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             }
             
             # Gửi dữ liệu ngay lập tức cho object mới nếu có kết quả hợp lệ
-            if processed_text and conf_val > MIN_CONFIDENCE:
+            if processed_text and conf_val > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
                 logger.info(f"🎯 NEW PLATE DETECTED: '{processed_text}' (conf: {conf_val:.3f})")
                 
                 # Tạo frame path
@@ -2168,7 +2182,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             obj['disappeared'] = 0
             
             # Update plate number if we have a new valid result
-            if plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE:
+            if plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
                 # Process plate text first
                 processed_text = process_plate_text(plate_text)
                 if processed_text:
@@ -2218,7 +2232,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         # Save crop for every detection with valid plate
-        if plate_text and plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE:
+        if plate_text and plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
             # Tạo tên file với format: plate_{track_id}_{plate_text}_{timestamp}.jpg
             clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text) if plate_text else f"unknown_{final_track_id}"
             crop_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
