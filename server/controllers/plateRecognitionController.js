@@ -1018,6 +1018,10 @@ const createLicensePlateRecognition = async (req, res) => {
         let actual_blacklist_match = false;
         
         try {
+            // DEBUG: Log plate number being checked
+            console.log(`🔍 DEBUG: Checking plate number: "${plateValidation.normalized}"`);
+            console.log(`🔍 DEBUG: Original plate number: "${plate_number}"`);
+            
             // Check whitelist - ENHANCED with validity and approval checks
             const whitelistQuery = `
                 SELECT id FROM vehicle_whitelist 
@@ -1027,10 +1031,34 @@ const createLicensePlateRecognition = async (req, res) => {
                 AND (valid_from IS NULL OR valid_from <= CURDATE())
                 AND (valid_to IS NULL OR valid_to >= CURDATE())
             `;
+            
+            // DEBUG: First check all entries with this plate number (without conditions)
+            const debugQuery = 'SELECT * FROM vehicle_whitelist WHERE plate_number = ?';
+            const debugResult = await new Promise((resolve, reject) => {
+                db.query(debugQuery, [plateValidation.normalized], (error, results) => {
+                    if (error) {
+                        console.error('❌ DEBUG: Debug query error:', error);
+                        reject(error);
+                    } else {
+                        console.log(`🔍 DEBUG: All whitelist entries for "${plateValidation.normalized}":`, results);
+                        resolve(results);
+                    }
+                });
+            });
+            
+            // DEBUG: Log the exact query being executed
+            console.log(`🔍 DEBUG: Whitelist query:`, whitelistQuery);
+            console.log(`🔍 DEBUG: Query parameter:`, plateValidation.normalized);
+            
             const whitelistResult = await new Promise((resolve, reject) => {
                 db.query(whitelistQuery, [plateValidation.normalized], (error, results) => {
-                    if (error) reject(error);
-                    else resolve(results);
+                    if (error) {
+                        console.error('❌ DEBUG: Whitelist query error:', error);
+                        reject(error);
+                    } else {
+                        console.log(`🔍 DEBUG: Whitelist query result:`, results);
+                        resolve(results);
+                    }
                 });
             });
             actual_whitelist_match = whitelistResult.length > 0;
@@ -1043,10 +1071,19 @@ const createLicensePlateRecognition = async (req, res) => {
                 AND (valid_from IS NULL OR valid_from <= CURDATE())
                 AND (valid_to IS NULL OR valid_to >= CURDATE())
             `;
+            
+            // DEBUG: Log blacklist query
+            console.log(`🔍 DEBUG: Blacklist query:`, blacklistQuery);
+            
             const blacklistResult = await new Promise((resolve, reject) => {
                 db.query(blacklistQuery, [plateValidation.normalized], (error, results) => {
-                    if (error) reject(error);
-                    else resolve(results);
+                    if (error) {
+                        console.error('❌ DEBUG: Blacklist query error:', error);
+                        reject(error);
+                    } else {
+                        console.log(`🔍 DEBUG: Blacklist query result:`, results);
+                        resolve(results);
+                    }
                 });
             });
             actual_blacklist_match = blacklistResult.length > 0;
