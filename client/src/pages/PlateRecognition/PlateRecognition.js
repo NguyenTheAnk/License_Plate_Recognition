@@ -338,6 +338,24 @@ const PlateRecognition = () => {
         // Add to uploaded videos list
         setUploadedVideos(prev => [...prev, result]);
         
+        // Tự động bắt đầu nhận diện video vừa upload
+        const newStream = {
+          id: result.data?.id || `upload-${Date.now()}`,
+          name: selectedFile.name,
+          type: 'uploaded_video',
+          url: result.data?.url || `/uploads/videos/${selectedFile.name}`,
+          streamUrl: result.data?.url || `/uploads/videos/${selectedFile.name}`,
+          status: 'active',
+          timestamp: new Date().toISOString()
+        };
+        
+        // Add to selected streams
+        setSelectedStreams(prev => [...prev, newStream]);
+        setCameraSizes(prev => ({ ...prev, [newStream.id]: { width: 640, height: 480 } }));
+        
+        // Tự động bắt đầu nhận diện
+        startPlateRecognitionForStream(newStream);
+        
         // Close dialog and reset
         setShowUploadDialog(false);
         setSelectedFile(null);
@@ -357,7 +375,8 @@ const PlateRecognition = () => {
   const loadDetectedPlates = async (page = 1, limit = 20) => {
     try {
       setLoadingPlates(true);
-      const response = await fetchDataFromFlaskAPI(`/api/detected-plates?page=${page}&limit=${limit}`);
+      // Use Node.js API instead of Flask API for better realtime support
+      const response = await fetchDataFromAPI(`/api/plate-recognitions?page=${page}&limit=${limit}&sort_by=detected_at&sort_order=DESC`);
       
       if (response.success) {
         setDetectedPlates(response.data || []);
