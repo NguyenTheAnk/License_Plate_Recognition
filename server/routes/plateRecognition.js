@@ -8,7 +8,8 @@ const {
     getLicensePlateRecognitionStats,
     deleteLicensePlateRecognition,
     updateRecognitionVerification,
-    createLicensePlateRecognition
+    createLicensePlateRecognition,
+    getRealtimeDetections
 } = require('../controllers/plateRecognitionController');
 
 // Import middlewares
@@ -21,6 +22,13 @@ const auth = require('../middlewares/authMiddleware');
 // Create new license plate recognition (for real-time detection)
 router.post('/detected-plates', 
     createLicensePlateRecognition
+);
+
+// Get realtime detections (latest)
+router.get('/realtime', 
+    // auth,  // Tạm thời bỏ auth để test
+    // checkPermission('recognition_plate.view'), 
+    getRealtimeDetections
 );
 
 // Get all license plate recognitions with pagination and filters
