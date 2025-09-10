@@ -4,6 +4,11 @@ from fast_alpr import ALPR
 import logging
 import time
 import os
+import threading
+import queue
+import subprocess
+import psutil
+from concurrent.futures import ThreadPoolExecutor
 try:
     import redis
     REDIS_AVAILABLE = True
@@ -19,7 +24,7 @@ import hashlib
 
 # Image enhancement functions for better OCR quality (from test2.py)
 ENHANCEMENT_AVAILABLE = True
-ENABLE_REALTIME_ENHANCEMENT = True  # Enable for better crop quality
+ENABLE_REALTIME_ENHANCEMENT = False  # Tắt enhancement để tăng tốc
 
 def refine_plate_crop(plate_img: np.ndarray) -> np.ndarray:
     """Conservative enhancement optimized for OCR accuracy."""
@@ -450,6 +455,129 @@ def enable_realtime_enhancement(enable=True):
     logger.info(f"🔧 Real-time enhancement {status}")
     return ENABLE_REALTIME_ENHANCEMENT
 
+def enable_performance_optimizations(enable=True):
+    """Enable or disable performance optimizations"""
+    global ENABLE_THREADING, ENABLE_CACHING, ENABLE_LIGHTWEIGHT_MODE
+    ENABLE_THREADING = enable
+    ENABLE_CACHING = enable
+    ENABLE_LIGHTWEIGHT_MODE = enable
+    logger.info(f"🚀 Performance optimizations {'enabled' if enable else 'disabled'}")
+    return enable
+
+def _cache_detection_result(frame_hash, result):
+    """Cache detection result for performance"""
+    if not ENABLE_CACHING:
+        return
+    
+    try:
+        with cache_lock:
+            # Clean old cache entries
+            if len(detection_cache) >= cache_size:
+                # Remove oldest entries
+                sorted_items = sorted(detection_cache.items(), key=lambda x: x[1][1])
+                for key, _ in sorted_items[:cache_size // 2]:
+                    del detection_cache[key]
+            
+            # Add new result
+            detection_cache[frame_hash] = (result, time.time())
+    except Exception as e:
+        logger.error(f"Cache error: {e}")
+
+def _get_cached_result(frame_hash):
+    """Get cached detection result"""
+    if not ENABLE_CACHING:
+        return None
+    
+    try:
+        with cache_lock:
+            if frame_hash in detection_cache:
+                cached_result = detection_cache[frame_hash]
+                # Update cache timestamp
+                detection_cache[frame_hash] = (cached_result[0], time.time())
+                return cached_result[0]
+    except Exception as e:
+        logger.error(f"Cache retrieval error: {e}")
+    
+    return None
+
+def _lightweight_enhancement(plate_img: np.ndarray) -> np.ndarray:
+    """Lightweight enhancement for better performance"""
+    try:
+        if plate_img is None or plate_img.size == 0:
+            return plate_img
+        
+        img = plate_img.copy()
+        h, w = img.shape[:2]
+        
+        # Only enhance if very small
+        if w < 100 or h < 30:
+            scale = max(100/w, 30/h, 1.5)
+            new_w, new_h = int(w * scale), int(h * scale)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        
+        # Simple contrast enhancement
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        enhanced = cv2.equalizeHist(gray)
+        img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+        
+        # Minimal padding
+        pad = 3
+        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, 
+                                cv2.BORDER_CONSTANT, value=[255, 255, 255])
+        
+        return img
+        
+    except Exception as e:
+        logger.error(f"Lightweight enhancement error: {e}")
+        return plate_img
+
+def is_redis_running():
+    """Kiểm tra xem Redis có đang chạy không"""
+    try:
+        test_redis = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=0.5)
+        test_redis.ping()
+        return True
+    except:
+        return False
+
+def start_redis_server():
+    """Khởi động Redis server nếu chưa chạy"""
+    try:
+        # Kiểm tra xem Redis đã chạy chưa
+        if is_redis_running():
+            logger.info("Redis server is already running")
+            return True
+        
+        # Khởi động Redis server
+        logger.info("Starting Redis server...")
+        redis_process = subprocess.Popen(
+            ['redis-server'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+        )
+        
+        # Đợi một chút để Redis khởi động
+        time.sleep(1)
+        
+        # Kiểm tra xem Redis có chạy thành công không với retry
+        for attempt in range(3):
+            try:
+                test_redis = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=1)
+                test_redis.ping()
+                logger.info("Redis server started successfully")
+                return True
+            except:
+                if attempt < 2:  # Chưa phải lần thử cuối
+                    time.sleep(0.5)  # Đợi thêm 0.5s
+                else:
+                    logger.warning("Redis server may not have started properly")
+                    return False
+            
+    except Exception as e:
+        logger.error(f"Failed to start Redis server: {e}")
+        return False
+
 # Cấu hình môi trường cho FastALPR GPU
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['ORT_LOGGING_LEVEL'] = '3'  # ERROR level only
@@ -486,6 +614,7 @@ plate_history = {}
 
 # Global background subtractor for motion detection
 global_bg_subtractor = None
+last_roi_frame = None
 
 # Frame skipping variables
 skip_frame_count = 0
@@ -501,39 +630,87 @@ max_ocr_attempts = 8       # Tăng số lần thử OCR
 consistency_window = 10    # Giảm cửa sổ consistency
 
 # Configuration - OPTIMIZED FOR VEHICLE AND LICENSE PLATE DETECTION
-# ROI toàn chiều rộng khung hình, chiều cao giữa
+# ROI mở rộng để phát hiện sớm hơn
 ROI_PERCENT_XMIN = 0.0    # Bắt đầu từ 0% chiều rộng (toàn bộ chiều rộng)
-ROI_PERCENT_YMIN = 0.25   # Bắt đầu từ 25% chiều cao
+ROI_PERCENT_YMIN = 0.15   # Bắt đầu từ 15% chiều cao (mở rộng lên trên)
 ROI_PERCENT_XMAX = 1.0    # Kết thúc ở 100% chiều rộng (toàn bộ chiều rộng)
-ROI_PERCENT_YMAX = 0.75   # Kết thúc ở 75% chiều cao
-MIN_CONFIDENCE = 0.6     # Tăng confidence threshold từ 0.3 lên 0.6
+ROI_PERCENT_YMAX = 0.85   # Kết thúc ở 85% chiều cao (mở rộng xuống dưới)
+MIN_CONFIDENCE = 0.4     # Giảm confidence để phát hiện sớm hơn
 MIN_PLATE_LENGTH = 6     # Tăng minimum length từ 4 lên 6
 MAX_PLATE_LENGTH = 12    # Giảm maximum length từ 15 xuống 12
 
 # Vehicle classes to track (COCO: car=2, motorbike=3, bus=5, truck=7)
 VEHICLE_CLASSES = [2, 3, 5, 7]
 
-# Khởi tạo Redis
-try:
-    r = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=1)
-    r.ping()  # Test kết nối
-    redis_available = True
-    logger.info("Redis connection successful")
-except (redis.ConnectionError, redis.TimeoutError, Exception) as e:
-    redis_available = False
-    logger.warning(f"Redis not available: {str(e)}. Running without Redis support.")
+# PERFORMANCE OPTIMIZATION - THREADING AND CACHING
+# Thread pool for async processing
+thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="detector")
 
-# Khởi tạo FastALPR với GPU support
+# Queues for async processing
+detection_queue = queue.Queue(maxsize=10)
+ocr_queue = queue.Queue(maxsize=20)
+result_queue = queue.Queue(maxsize=30)
+
+# Detection cache for performance
+detection_cache = {}
+cache_size = 100
+cache_lock = threading.Lock()
+
+# Performance settings
+ENABLE_THREADING = True
+ENABLE_CACHING = False  # Tắt caching để tránh overhead
+ENABLE_LIGHTWEIGHT_MODE = True
+
+# Database throttling
+last_db_send_time = 0
+db_send_interval = 0.1  # Gửi database mỗi 0.1 giây để tăng tốc
+
+# Khởi tạo Redis với auto-start
+redis_available = False
+if REDIS_AVAILABLE:
+    # Kiểm tra Redis với timeout ngắn hơn
+    if is_redis_running():
+        try:
+            r = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=1)
+            r.ping()
+            redis_available = True
+            logger.info("Redis connection successful")
+        except:
+            redis_available = False
+            logger.warning("Redis connection failed")
+    else:
+        logger.info("Redis not running, attempting to start Redis server...")
+        # Thử khởi động Redis server
+        if start_redis_server():
+            try:
+                r = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=2)
+                r.ping()
+                redis_available = True
+                logger.info("Redis connection successful after auto-start")
+            except:
+                redis_available = False
+                logger.warning("Failed to connect to Redis even after auto-start")
+        else:
+            redis_available = False
+            logger.warning("Failed to start Redis server. Running without Redis support.")
+else:
+    logger.warning("Redis module not available. Running without Redis support.")
+
+# Khởi tạo FastALPR với GPU support tối ưu
 alpr = None
 try:
-    # Khởi tạo ALPR với GPU support
+    # Cấu hình GPU tối ưu
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Sử dụng GPU đầu tiên
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'  # Cho phép GPU memory growth
+    
+    # Khởi tạo ALPR với GPU support và tối ưu hóa
     alpr = ALPR(
         detector_model="yolo-v9-t-416-license-plate-end2end",
         ocr_model="cct-xs-v1-global-model"
-        # Không cần tham số device, FastALPR tự động chọn
+        # Không force device, để FastALPR tự chọn
     )
     
-    logger.info("FastALPR initialized successfully with GPU support")
+    logger.info("FastALPR initialized successfully")
     # Test với một frame đơn giản để đảm bảo ALPR hoạt động
     test_frame = np.zeros((100, 100, 3), dtype=np.uint8)
     test_results = alpr.predict(test_frame)
@@ -543,11 +720,11 @@ except Exception as e:
     logger.warning("Running without FastALPR - detection will be disabled")
     alpr = None
 
-# Khởi tạo ByteTrack với tham số tối ưu
+# Khởi tạo ByteTrack với tham số tối ưu cho phát hiện sớm (luôn khởi tạo)
 tracker = BYTETracker(
-    track_thresh=0.25,
-    track_buffer=30,
-    match_thresh=0.8,
+    track_thresh=0.2,  # Giảm threshold để track sớm hơn
+    track_buffer=50,   # Tăng buffer để duy trì track lâu hơn
+    match_thresh=0.7,  # Giảm match threshold
     frame_rate=30
 )
 
@@ -645,18 +822,36 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
         logger.info(f"🔄 Sending plate data to Node.js API: {plate_text}")
         logger.info(f"🌐 URL: {url}")
         
-        response = requests.post(url, json=data, timeout=10, headers={'Content-Type': 'application/json'})
+        # Kiểm tra Node.js server có chạy không
+        try:
+            test_response = requests.get("http://localhost:5000/health", timeout=2)
+            if test_response.status_code != 200:
+                logger.warning("⚠️ Node.js server may not be running properly")
+        except:
+            logger.error("❌ Node.js server is not running! Please start the Node.js server first.")
+            logger.error("💡 Run: cd server && npm start")
+            return False
         
-        logger.info(f"📡 Node.js API response: {response.status_code}")
-        logger.info(f"📄 Response: {response.text}")
-        
-        if response.status_code in [200, 201]:
-            logger.info(f"✅ Biển số {plate_text} đã lưu vào database thành công!")
-            # Cập nhật thời gian gửi cuối cùng
-            sent_plates[plate_text] = current_time
-            return True
-        else:
-            logger.error(f"❌ Lỗi lưu biển số vào database: {response.status_code} - {response.text}")
+        try:
+            response = requests.post(url, json=data, timeout=5, headers={'Content-Type': 'application/json'})
+            
+            logger.info(f"📡 Node.js API response: {response.status_code}")
+            if response.status_code not in [200, 201]:
+                logger.error(f"📄 Response error: {response.text}")
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ Biển số {plate_text} đã lưu vào database thành công!")
+                # Cập nhật thời gian gửi cuối cùng
+                sent_plates[plate_text] = current_time
+                return True
+            else:
+                logger.error(f"❌ Lỗi lưu biển số vào database: {response.status_code}")
+                return False
+        except requests.exceptions.Timeout:
+            logger.error(f"⏰ Timeout khi gửi biển số {plate_text} tới Node.js API")
+            return False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"🌐 Lỗi kết nối tới Node.js API: {e}")
             return False
             
     except requests.exceptions.ConnectionError as e:
@@ -760,9 +955,9 @@ def has_motion_in_roi(frame, roi):
         fg_pixels = np.sum(fg_mask > 0)
         gradient_mean = np.mean(magnitude)
         
-        # Điều kiện phát hiện chuyển động (nhạy hơn)
-        motion_threshold_gradient = 25  # Giảm từ 30 xuống 25
-        motion_threshold_fg = roi_frame.shape[0] * roi_frame.shape[1] * 0.005  # 0.5% pixels
+        # Điều kiện phát hiện chuyển động (nhạy hơn nữa)
+        motion_threshold_gradient = 15  # Giảm từ 25 xuống 15
+        motion_threshold_fg = roi_frame.shape[0] * roi_frame.shape[1] * 0.003  # 0.3% pixels
         
         has_motion = (gradient_mean > motion_threshold_gradient) or (fg_pixels > motion_threshold_fg)
         
@@ -877,14 +1072,24 @@ def process_plate_text(text):
         
         # ENHANCED Vietnamese plate patterns - CHẤP NHẬN FORMAT CHÍNH XÁC VÀ CÓ DẤU CHẤM
         patterns = [
-            # Xe máy với dấu chấm - ENHANCED
-            r'^\d{2}[A-Z]-\d{2,4}\.\d{2}$',        # 30A-123.45 (xe máy)
-            r'^\d{2}[A-Z]\d-\d{2,4}\.\d{2}$',      # 30A1-123.45 (xe máy)
+            # XE MÁY: 7 ký tự (không có dấu chấm)
+            r'^\d{2}[A-Z]\d-\d{3}$',                # 30A1-234 (xe máy 7 ký tự)
+            
+            # XE Ô TÔ: 8 ký tự (có dấu chấm)
+            r'^\d{2}[A-Z]-\d{3}\.\d{2}$',          # 88A-410.11 (xe ô tô 8 ký tự)
+            
+            # XE MÁY: 9 ký tự (có dấu chấm)
+            r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',        # 30A1-123.45 (xe máy 9 ký tự)
+            
+            # XE Ô TÔ: 10 ký tự (có dấu chấm)
+            r'^\d{2}[A-Z]-\d{5}\.\d{2}$',          # 30A-12345.67 (xe ô tô 10 ký tự)
+            
+            # XE MÁY: 11 ký tự (có dấu chấm)
+            r'^\d{2}[A-Z]\d-\d{5}\.\d{2}$',        # 30A1-12345.67 (xe máy 11 ký tự)
+            
+            # Các format khác
+            r'^\d{2}[A-Z]-\d{2,4}\.\d{2}$',        # 30A-123.45 (xe máy format cũ)
             r'^\d{2}[A-Z]{2}-\d{2,4}\.\d{2}$',     # 30AB-123.45 (xe máy)
-            
-            
-            # Xe máy không có dấu chấm (format cũ)
-            r'^\d{2}[A-Z]\d-\d{3,4}$',              # 30A1-2345 (xe máy)
         ]
         
         for pattern in patterns:
@@ -896,32 +1101,99 @@ def process_plate_text(text):
         # Loại bỏ khoảng trắng và kiểm tra lại
         clean_text = re.sub(r'\s+', '', text)
         
-        # Thử thêm dấu gạch ngang và dấu chấm nếu thiếu
+        # Thử thêm dấu gạch ngang và dấu chấm dựa trên độ dài chính xác
         if re.match(r'^\d{2}[A-Z]\d{2,6}$', clean_text):
-            # Format: 30A12345 -> 30A-123.45 (thêm cả dấu gạch ngang và dấu chấm)
-            if len(clean_text) >= 6:  # Đảm bảo có đủ ký tự để tách
-                prefix = clean_text[:3]  # 30A
-                suffix = clean_text[3:]  # 12345
+            text_len = len(clean_text)
+            
+            # XE MÁY: 7 ký tự → 30A1-234
+            if text_len == 7:
+                prefix = clean_text[:4]  # 30A1
+                suffix = clean_text[4:]  # 234
+                formatted = f"{prefix}-{suffix}"  # 30A1-234
+                
+                # Kiểm tra với patterns
+                for valid_pattern in patterns:
+                    if re.match(valid_pattern, formatted):
+                        logger.info(f"✅ XE MÁY (7 ký tự): '{original}' -> '{formatted}'")
+                        return formatted
+            
+            # XE Ô TÔ: 8 ký tự → 88A-410.11
+            elif text_len == 8:
+                prefix = clean_text[:3]  # 88A
+                suffix = clean_text[3:]  # 41011
                 
                 # Tách 2 số cuối làm phần sau dấu chấm
-                if len(suffix) >= 4:
-                    main_part = suffix[:-2]
-                    dot_part = suffix[-2:]
-                    formatted = f"{prefix}-{main_part}.{dot_part}"
+                if len(suffix) == 5:  # Đảm bảo có đúng 5 số sau prefix
+                    main_part = suffix[:-2]  # 410
+                    dot_part = suffix[-2:]   # 11
+                    formatted = f"{prefix}-{main_part}.{dot_part}"  # 88A-410.11
                     
                     # Kiểm tra với patterns
                     for valid_pattern in patterns:
                         if re.match(valid_pattern, formatted):
-                            logger.info(f"✅ Auto-formatted with dash and dot: '{original}' -> '{formatted}'")
+                            logger.info(f"✅ XE Ô TÔ (8 ký tự): '{original}' -> '{formatted}'")
                             return formatted
+            
+            # XE MÁY: 9 ký tự → 30A1-123.45
+            elif text_len == 9:
+                prefix = clean_text[:4]  # 30A1
+                suffix = clean_text[4:]  # 12345
                 
-                # Fallback: chỉ thêm dấu gạch ngang nếu không thể thêm dấu chấm
-                formatted = re.sub(r'^(\d{2}[A-Z])(\d{2,6})$', r'\1-\2', clean_text)
-                if re.match(r'^\d{2}[A-Z]-\d{2,6}$', formatted):
-                    logger.info(f"✅ Auto-formatted with dash only: '{original}' -> '{formatted}'")
-                    return formatted
+                # Tách 2 số cuối làm phần sau dấu chấm
+                if len(suffix) == 5:  # Đảm bảo có đúng 5 số sau prefix
+                    main_part = suffix[:-2]  # 123
+                    dot_part = suffix[-2:]   # 45
+                    formatted = f"{prefix}-{main_part}.{dot_part}"  # 30A1-123.45
+                    
+                    # Kiểm tra với patterns
+                    for valid_pattern in patterns:
+                        if re.match(valid_pattern, formatted):
+                            logger.info(f"✅ XE MÁY (9 ký tự): '{original}' -> '{formatted}'")
+                            return formatted
+            
+            # XE Ô TÔ: 10 ký tự → 30A-123.45
+            elif text_len == 10:
+                prefix = clean_text[:3]  # 30A
+                suffix = clean_text[3:]  # 12345
+                
+                # Tách 2 số cuối làm phần sau dấu chấm
+                if len(suffix) == 7:  # Đảm bảo có đúng 7 số sau prefix
+                    main_part = suffix[:-2]  # 123
+                    dot_part = suffix[-2:]   # 45
+                    formatted = f"{prefix}-{main_part}.{dot_part}"  # 30A-123.45
+                    
+                    # Kiểm tra với patterns
+                    for valid_pattern in patterns:
+                        if re.match(valid_pattern, formatted):
+                            logger.info(f"✅ XE Ô TÔ (10 ký tự): '{original}' -> '{formatted}'")
+                            return formatted
+            
+            # XE MÁY: 11 ký tự → 30A1-123.45
+            elif text_len == 11:
+                prefix = clean_text[:4]  # 30A1
+                suffix = clean_text[4:]  # 12345
+                
+                # Tách 2 số cuối làm phần sau dấu chấm
+                if len(suffix) == 7:  # Đảm bảo có đúng 7 số sau prefix
+                    main_part = suffix[:-2]  # 123
+                    dot_part = suffix[-2:]   # 45
+                    formatted = f"{prefix}-{main_part}.{dot_part}"  # 30A1-123.45
+                    
+                    # Kiểm tra với patterns
+                    for valid_pattern in patterns:
+                        if re.match(valid_pattern, formatted):
+                            logger.info(f"✅ XE MÁY (11 ký tự): '{original}' -> '{formatted}'")
+                            return formatted
+            
+            # Các trường hợp khác: chỉ thêm dấu gạch ngang
+            else:
+                if len(clean_text) >= 6:
+                    formatted = re.sub(r'^(\d{2}[A-Z])(\d{2,6})$', r'\1-\2', clean_text)
+                    if re.match(r'^\d{2}[A-Z]-\d{2,6}$', formatted):
+                        logger.info(f"✅ Auto-formatted with dash only: '{original}' -> '{formatted}'")
+                        return formatted
         
-        # ENHANCED: Thử thêm dấu chấm nếu thiếu (cho xe máy/xe tải)
+        # ENHANCED: Thử thêm dấu chấm nếu thiếu (cho xe máy/xe tải) - CHỈ KHI ĐÚNG ĐỘ DÀI
         # Kiểm tra nếu có pattern xe máy/xe tải nhưng thiếu dấu chấm
         dot_patterns = [
             (r'^(\d{2}[A-Z]-\d{2,4})(\d{2})$', r'\1.\2'),      # 30A-12345 -> 30A-123.45
@@ -931,6 +1203,7 @@ def process_plate_text(text):
         
         for pattern, replacement in dot_patterns:
             if re.match(pattern, clean_text):
+                # CHỈ format khi kết quả có đúng 10 ký tự (không tính dấu gạch ngang và chấm)
                 formatted = re.sub(pattern, replacement, clean_text)
                 # Kiểm tra xem kết quả có hợp lệ không
                 for valid_pattern in patterns:
@@ -946,18 +1219,51 @@ def process_plate_text(text):
                 prefix = parts[0]  # 30A hoặc 30A1
                 suffix = parts[1]  # 12345
                 
-                # Kiểm tra prefix có đúng format không
+                # Kiểm tra prefix có đúng format không và format dựa trên độ dài
                 if re.match(r'^\d{2}[A-Z]\d?$', prefix):
-                    # Nếu suffix có ≥4 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
-                    if re.match(r'^\d{4,}$', suffix) and len(suffix) >= 4:
-                        main_part = suffix[:-2]
-                        dot_part = suffix[-2:]
-                        formatted = f"{prefix}-{main_part}.{dot_part}"
-                        
-                        # Kiểm tra với patterns
+                    total_len = len(prefix) + len(suffix)
+                    
+                    # XE MÁY: 7 ký tự → 30A1-234
+                    if total_len == 7:
+                        formatted = f"{prefix}-{suffix}"
+                    
+                    # XE Ô TÔ: 8 ký tự → 88A-410.11
+                    elif total_len == 8:
+                        # Nếu suffix có ≥3 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
+                        if re.match(r'^\d{3,}$', suffix) and len(suffix) >= 3:
+                            main_part = suffix[:-2]
+                            dot_part = suffix[-2:]
+                            formatted = f"{prefix}-{main_part}.{dot_part}"
+                    
+                    # XE MÁY: 9 ký tự → 30A1-123.45
+                    elif total_len == 9:
+                        # Nếu suffix có ≥3 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
+                        if re.match(r'^\d{3,}$', suffix) and len(suffix) >= 3:
+                            main_part = suffix[:-2]
+                            dot_part = suffix[-2:]
+                            formatted = f"{prefix}-{main_part}.{dot_part}"
+                    
+                    # XE Ô TÔ: 10 ký tự → 30A-123.45
+                    elif total_len == 10:
+                        # Nếu suffix có ≥4 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
+                        if re.match(r'^\d{4,}$', suffix) and len(suffix) >= 4:
+                            main_part = suffix[:-2]
+                            dot_part = suffix[-2:]
+                            formatted = f"{prefix}-{main_part}.{dot_part}"
+                    
+                    # XE MÁY: 11 ký tự → 30A1-123.45
+                    elif total_len == 11:
+                        # Nếu suffix có ≥4 chữ số, thử tách 2 số cuối làm phần sau dấu chấm
+                        if re.match(r'^\d{4,}$', suffix) and len(suffix) >= 4:
+                            main_part = suffix[:-2]
+                            dot_part = suffix[-2:]
+                            formatted = f"{prefix}-{main_part}.{dot_part}"
+                    
+                    # Kiểm tra với patterns cho tất cả các trường hợp
+                    if 'formatted' in locals():
                         for valid_pattern in patterns:
                             if re.match(valid_pattern, formatted):
-                                logger.info(f"✅ Fixed dot position: '{original}' -> '{formatted}'")
+                                logger.info(f"✅ Fixed format: '{original}' -> '{formatted}'")
                                 return formatted
                     
                     # Nếu suffix có 3 chữ số, thử thêm dấu chấm ở cuối
@@ -1337,22 +1643,36 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # Vẽ ROI trước khi kiểm tra skip
     cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 1)  # Vàng, nét mỏng
     
-    # Kiểm tra xem có nên skip frame không - Dựa trên chuyển động trong ROI
-    if should_skip_frame(frame, roi):
-        # Skip frame này nhưng vẫn vẽ ROI
-        logger.debug(f"⏭️ Skipping frame {frame_count} - no motion in ROI")
+    # OPTIMIZED: Giảm frame skipping để phát hiện sớm hơn
+    should_skip = False
+    
+    # Kiểm tra motion trong ROI trước
+    has_motion = has_motion_in_roi(frame, roi)
+    
+    if not has_motion and len(tracked_objects) == 0:
+        # Nếu không có motion và không có object, skip nhiều hơn
+        if frame_count % 4 != 0:  # Skip mỗi 4 frame
+            should_skip = True
+    elif has_motion or len(tracked_objects) > 0:
+        # Nếu có motion hoặc có object, xử lý nhiều frame hơn
+        if frame_count % 2 != 0:  # Chỉ skip mỗi 2 frame
+            should_skip = True
+    
+    if should_skip:
+        # Skip frame này nhưng vẫn vẽ ROI và text
+        logger.debug(f"⏭️ Skipping frame {frame_count} - smart skipping based on tracked objects")
         
-        # Vẽ thông tin debug trên frame
+        # Vẽ thông tin cần thiết trên frame
         fps_text = f"FPS: {current_fps:.1f}"
         cv2.putText(display_frame, fps_text, (original_width - 150, 35),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         
-        skip_info = f"Skip: {skip_frame_count}/{max_skip_frames}"
-        cv2.putText(display_frame, skip_info, (10, 35),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        detections_text = f"Detections: 0"
+        cv2.putText(display_frame, detections_text, (10, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
         
         return {
-            'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes(),
+            'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])[1].tobytes(),
             'boxes': [],
             'labels': [],
             'ocr_results': [],
@@ -1367,7 +1687,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             'skipped': True
         }
     else:
-        logger.debug(f"🔄 Processing frame {frame_count} - motion detected or max skip reached")
+        logger.debug(f"🔄 Processing frame {frame_count} - selected for processing")
     
     # Ensure ROI is valid
     if roi_xmax <= roi_xmin or roi_ymax <= roi_ymin:
@@ -1394,7 +1714,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         roi_ymax = min(original_height, center_y + roi_height // 2)
         roi_frame = frame[roi_ymin:roi_ymax, roi_xmin:roi_xmax]
     
-    # Call FastALPR on ROI only
+    # OPTIMIZED: Call FastALPR on ROI only with caching and threading
     alpr_results = []
     if alpr is not None:
         try:
@@ -1408,18 +1728,51 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             
             # Ensure frame has minimum size
             if roi_frame_rgb.shape[0] >= 50 and roi_frame_rgb.shape[1] >= 50:
-                # Smart enhancement for OCR - only when absolutely necessary (disabled by default)
-                enhanced_frame = roi_frame_rgb
-                if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
-                    try:
-                        enhanced_frame = smart_enhancement(roi_frame_rgb)
-                        if enhanced_frame.shape != roi_frame_rgb.shape:
-                            logger.debug(f"🔧 Smart enhanced frame for OCR: {roi_frame_rgb.shape} -> {enhanced_frame.shape}")
-                    except Exception as e:
-                        logger.debug(f"⚠️ Frame enhancement failed, using original: {e}")
+                # OPTIMIZED: Check cache first
+                frame_hash = hashlib.md5(roi_frame_rgb.tobytes()).hexdigest()[:16]
+                cached_result = _get_cached_result(frame_hash)
                 
-                alpr_results = alpr.predict(enhanced_frame)
-                logger.debug(f"FastALPR detected {len(alpr_results)} objects in enhanced ROI")
+                if cached_result and 'alpr_results' in cached_result:
+                    alpr_results = cached_result['alpr_results']
+                    logger.debug(f"🚀 Using cached detection result")
+                else:
+                    # OPTIMIZED: Use lightweight enhancement if enabled
+                    enhanced_frame = roi_frame_rgb
+                    if ENABLE_LIGHTWEIGHT_MODE and ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
+                        try:
+                            # Convert to BGR for lightweight enhancement
+                            roi_frame_bgr = cv2.cvtColor(roi_frame_rgb, cv2.COLOR_RGB2BGR)
+                            enhanced_bgr = _lightweight_enhancement(roi_frame_bgr)
+                            enhanced_frame = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB)
+                            logger.debug(f"🔧 Lightweight enhanced frame: {roi_frame_rgb.shape} -> {enhanced_frame.shape}")
+                        except Exception as e:
+                            logger.debug(f"⚠️ Lightweight enhancement failed, using original: {e}")
+                    elif ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
+                        try:
+                            enhanced_frame = smart_enhancement(roi_frame_rgb)
+                            if enhanced_frame.shape != roi_frame_rgb.shape:
+                                logger.debug(f"🔧 Smart enhanced frame for OCR: {roi_frame_rgb.shape} -> {enhanced_frame.shape}")
+                        except Exception as e:
+                            logger.debug(f"⚠️ Frame enhancement failed, using original: {e}")
+                    
+                    # OPTIMIZED: Gọi FastALPR trực tiếp (không resize để tránh lỗi)
+                    alpr_results = alpr.predict(enhanced_frame)
+                    
+                    # Convert to list if needed
+                    if hasattr(alpr_results, '__iter__') and not isinstance(alpr_results, str):
+                        alpr_results = list(alpr_results)
+                    else:
+                        alpr_results = []
+                    
+                    logger.debug(f"FastALPR detected {len(alpr_results)} objects in enhanced ROI")
+                    
+                    # Cache result
+                    if ENABLE_CACHING:
+                        result = {
+                            'alpr_results': alpr_results,
+                            'roi_coords': (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
+                        }
+                        _cache_detection_result(frame_hash, result)
                 
                 # Cập nhật thời gian detection nếu có kết quả
                 if len(alpr_results) > 0:
@@ -1461,9 +1814,15 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             conf_list = res.ocr.confidence
             ocr_conf = mean(conf_list) if isinstance(conf_list, list) else conf_list
             
-            # ENHANCED: Pre-process OCR text for better dot recognition
-            enhanced_text = fix_vietnamese_ocr_errors(raw_text)
-            plate_text = enhanced_text
+            # OPTIMIZED: Pre-process OCR text for better dot recognition
+            if ENABLE_LIGHTWEIGHT_MODE:
+                # Lightweight text processing
+                plate_text = raw_text.strip().upper()
+                plate_text = re.sub(r'[^A-Z0-9\-\.]', '', plate_text)
+            else:
+                # Full text processing
+                enhanced_text = fix_vietnamese_ocr_errors(raw_text)
+                plate_text = enhanced_text
         
         # Store plate detection info for bounding box display
         plate_detections.append({
@@ -1541,54 +1900,70 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 except Exception as e:
                     logger.error(f"Error saving direct crop image: {e}")
                 
-                # Gửi trực tiếp tới database
-                success = send_plate_to_server("direct", {
-                    'plate': processed_text,
-                    'confidence': confidence,
-                    'bbox': detection['bbox']
-                }, frame_path, camera_id, source_type, video_filename, camera_location)
-                
-                if success:
-                    logger.info(f"✅ Direct plate '{processed_text}' sent to database successfully!")
+                # OPTIMIZED: Gửi trực tiếp tới database với threading
+                # OPTIMIZED: Throttled database sending
+                global last_db_send_time
+                current_time = time.time()
+                if current_time - last_db_send_time >= db_send_interval:
+                    if ENABLE_THREADING:
+                        # Gửi async để không block frame processing
+                        thread_pool.submit(
+                            send_plate_to_server, "direct", {
+                                'plate': processed_text,
+                                'confidence': confidence,
+                                'bbox': detection['bbox']
+                            }, frame_path, camera_id, source_type, video_filename, camera_location
+                        )
+                        logger.info(f"🚀 Direct plate '{processed_text}' queued for database (async)")
+                        last_db_send_time = current_time
+                    else:
+                        # Gửi sync như cũ
+                        success = send_plate_to_server("direct", {
+                            'plate': processed_text,
+                            'confidence': confidence,
+                            'bbox': detection['bbox']
+                        }, frame_path, camera_id, source_type, video_filename, camera_location)
+                        logger.info(f"🚀 Direct plate '{processed_text}' sent to database: {success}")
+                        last_db_send_time = current_time
                 else:
-                    logger.error(f"❌ Failed to send direct plate '{processed_text}' to database")
+                    logger.debug(f"⏱️ Database send throttled - next in {db_send_interval - (current_time - last_db_send_time):.1f}s")
 
     # ROI đã được vẽ ở trên
 
-    # Display FPS and debug info - ENHANCED
+    # Display FPS and detections only
     fps_text = f"FPS: {current_fps:.1f}"
     cv2.putText(display_frame, fps_text, (original_width - 150, 35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
     
-    # Display debug information
-    debug_text = f"ROI Center: ({(roi_xmin+roi_xmax)//2},{(roi_ymin+roi_ymax)//2})"
-    cv2.putText(display_frame, debug_text, (10, 35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-    
     detections_text = f"Detections: {len(detections)}"
-    cv2.putText(display_frame, detections_text, (10, 65),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-    
-    # Display FastALPR status
-    alpr_status = "ALPR: OK" if alpr is not None else "ALPR: NOT AVAILABLE"
-    cv2.putText(display_frame, alpr_status, (10, 95),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0) if alpr is not None else (0, 0, 255), 2)
-    
-    # Frame size info
-    frame_size_text = f"Frame: {original_width}x{original_height}"
-    cv2.putText(display_frame, frame_size_text, (10, 125),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-    
-    # Skip frame info
-    skip_info = f"Skip: {skip_frame_count}/{max_skip_frames}"
-    cv2.putText(display_frame, skip_info, (10, 155),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    cv2.putText(display_frame, detections_text, (10, 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
-    # Draw all plate detections with bounding boxes - ENHANCED DISPLAY
+    # Draw all plate detections with bounding boxes - SIMPLIFIED DISPLAY
     boxes = []
     labels = []
     ocr_results = []
     
+    # Hiển thị tất cả tracked objects (kể cả khi không có detection mới)
+    for track_id, obj in tracked_objects.items():
+        if obj['disappeared'] < 10:  # Tăng thời gian hiển thị lên 10 frames
+            x1, y1, x2, y2 = obj['bbox']
+            plate_text = obj.get('plate_text', '')
+            
+            if plate_text and plate_text != "Đang nhận diện...":
+                # Draw bounding box
+                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                
+                # Draw plate text - SIMPLIFIED DISPLAY
+                label = f"{plate_text}"
+                cv2.putText(display_frame, label, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                
+                boxes.append([x1, y1, x2, y2])
+                labels.append(plate_text)
+                ocr_results.append(plate_text)
+    
+    # Hiển thị detections mới (nếu có)
     for detection in plate_detections:
         x1, y1, x2, y2 = detection['bbox']
         plate_text = detection['plate_text']
@@ -1603,19 +1978,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         processed_text = process_plate_text(plate_text) if plate_text else None
         
         if processed_text and confidence > MIN_CONFIDENCE:
-            # Draw plate text with confidence - ENHANCED DISPLAY
-            label = f"PLATE: {processed_text}"
-            cv2.putText(display_frame, label, (x1, y1 - 45),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 3)
+            # Draw plate text - SIMPLIFIED DISPLAY
+            label = f"{processed_text}"
+            cv2.putText(display_frame, label, (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             
-            conf_text = f"OCR: {confidence:.3f}"
-            cv2.putText(display_frame, conf_text, (x1, y2 + 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            # Show raw text for debugging (WHITE text)
-            raw_debug = f"Raw: {raw_text}"
-            cv2.putText(display_frame, raw_debug, (x1, y2 + 55),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             
             # Draw smaller plate bounding box (WHITE for processed plates)
             plate_padding = 5
@@ -2157,5 +2524,73 @@ __all__ = [
     'cleanup_tracked_objects',
     'get_detection_stats',
     'reset_anti_duplicate_system',
-    'get_tracked_objects_status'
+    'get_tracked_objects_status',
+    'enable_performance_optimizations',
+    'get_performance_stats',
+    'clear_detection_cache'
 ]
+
+# PERFORMANCE OPTIMIZATION FUNCTIONS
+
+def get_performance_stats():
+    """Get performance statistics"""
+    try:
+        return {
+            'threading_enabled': ENABLE_THREADING,
+            'caching_enabled': ENABLE_CACHING,
+            'lightweight_mode': ENABLE_LIGHTWEIGHT_MODE,
+            'cache_size': len(detection_cache),
+            'max_cache_size': cache_size,
+            'thread_pool_workers': thread_pool._max_workers,
+            'detection_queue_size': detection_queue.qsize(),
+            'ocr_queue_size': ocr_queue.qsize(),
+            'result_queue_size': result_queue.qsize(),
+            'current_fps': current_fps,
+            'frame_count': frame_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting performance stats: {e}")
+        return {'error': str(e)}
+
+def clear_detection_cache():
+    """Clear detection cache"""
+    try:
+        with cache_lock:
+            detection_cache.clear()
+        logger.info("🧹 Detection cache cleared")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        return False
+
+def set_performance_mode(mode='balanced'):
+    """Set performance mode: 'fast', 'balanced', 'quality'"""
+    global ENABLE_THREADING, ENABLE_CACHING, ENABLE_LIGHTWEIGHT_MODE, ENABLE_REALTIME_ENHANCEMENT
+    
+    try:
+        if mode == 'fast':
+            ENABLE_THREADING = True
+            ENABLE_CACHING = True
+            ENABLE_LIGHTWEIGHT_MODE = True
+            ENABLE_REALTIME_ENHANCEMENT = False
+            logger.info("🚀 Performance mode set to FAST")
+        elif mode == 'balanced':
+            ENABLE_THREADING = True
+            ENABLE_CACHING = True
+            ENABLE_LIGHTWEIGHT_MODE = True  # Bật lightweight mode cho balanced
+            ENABLE_REALTIME_ENHANCEMENT = False  # Tắt enhancement cho balanced
+            logger.info("⚖️ Performance mode set to BALANCED")
+        elif mode == 'quality':
+            ENABLE_THREADING = False
+            ENABLE_CACHING = False
+            ENABLE_LIGHTWEIGHT_MODE = False
+            ENABLE_REALTIME_ENHANCEMENT = True
+            logger.info("🎯 Performance mode set to QUALITY")
+        else:
+            logger.error(f"Invalid performance mode: {mode}")
+            return False
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error setting performance mode: {e}")
+        return False
