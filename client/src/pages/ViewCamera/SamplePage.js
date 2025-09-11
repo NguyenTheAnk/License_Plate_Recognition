@@ -55,9 +55,13 @@ const SamplePage = () => {
   const [cameraPositions, setCameraPositions] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [showConfig, setShowConfig] = useState(false);
-  const [selectedCameraId, setSelectedCameraId] = useState(null);
+  const [selectedCameraId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [retrying, setRetrying] = useState({});
+  const [recording, setRecording] = useState({}); // Thêm state cho ghi hình
+  const [muted, setMuted] = useState({}); // State cho âm thanh
+  const [playing, setPlaying] = useState({}); // State cho phát video
+  const [recordingTimers, setRecordingTimers] = useState({}); // State cho timer ghi hình
+  const [currentQuality, setCurrentQuality] = useState({}); // State cho chất lượng hiện tại
   const isLoadingStream = useRef(false);
   const [pendingCameraId, setPendingCameraId] = useState(null);
   const [rtspStreams, setRtspStreams] = useState({});
@@ -1000,45 +1004,6 @@ useEffect(() => {
     }
   };
 
-  const handleRetry = async (streamId) => {
-    const streamInfo = rtspStreams[streamId];
-    if (!streamInfo || !streamInfo.cameraId) {
-      console.error("No RTSP stream info found for streamId:", streamId);
-      return;
-    }
-
-    const cameraId = streamInfo.cameraId;
-    setRetrying((prev) => ({ ...prev, [streamId]: true }));
-
-    try {
-      const token = localStorage.getItem("token");
-      const result = await postData(
-        `/api/cameras/${cameraId}/stream/start`,
-        { type: "hls" },
-        token
-      );
-      if (!result.success) {
-        alert(result.message || "Không thể phát lại camera");
-        return;
-      }
-      const streamUrl = result.data.stream.streamUrl.replace(
-        "localhost",
-        window.location.hostname
-      );
-      setRtspStreams((prev) => ({
-        ...prev,
-        [streamId]: {
-          ...prev[streamId],
-          url: streamUrl,
-        },
-      }));
-    } catch (error) {
-      console.error("Error restarting stream:", error);
-      alert("Không thể phát lại camera: " + (error.message || "Lỗi không xác định"));
-    } finally {
-      setRetrying((prev) => ({ ...prev, [streamId]: false }));
-    }
-  };
 
   const handleCloseCameraFeed = (streamId) => {
     setSelectedStreams((prev) => prev.filter((id) => id !== streamId));
@@ -1059,21 +1024,306 @@ useEffect(() => {
     });
   };
 
-  const handleConfigClick = (streamId) => {
-    const streamInfo = rtspStreams[streamId] || uploadedVideos[streamId];
-    if (!streamInfo) {
-      console.error("No stream info found for streamId:", streamId);
-      return;
-    }
 
-    const cameraId = streamInfo.cameraId || streamId.split("-")[1];
-    if (!cameraId) {
-      console.error("No cameraId found for streamId:", streamId);
-      return;
-    }
+  // Hàm xử lý bắt đầu ghi hình
+  const handleStartRecording = (streamId) => {
+    console.log("🎥 Starting recording for stream:", streamId);
+    
+    try {
+      const videoElement = document.getElementById(`video-${streamId}`);
+      if (!videoElement) {
+        console.error("Video element not found for stream:", streamId);
+        alert("Không tìm thấy video element để ghi hình");
+        return;
+      }
 
-    setSelectedCameraId(cameraId);
-    setShowConfig(true);
+      // Kiểm tra video đã sẵn sàng chưa
+      if (videoElement.readyState < 2) {
+        alert("Video chưa sẵn sàng để ghi hình. Vui lòng đợi video load xong.");
+        return;
+      }
+
+      // Tạo MediaStream từ video element
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = videoElement.videoWidth || 640;
+      canvas.height = videoElement.videoHeight || 480;
+      
+      const stream = canvas.captureStream(30); // 30 FPS
+      
+      // Kiểm tra browser có hỗ trợ MediaRecorder không
+      if (!window.MediaRecorder) {
+        alert("Trình duyệt không hỗ trợ ghi hình. Vui lòng sử dụng Chrome, Firefox hoặc Edge mới nhất.");
+        return;
+      }
+
+      // Thử các format khác nhau
+      let mimeType = 'video/webm;codecs=vp9';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm;codecs=vp8';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'video/webm';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/mp4';
+          }
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: mimeType
+      });
+
+      const chunks = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const fileExtension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(chunks, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        
+        // Tạo link download
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `camera_${streamId}_${new Date().toISOString().replace(/[:.]/g, '-')}.${fileExtension}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log("✅ Recording saved successfully");
+      };
+
+      // Bắt đầu ghi hình
+      mediaRecorder.start(1000); // Ghi mỗi 1 giây
+      
+      // Bắt đầu timer ghi hình
+      const startTime = Date.now();
+      const timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setRecordingTimers(prev => ({
+          ...prev,
+          [streamId]: elapsed
+        }));
+      }, 1000);
+
+      // Lưu MediaRecorder vào state để có thể dừng sau
+      setRecording((prev) => ({ 
+        ...prev, 
+        [streamId]: { 
+          isRecording: true, 
+          mediaRecorder,
+          canvas,
+          ctx,
+          videoElement,
+          interval: setInterval(() => {
+            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+          }, 1000/30), // 30 FPS
+          timerInterval
+        }
+      }));
+
+      console.log("✅ Recording started successfully");
+      
+    } catch (error) {
+      console.error("❌ Error starting recording:", error);
+      alert("Lỗi khi bắt đầu ghi hình: " + error.message);
+    }
+  };
+
+  // Hàm xử lý dừng ghi hình
+  const handleStopRecording = (streamId) => {
+    console.log("🛑 Stopping recording for stream:", streamId);
+    
+    try {
+      const recordingData = recording[streamId];
+      if (!recordingData || !recordingData.mediaRecorder) {
+        console.error("No active recording found for stream:", streamId);
+        return;
+      }
+
+      // Dừng MediaRecorder
+      if (recordingData.mediaRecorder.state === 'recording') {
+        recordingData.mediaRecorder.stop();
+      }
+
+      // Clear interval
+      if (recordingData.interval) {
+        clearInterval(recordingData.interval);
+      }
+
+      // Clear timer interval
+      if (recordingData.timerInterval) {
+        clearInterval(recordingData.timerInterval);
+      }
+
+      // Cleanup
+      if (recordingData.canvas) {
+        recordingData.canvas.remove();
+      }
+
+      // Cập nhật state
+      setRecording((prev) => {
+        const newState = { ...prev };
+        delete newState[streamId];
+        return newState;
+      });
+
+      // Xóa timer
+      setRecordingTimers((prev) => {
+        const newState = { ...prev };
+        delete newState[streamId];
+        return newState;
+      });
+
+      console.log("✅ Recording stopped successfully");
+      
+    } catch (error) {
+      console.error("❌ Error stopping recording:", error);
+      alert("Lỗi khi dừng ghi hình: " + error.message);
+    }
+  };
+
+  // Hàm xử lý chụp ảnh
+  const handleSnapshot = (streamId) => {
+    console.log("📸 Taking snapshot for stream:", streamId);
+    
+    try {
+      const videoElement = document.getElementById(`video-${streamId}`);
+      if (!videoElement) {
+        console.error("Video element not found for stream:", streamId);
+        alert("Không tìm thấy video element để chụp ảnh");
+        return;
+      }
+
+      // Tạo canvas để chụp ảnh
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = videoElement.videoWidth || 640;
+      canvas.height = videoElement.videoHeight || 480;
+      
+      // Vẽ frame hiện tại lên canvas
+      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+      
+      // Tạo blob và download
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `snapshot_${streamId}_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log("✅ Snapshot saved successfully");
+      }, 'image/png');
+      
+    } catch (error) {
+      console.error("❌ Error taking snapshot:", error);
+      alert("Lỗi khi chụp ảnh: " + error.message);
+    }
+  };
+
+  // Hàm xử lý toggle mute
+  const handleToggleMute = (streamId) => {
+    console.log("🔇 Toggling mute for stream:", streamId);
+    
+    try {
+      const videoElement = document.getElementById(`video-${streamId}`);
+      if (!videoElement) {
+        console.error("Video element not found for stream:", streamId);
+        return;
+      }
+
+      const newMutedState = !muted[streamId];
+      videoElement.muted = newMutedState;
+      
+      setMuted((prev) => ({
+        ...prev,
+        [streamId]: newMutedState
+      }));
+
+      console.log("✅ Mute toggled successfully:", newMutedState);
+      
+    } catch (error) {
+      console.error("❌ Error toggling mute:", error);
+      alert("Lỗi khi thay đổi âm thanh: " + error.message);
+    }
+  };
+
+  // Hàm xử lý play/pause
+  const handlePlayPause = (streamId) => {
+    console.log("⏯️ Toggling play/pause for stream:", streamId);
+    
+    try {
+      const videoElement = document.getElementById(`video-${streamId}`);
+      if (!videoElement) {
+        console.error("Video element not found for stream:", streamId);
+        return;
+      }
+
+      const newPlayingState = videoElement.paused;
+      
+      if (newPlayingState) {
+        videoElement.play();
+      } else {
+        videoElement.pause();
+      }
+      
+      setPlaying((prev) => ({
+        ...prev,
+        [streamId]: !newPlayingState
+      }));
+
+      console.log("✅ Play/pause toggled successfully:", !newPlayingState);
+      
+    } catch (error) {
+      console.error("❌ Error toggling play/pause:", error);
+      alert("Lỗi khi phát/tạm dừng video: " + error.message);
+    }
+  };
+
+  // Hàm xử lý cài đặt chất lượng
+  const handleQualitySettings = (streamId, quality) => {
+    console.log("⚙️ Changing quality for stream:", streamId, "to:", quality);
+    
+    try {
+      const qualities = {
+        'low': { width: 640, height: 360, label: 'Low (360p)' },
+        'medium': { width: 1280, height: 720, label: 'Medium (720p)' },
+        'high': { width: 1920, height: 1080, label: 'High (1080p)' }
+      };
+      
+      const selectedQuality = qualities[quality];
+      if (!selectedQuality) {
+        console.error("Invalid quality option:", quality);
+        return;
+      }
+
+      // Cập nhật chất lượng hiện tại
+      setCurrentQuality((prev) => ({
+        ...prev,
+        [streamId]: quality
+      }));
+
+      // Lưu thông tin chất lượng vào localStorage để giữ khi reload
+      localStorage.setItem(`quality_${streamId}`, quality);
+
+      console.log("✅ Quality settings applied:", selectedQuality);
+      
+      // TODO: Implement actual quality change logic here
+      // Có thể cần gọi API để thay đổi stream quality
+      // Hiện tại chỉ lưu preference, không thay đổi stream thực tế
+      
+    } catch (error) {
+      console.error("❌ Error changing quality:", error);
+      alert("Lỗi khi thay đổi chất lượng: " + error.message);
+    }
   };
 
   const handleSaveConfig = (updatedConfig) => {
@@ -1380,6 +1630,26 @@ useEffect(() => {
       {/* CSS để hiển thị datetime theo định dạng dd/MM/yyyy HH:mm */}
       <style>
   {`
+    /* Ẩn số 0 có thể xuất hiện từ video player - chỉ trong video container */
+    .video-container video::-webkit-media-controls-timeline {
+      display: none !important;
+    }
+    .video-container video::-webkit-media-controls-current-time-display {
+      display: none !important;
+    }
+    .video-container video::-webkit-media-controls-time-remaining-display {
+      display: none !important;
+    }
+    .video-container video::-webkit-media-controls {
+      display: none !important;
+    }
+    .video-container video::-webkit-media-controls-enclosure {
+      display: none !important;
+    }
+    .video-container video::-webkit-media-controls-panel {
+      display: none !important;
+    }
+    
     /* Custom styling cho datetime input */
     .custom-datetime-input {
       position: relative;
@@ -1567,24 +1837,31 @@ useEffect(() => {
                       <CameraActionBar
                         cameraName={camera.name}
                         cameraId={cameraId}
-                        isRetrying={retrying[streamId]}
-                        onRetry={() => handleRetry(streamId)}
                         onFullscreen={() => {
                           const video = document.getElementById(`video-${streamId}`);
                           if (video && video.requestFullscreen) {
                             video.requestFullscreen();
                           }
                         }}
-                        onConfigure={() => handleConfigClick(streamId)}
                         onClose={() => handleCloseCameraFeed(streamId)}
                         onStartRecognize={startRecognition}
                         onStopRecognize={stopRecognition}
                         isRecognizing={isRecognizing}
                         isProcessing={isProcessing}
-                        onForcePlay={onForcePlay}
+                        onStartRecording={() => handleStartRecording(streamId)}
+                        onStopRecording={() => handleStopRecording(streamId)}
+                        isRecording={recording[streamId]?.isRecording || false}
+                        onSnapshot={() => handleSnapshot(streamId)}
+                        onToggleMute={() => handleToggleMute(streamId)}
+                        isMuted={muted[streamId] || false}
+                        onPlayPause={() => handlePlayPause(streamId)}
+                        isPlaying={playing[streamId] || false}
+                        onQualitySettings={(quality) => handleQualitySettings(streamId, quality)}
+                        currentQuality={currentQuality[streamId] || 'medium'}
                       />
                     )}
                     onClose={() => handleCloseCameraFeed(streamId)}
+                    recordingTimer={recordingTimers[streamId] || 0}
                     style={{
                       width: `${size.width}px`,
                       height: `${size.height}px`,

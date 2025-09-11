@@ -1,32 +1,45 @@
 .camera-action-bar {
   display: flex;
-  gap: 12px;
+  gap: 4px;
   margin-top: 0;
   justify-content: flex-start;
   flex-shrink: 0; /* Quan trọng */
-  min-height: 50px;
+  min-height: 44px;
   height: auto;
   background: #2e2e2e;
-  border-bottom-left-radius: 12px;
-  border-bottom-right-radius: 12px;
-  padding: 0 12px;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  padding: 6px 12px;
   align-items: center;
   width: 100%; /* Đảm bảo thanh chiếm toàn bộ chiều rộng */
   box-sizing: border-box;
+  flex-wrap: nowrap;
 }
 
 .action-btn {
-  width: 35px;
-  height: 35px;
+  width: 32px;
+  height: 32px;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s;
-  margin-right: 12px;
+  transition: all 0.2s ease;
+  margin-right: 4px;
   padding: 0;
+  position: relative;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.action-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .close-btn {
@@ -36,19 +49,6 @@
   background: #d32f2f;
 }
 
-.retry-btn {
-  background: #2196F3;
-}
-.retry-btn:hover {
-  background: #1976D2;
-}
-
-.play-btn {
-  background: #00BCD4;
-}
-.play-btn:hover {
-  background: #0097A7;
-}
 
 .fullscreen-btn {
   background: #4CAF50;
@@ -64,40 +64,154 @@
   background: #FFC107;
 }
 
-.record-btn {
+.record-btn,
+.recording-btn {
   background: #FF5722;
 }
-.record-btn.recording {
+.record-btn.recording,
+.recording-btn.recording {
   background: #D32F2F;
+  animation: pulse 1.5s infinite;
 }
-.record-btn:hover {
+.record-btn:hover,
+.recording-btn:hover {
   background: #E64A19;
 }
 
-.motion-btn {
+.snapshot-btn {
+  background: #FF9800;
+}
+.snapshot-btn:hover {
+  background: #F57C00;
+}
+
+.play-pause-btn {
+  background: #4CAF50;
+}
+.play-pause-btn:hover {
+  background: #388E3C;
+}
+
+.mute-btn {
   background: #9C27B0;
 }
-.motion-btn:hover {
+.mute-btn:hover {
   background: #7B1FA2;
 }
+
+.quality-btn {
+  background: #607D8B;
+}
+.quality-btn:hover {
+  background: #455A64;
+}
+
+.quality-dropdown-container {
+  position: relative;
+  display: inline-block;
+}
+
+.quality-btn-icon {
+  background: #607d8b;
+}
+
+.quality-btn-icon:hover {
+  background: #455a64;
+}
+
+.quality-btn-icon:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.quality-dropdown.upward-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  background: #2e2e2e;
+  border: 1px solid #555;
+  border-radius: 6px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  min-width: 160px;
+  margin-bottom: 4px;
+  overflow: hidden;
+}
+
+.quality-option {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border-bottom: 1px solid #444;
+}
+
+.quality-option:last-child {
+  border-bottom: none;
+}
+
+.quality-option:hover {
+  background-color: #404040;
+}
+
+.quality-option.selected {
+  background-color: #4a5568;
+}
+
+.quality-option-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #fff;
+}
+
+.quality-option.selected .quality-option-content {
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+.checkmark {
+  margin-left: auto;
+  color: #60a5fa;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.source-btn {
+  background: #607D8B;
+}
+.source-btn:hover {
+  background: #455A64;
+}
+
+.upload-btn {
+  background: #795548;
+}
+.upload-btn:hover {
+  background: #5D4037;
+}
+
 
 .action-btn svg {
   display: block;
   color: #fff !important;
-  width: 25px;
-  height: 25px;
+  width: 18px;
+  height: 18px;
 }
 
 .camera-actionbar-name {
   color: #fff;
-  font-size: 16px; /* Giảm kích thước font */
+  font-size: 12px;
   font-weight: 500;
-  margin-left: 12px;
+  margin-left: auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex-grow: 1;
-  max-width: 200px;
+  max-width: 150px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .recognize-btn.recognizing {
@@ -109,11 +223,27 @@ animation: pulse 1.5s infinite;
 @keyframes pulse {
 0% {
   background-color: #ff0000;
+  opacity: 1;
 }
 50% {
   background-color: #990000;
+  opacity: 0.5;
 }
 100% {
   background-color: #ff0000;
+  opacity: 1;
+}
+}
+
+/* Animation cho recording indicator */
+@keyframes pulse {
+0% {
+  opacity: 1;
+}
+50% {
+  opacity: 0.5;
+}
+100% {
+  opacity: 1;
 }
 }
