@@ -1456,7 +1456,7 @@ useEffect(() => {
                 mb: 1
               }}>
                 <CameraIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                Giám sát và Nhận diện Biển số
+                Nhận diện biển số xe
               </Typography>
               <Typography variant="body1" color="text.secondary">
                 Theo dõi camera trực tiếp và phát hiện biển số xe tự động
@@ -2105,9 +2105,14 @@ useEffect(() => {
                                 if (imagePath.includes('/static/crops//static/crops/')) {
                                   imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
                                 }
-                                return imagePath.startsWith('/static/crops/') 
-                                  ? `http://localhost:5002${imagePath}`
-                                  : `http://localhost:5002/static/crops/${imagePath}`;
+                                // Xử lý đường dẫn ảnh
+                                if (imagePath.startsWith('/static/crops/')) {
+                                  return `http://localhost:5002${imagePath}`;
+                                } else if (imagePath.startsWith('static/crops/')) {
+                                  return `http://localhost:5002/${imagePath}`;
+                                } else {
+                                  return `http://localhost:5002/static/crops/${imagePath}`;
+                                }
                               })()}
                               alt="Ảnh biển số"
                               sx={{
@@ -2125,42 +2130,27 @@ useEffect(() => {
                                 }
                               }}
                               onClick={() => {
-                                // Xử lý đường dẫn ảnh
+                                // Xử lý đường dẫn ảnh - simplified logic
                                 let imagePath = result.cropped_plate_image_path;
                                 
-                                // Loại bỏ duplicate /static/crops/ nếu có
-                                if (imagePath.includes('/static/crops//static/crops/')) {
-                                  imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                                // Ensure path starts with /static/crops/
+                                if (!imagePath.startsWith('/static/crops/')) {
+                                  imagePath = `/static/crops/${imagePath}`;
                                 }
                                 
-                                // Nếu đường dẫn đã có /static/crops/ thì dùng trực tiếp
-                                if (imagePath.startsWith('/static/crops/')) {
-                                  const cropImageUrl = `http://localhost:5002${imagePath}`;
-                                  console.log('Opening image URL:', cropImageUrl);
-                                  window.open(cropImageUrl, '_blank');
-                                } else {
-                                  // Nếu chưa có thì thêm vào
-                                  const cropImageUrl = `http://localhost:5002/static/crops/${imagePath}`;
-                                  console.log('Opening image URL:', cropImageUrl);
-                                  window.open(cropImageUrl, '_blank');
-                                }
+                                const cropImageUrl = `http://localhost:5002${imagePath}`;
+                                console.log('Opening image URL:', cropImageUrl);
+                                window.open(cropImageUrl, '_blank');
                               }}
                               onError={(e) => {
                                 console.error('Error loading image:', result.cropped_plate_image_path);
                                 
-                                // Xử lý đường dẫn ảnh cho log
+                                // Simplified error handling
                                 let imagePath = result.cropped_plate_image_path;
-                                // Loại bỏ duplicate /static/crops/ nếu có
-                                if (imagePath.includes('/static/crops//static/crops/')) {
-                                  imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                                if (!imagePath.startsWith('/static/crops/')) {
+                                  imagePath = `/static/crops/${imagePath}`;
                                 }
-                                
-                                let fullUrl;
-                                if (imagePath.startsWith('/static/crops/')) {
-                                  fullUrl = `http://localhost:5002${imagePath}`;
-                                } else {
-                                  fullUrl = `http://localhost:5002/static/crops/${imagePath}`;
-                                }
+                                const fullUrl = `http://localhost:5002${imagePath}`;
                                 console.error('Full URL:', fullUrl);
                                 
                                 e.target.style.display = 'none';
@@ -3270,14 +3260,22 @@ useEffect(() => {
                           if (imagePath.includes('/static/crops//static/crops/')) {
                             imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
                           }
-                          return imagePath.startsWith('/static/crops/') 
-                            ? `http://localhost:5002${imagePath}`
-                            : `http://localhost:5002/static/crops/${imagePath}`;
+                                // Xử lý đường dẫn ảnh
+                                if (imagePath.startsWith('/static/crops/')) {
+                                  return `http://localhost:5002${imagePath}`;
+                                } else if (imagePath.startsWith('static/crops/')) {
+                                  return `http://localhost:5002/${imagePath}`;
+                                } else {
+                                  return `http://localhost:5002/static/crops/${imagePath}`;
+                                }
                         })()}
                         alt="Biển số xe"
                         style={{
                           maxWidth: '100%',
                           maxHeight: '300px',
+                          width: '100%',
+                          height: 'auto',
+                          objectFit: 'contain',
                           borderRadius: '8px',
                           boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
                         }}
@@ -3563,14 +3561,22 @@ useEffect(() => {
                           if (imagePath.includes('/static/crops//static/crops/')) {
                             imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
                           }
-                          return imagePath.startsWith('/static/crops/') 
-                            ? `http://localhost:5002${imagePath}`
-                            : `http://localhost:5002/static/crops/${imagePath}`;
+                                // Xử lý đường dẫn ảnh
+                                if (imagePath.startsWith('/static/crops/')) {
+                                  return `http://localhost:5002${imagePath}`;
+                                } else if (imagePath.startsWith('static/crops/')) {
+                                  return `http://localhost:5002/${imagePath}`;
+                                } else {
+                                  return `http://localhost:5002/static/crops/${imagePath}`;
+                                }
                         })()}
                         alt="Biển số xe"
                         style={{
                           maxWidth: '100%',
                           maxHeight: '200px',
+                          width: '100%',
+                          height: 'auto',
+                          objectFit: 'contain',
                           borderRadius: '8px',
                           boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
                         }}
