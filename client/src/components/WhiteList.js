@@ -2558,7 +2558,7 @@ const handleDateIconClickBackup = (field) => {
             </Typography>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ p: 3, pt: 4 }}>
           <Typography variant="body1" sx={{ mb: 2, color: '#222' }}>
             Bạn có chắc chắn muốn <strong>XÓA VĨNH VIỄN</strong> whitelist với biển số <strong>"{deleteDialog.plateName}"</strong>?
           </Typography>

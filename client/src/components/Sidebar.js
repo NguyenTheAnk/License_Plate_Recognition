@@ -3,17 +3,28 @@ import {
   Box,
   Avatar,
   Typography,
-  Divider,
   List,
   ListItem,
   ListItemIcon,
   ListItemText,
-  Switch,
   Button,
   LinearProgress,
   Paper,
   Collapse,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Grid,
+  Snackbar,
+  Alert,
+  Fade,
 } from "@mui/material";
 import {
   Home as HomeIcon,
@@ -26,16 +37,14 @@ import {
   PeopleOutline as UsersIcon,
   SecurityOutlined as PermissionIcon,
   BadgeOutlined as RoleIcon,
-  PersonAddAlt as UserPermissionIcon,
   ExitToApp as LogoutIcon,
   ExpandLess,
   ExpandMore,
-  SmartToy as AiIcon,
   Videocam as CameraIcon,
   PlayCircleOutline as PlayIcon,
-  VideoLibrary as VideoIcon,
+  Add as AddIcon,
 } from "@mui/icons-material";
-import { fetchDataFromAPI } from '../utils/auth';
+import { fetchDataFromAPI, postData } from '../utils/auth';
 
 const SIDEBAR_WIDTH = 260;
 
@@ -63,18 +72,37 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   // State cho việc mở/đóng submenu
   const [openSubmenus, setOpenSubmenus] = useState({});
   const [isCameraListOpen, setIsCameraListOpen] = useState(false);
-  const [isVideoListOpen, setIsVideoListOpen] = useState(false);
   const [cameras, setCameras] = useState([]);
-  const [videos, setVideos] = useState([]);
   const [hasViewDashboard, setasViewDashboard] = useState(false);
   const [hasRecognition, sethasRecognition] = useState(false);
   const [hasMonitorJourney, sethasMonitorJourney] = useState(false);
   const [hasSearchModule, sethasSearchModule] = useState(false);
   const [hasViewWhitelist, sethasViewWhitelist] = useState(false);
   const [hasViewBlacklist, sethasViewBlacklist] = useState(false);
+  const [showAddCameraModal, setShowAddCameraModal] = useState(false);
+  const [newCamera, setNewCamera] = useState({
+    name: '',
+    protocol: 'rtsp',
+    host: '',
+    port: 554,
+    path: '',
+    location_id: '',
+    description: ''
+  });
+  const [locations, setLocations] = useState([]);
+  const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [hasViewUser, sethasViewUser] = useState(false);
   const [hasViewRole, sethasViewRole] = useState(false);
   const [hasViewPermission, sethasViewPermission] = useState(false);
+
+  // Notification functions
+  const showNotification = (message, severity = 'success') => {
+    setNotification({ open: true, message, severity });
+  };
+
+  const closeNotification = () => {
+    setNotification(prev => ({ ...prev, open: false }));
+  };
   useEffect(() => {
               const storedUser = localStorage.getItem('user');
               if (storedUser ) {
@@ -94,8 +122,45 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
                   } catch (error) {
                       console.error('Error parsing permissions:', error);
                   }
-              }
-          }, []);
+          }
+      }, []);
+
+  // Fetch locations for dropdown
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const data = await fetchDataFromAPI("/api/location/active", token);
+        console.log('Locations API response:', data);
+        
+        if (data.success && data.data && data.data.locations) {
+          setLocations(data.data.locations);
+        } else {
+          // Fallback: Use hardcoded locations from database
+          setLocations([
+            { id: 1, name: 'Cổng chính tòa nhà ABC' },
+            { id: 2, name: 'Lối ra chính tòa nhà ABC' },
+            { id: 3, name: 'Bãi đỗ xe tầng hầm B1' },
+            { id: 4, name: 'Cổng vào bãi xe B1' },
+            { id: 5, name: 'Cổng ra bãi xe B1' }
+          ]);
+        }
+      } catch (error) {
+        console.error('Error fetching locations:', error);
+        // Fallback on error
+        setLocations([
+          { id: 1, name: 'Cổng chính tòa nhà ABC' },
+          { id: 2, name: 'Lối ra chính tòa nhà ABC' },
+          { id: 3, name: 'Bãi đỗ xe tầng hầm B1' },
+          { id: 4, name: 'Cổng vào bãi xe B1' },
+          { id: 5, name: 'Cổng ra bãi xe B1' }
+        ]);
+      }
+    };
+    
+    fetchLocations();
+  }, []);
+
   const menuGroups = [
   {
     label: '',
@@ -125,9 +190,6 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
   // Camera state
   const totalCameras = 46;
 
-  // Trạng thái AI
-  const [aiStatus, setAiStatus] = useState(true);
-
   // Fetch cameras data
   useEffect(() => {
     const fetchCameras = async () => {
@@ -152,30 +214,12 @@ function Sidebar({ user, onLogout, navigate, currentPath, handleCameraClick }) {
     };
     fetchCameras();
   }, []);
-useEffect(() => {
-    const fetchVideos = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        const response = await fetchDataFromAPI('/api/cameras/list-videos', token);
-        if (response.success) {
-          setVideos(response.data || []);
-        }
-      } catch (error) {
-        console.error("Sidebar Error fetching videos:", error);
-        setVideos([]);
-      }
-    };
-    fetchVideos();
-  }, []);
   // Hàm toggle submenu
   const handleSubmenuToggle = (itemText) => {
     setOpenSubmenus(prev => ({
       ...prev,
       [itemText]: !prev[itemText]
     }));
-  };
-  const handleVideoToggle = () => {
-    setIsVideoListOpen(!isVideoListOpen);
   };
   const handleCameraToggle = () => {
     setIsCameraListOpen(!isCameraListOpen);
@@ -185,25 +229,94 @@ useEffect(() => {
     if (window.startCameraStream) {
       window.startCameraStream(cameraId.toString());
     }
-    if (currentPath !== "/route-monitoring") {
-      navigate("/route-monitoring");
+    if (currentPath !== "/plate-recognition") {
+      navigate("/plate-recognition");
     }
+  };
+
+  const handleAddCamera = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      
+      // Validate required fields
+      if (!newCamera.name || !newCamera.host || !newCamera.port || !newCamera.location_id) {
+        showNotification("Vui lòng điền đầy đủ thông tin bắt buộc (Tên, Host, Port, Vị trí)", 'error');
+        return;
+      }
+
+      // Validate camera name length (will be used to generate code)
+      if (newCamera.name.length > 50) {
+        showNotification("Tên camera không được quá 50 ký tự", 'error');
+        return;
+      }
+
+      // Prepare camera data according to database schema
+      const cameraData = {
+        name: newCamera.name,
+        location_id: parseInt(newCamera.location_id), // Use selected location
+        code: newCamera.name.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').substring(0, 20) || `cam_${Date.now().toString().slice(-8)}`, // Generate code from name, max 20 chars
+        protocol: newCamera.protocol,
+        host: newCamera.host,
+        port: parseInt(newCamera.port),
+        path: newCamera.path || '',
+        fps: 30, // Default FPS
+        width: 1920, // Default width
+        height: 1080, // Default height
+        direction: 'bidirectional', // Default direction
+        camera_type: 'fixed', // Default camera type
+        camera_role: 'internal', // Default camera role
+        installation_date: new Date().toISOString().split('T')[0], // Date format (YYYY-MM-DD)
+        maintenance_schedule: 'Hàng tháng', // Default maintenance
+        details: newCamera.description || 'Camera được tạo tự động'
+      };
+
+      console.log('Adding new camera:', cameraData);
+
+      const response = await postData('/api/cameras/create', cameraData, token);
+
+      if (response.success) {
+        console.log('Camera created successfully, showing notification...');
+        showNotification(response.message || "Thêm mới camera thành công!");
+        
+        // Reset form
+        setNewCamera({
+          name: '',
+          protocol: 'rtsp',
+          host: '',
+          port: 554,
+          path: '',
+          location_id: '',
+          description: ''
+        });
+        
+        // Close modal
+        setShowAddCameraModal(false);
+        
+        // Refresh cameras list
+        const data = await fetchDataFromAPI("/api/cameras/streams/all", token);
+        const cameraList = data.data.cameras || [];
+        setCameras(cameraList);
+        
+      } else {
+        console.log('API Response Error:', response);
+        console.log('Validation Errors:', response.errors);
+        showNotification(response.message || "Có lỗi xảy ra khi thêm camera", 'error');
+      }
+    } catch (error) {
+      console.error('Error adding camera:', error);
+      showNotification("Có lỗi xảy ra khi thêm camera: " + error.message, 'error');
+    }
+  };
+
+  const handleInputChange = (field, value) => {
+    setNewCamera(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
   // Tính số camera đang hoạt động
   const activeCameras = cameras.length;
-
-  // Helper function để check permission
-  const hasPermission = (permissionCode) => {
-    if (!user || !user.permissions) return false;
-    return user.permissions.some(permission => permission.code === permissionCode);
-  };
-
-  // Helper function để check role
-  const hasRole = (roleName) => {
-    if (!user || !user.roles) return false;
-    return user.roles.some(role => role.name === roleName);
-  };
 
   // Filter menu items based on permissions (hiện tại hiển thị tất cả)
   const filterMenuItems = (items) => {
@@ -211,15 +324,6 @@ useEffect(() => {
       // Hiển thị tất cả menu items
       return true;
     });
-  };
-const handleVideoSelect = (videoId) => {
-    // Gọi hàm từ SamplePage để mở luồng video (giả sử window.startVideoStream tồn tại)
-    if (window.startVideoStream) {
-      window.startVideoStream(videoId); // Cần định nghĩa startVideoStream trong SamplePage.js
-    }
-    if (currentPath !== "/route-monitoring") {
-      navigate("/route-monitoring");
-    }
   };
   // Lấy tên hiển thị từ user object
   const getDisplayName = () => {
@@ -258,6 +362,7 @@ const handleVideoSelect = (videoId) => {
   };
 
   return (
+    <>
     <Box sx={{
       width: SIDEBAR_WIDTH,
       minWidth: SIDEBAR_WIDTH,
@@ -411,57 +516,6 @@ const handleVideoSelect = (videoId) => {
         </Typography>
       </Paper>
 
-      {/* Trạng thái AI */}
-      <Paper elevation={0} sx={{ 
-        mx: 1, 
-        mb: 1, 
-        p: 1.5, 
-        display: 'flex', 
-        alignItems: 'center', 
-        borderRadius: 3, 
-        bgcolor: aiStatus ? '#e8f5e9' : '#fafafa',
-        border: `1px solid ${aiStatus ? '#c8e6c9' : '#e0e0e0'}`,
-        transition: 'all 0.3s ease',
-        '&:hover': {
-          transform: 'translateY(-1px)',
-          boxShadow: '0 3px 8px rgba(0,0,0,0.1)'
-        }
-      }}>
-        <AiIcon sx={{ 
-          color: aiStatus ? '#2e7d32' : '#757575', 
-          mr: 1,
-          transition: 'all 0.3s ease',
-          animation: aiStatus ? 'pulse 2s infinite' : 'none',
-          '@keyframes pulse': {
-            '0%': { opacity: 1 },
-            '50%': { opacity: 0.7 },
-            '100%': { opacity: 1 }
-          }
-        }} />
-        <Box sx={{ flex: 1 }}>
-          <Typography variant="body2" sx={{ 
-            fontWeight: 600, 
-            fontSize: 13, 
-            color: '#333',
-            mb: 0.2
-          }}>
-            Trạng thái AI
-          </Typography>
-          <Typography variant="caption" sx={{ 
-            color: aiStatus ? '#2e7d32' : '#757575',
-            fontSize: 10,
-            fontWeight: 500
-          }}>
-            {aiStatus ? 'Đang hoạt động' : 'Tạm dừng'}
-          </Typography>
-        </Box>
-        <Switch 
-          checked={aiStatus} 
-          onChange={() => setAiStatus(!aiStatus)} 
-          color="success" 
-          size="small"
-        />
-      </Paper>
 
       {/* Progress camera */}
       <Paper elevation={0} sx={{ 
@@ -477,6 +531,38 @@ const handleVideoSelect = (videoId) => {
           boxShadow: '0 3px 8px rgba(255, 193, 7, 0.2)'
         }
       }}>
+        {/* Nút Thêm camera - Vị trí trên text */}
+        <Button
+          variant="contained"
+          fullWidth
+          onClick={() => setShowAddCameraModal(true)}
+          sx={{
+            py: 1.5,
+            px: 3,
+            textTransform: "none",
+            backgroundColor: "#4caf50",
+            color: "#fff",
+            fontWeight: 600,
+            fontSize: 14,
+            borderRadius: 3,
+            mb: 2,
+            boxShadow: "0 4px 15px rgba(76, 175, 80, 0.3)",
+            "&:hover": {
+              backgroundColor: "#45a049",
+              transform: "translateY(-2px)",
+              boxShadow: "0 6px 20px rgba(76, 175, 80, 0.4)",
+            },
+            "&:active": {
+              transform: "translateY(0px)",
+              boxShadow: "0 2px 10px rgba(76, 175, 80, 0.3)",
+            },
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          }}
+          startIcon={<AddIcon sx={{ fontSize: 20 }} />}
+        >
+          Thêm Camera Mới
+        </Button>
+        
         <Box
           sx={{
             display: "flex",
@@ -535,6 +621,7 @@ const handleVideoSelect = (videoId) => {
             {totalCameras === 0 ? 0 : Math.round((activeCameras / totalCameras) * 100)}%
           </Typography>
         </Box>
+        
         <Collapse in={isCameraListOpen} timeout="auto" unmountOnExit>
           <List dense sx={{ mt: 1, maxHeight: 200, overflowY: "auto" }}>
             {cameras.length > 0 ? (
@@ -592,132 +679,6 @@ const handleVideoSelect = (videoId) => {
           </List>
         </Collapse>
       </Paper>
-       <Paper elevation={0} sx={{ 
-        mx: 1, 
-        mb: 2, 
-        p: 1.5, 
-        borderRadius: 3, 
-        bgcolor: '#eceff1',
-        border: '1px solid #cfd8dc',
-        transition: 'all 0.3s ease',
-        '&:hover': {
-          transform: 'translateY(-1px)',
-          boxShadow: '0 3px 8px rgba(0, 0, 0, 0.1)'
-        }
-      }}>
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            mb: 1,
-            cursor: "pointer",
-            "&:hover": {
-              "& .MuiTypography-root": {
-                color: "#0288d1",
-              },
-            },
-          }}
-          onClick={handleVideoToggle}
-        >
-          <VideoIcon sx={{ color: "#0288d1", mr: 1, fontSize: 18 }} />
-          <Typography
-            variant="caption"
-            sx={{
-              fontWeight: 600,
-              fontSize: 12,
-              color: "#01579b",
-              flex: 1,
-            }}
-          >
-            Danh sách video
-          </Typography>
-          {isVideoListOpen ? <ExpandLess /> : <ExpandMore />}
-        </Box>
-        <LinearProgress 
-          variant="determinate" 
-          value={videos.length > 0 ? 100 : 0} // Giả định nếu có video thì hiển thị 100%
-          sx={{ 
-            my: 1, 
-            height: 8, 
-            borderRadius: 4, 
-            bgcolor: '#e0f7fa',
-            '& .MuiLinearProgress-bar': {
-              borderRadius: 4,
-              background: 'linear-gradient(90deg, #0288d1, #03a9f4)'
-            }
-          }} 
-        />
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="caption" sx={{ 
-            fontWeight: 500, 
-            fontSize: 11,
-            color: '#01579b'
-          }}>
-            {videos.length} video
-          </Typography>
-          <Typography variant="caption" sx={{ 
-            fontWeight: 600, 
-            fontSize: 11,
-            color: '#0288d1'
-          }}>
-            {videos.length > 0 ? '100%' : '0%'}
-          </Typography>
-        </Box>
-        <Collapse in={isVideoListOpen} timeout="auto" unmountOnExit>
-          <List dense sx={{ mt: 1, maxHeight: 200, overflowY: "auto" }}>
-            {videos && videos.length > 0 ? (
-              videos.map((video) => (
-                <ListItem
-                  key={video.id}
-                  button
-                  onClick={() => handleVideoSelect(video.id)}
-                  sx={{
-                    borderRadius: 2,
-                    mb: 0.5,
-                    pl: 2,
-                    pr: 1,
-                    py: 0.5,
-                    transition: "all 0.3s ease",
-                    "&:hover": {
-                      bgcolor: "#e1f5fe",
-                      transform: "translateX(4px)",
-                      boxShadow: "0 2px 8px rgba(0, 136, 209, 0.2)",
-                    },
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 24 }}>
-                    <PlayIcon sx={{ fontSize: 16, color: "#0288d1" }} />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={video.name || `Video ${video.id}`}
-                    secondary={`ID: ${video.id}`}
-                    primaryTypographyProps={{
-                      fontSize: 13,
-                      fontWeight: 500,
-                      color: "#333",
-                    }}
-                    secondaryTypographyProps={{
-                      fontSize: 11,
-                      color: "#666",
-                    }}
-                  />
-                </ListItem>
-              ))
-            ) : (
-              <ListItem>
-                <ListItemText
-                  primary="Không có video nào"
-                  primaryTypographyProps={{
-                    color: "#757575",
-                    fontSize: 12,
-                    textAlign: "center",
-                  }}
-                />
-              </ListItem>
-            )}
-          </List>
-        </Collapse>
-      </Paper>     
       {/* Menu */}
       <Box sx={{ 
         flex: 1, 
@@ -910,7 +871,205 @@ const handleVideoSelect = (videoId) => {
           ĐĂNG XUẤT
         </Button>
       </Box>
+      
+      {/* Modal Thêm Camera */}
+      <Dialog 
+        open={showAddCameraModal} 
+        onClose={() => setShowAddCameraModal(false)}
+        maxWidth="md"
+        fullWidth
+        sx={{
+          '& .MuiDialog-paper': {
+            borderRadius: 3,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column'
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          bgcolor: '#1976d2', 
+          color: 'white', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 1,
+          fontWeight: 600
+        }}>
+          <AddIcon />
+          Thêm Camera Mới
+        </DialogTitle>
+        
+        <DialogContent sx={{ 
+          p: 3, 
+          pt: 4,
+          maxHeight: '60vh',
+          overflowY: 'auto'
+        }}>
+          <Grid container spacing={3} sx={{ mt: 2 }}>
+            {/* Tên camera */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Tên camera *"
+                value={newCamera.name}
+                onChange={(e) => handleInputChange('name', e.target.value)}
+                placeholder="Ví dụ: Camera checkpoint 1"
+                variant="outlined"
+                required
+              />
+            </Grid>
+            
+            {/* Protocol */}
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Giao thức *</InputLabel>
+                <Select
+                  value={newCamera.protocol}
+                  onChange={(e) => handleInputChange('protocol', e.target.value)}
+                  label="Giao thức *"
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: '200px',
+                        overflowY: 'auto'
+                      }
+                    }
+                  }}
+                >
+                  <MenuItem value="rtsp">RTSP</MenuItem>
+                  <MenuItem value="http">HTTP</MenuItem>
+                  <MenuItem value="https">HTTPS</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            {/* Host */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Địa chỉ IP/Host *"
+                value={newCamera.host}
+                onChange={(e) => handleInputChange('host', e.target.value)}
+                placeholder="192.168.1.100"
+                variant="outlined"
+                required
+              />
+            </Grid>
+            
+            {/* Port */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Port *"
+                type="number"
+                value={newCamera.port}
+                onChange={(e) => handleInputChange('port', parseInt(e.target.value))}
+                placeholder="554"
+                variant="outlined"
+                required
+              />
+            </Grid>
+            
+            {/* Path */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Đường dẫn stream"
+                value={newCamera.path}
+                onChange={(e) => handleInputChange('path', e.target.value)}
+                placeholder="/stream1"
+                variant="outlined"
+              />
+            </Grid>
+            
+            {/* Location */}
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Vị trí *</InputLabel>
+                <Select
+                  value={newCamera.location_id}
+                  onChange={(e) => handleInputChange('location_id', e.target.value)}
+                  label="Vị trí *"
+                  required
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: '200px',
+                        overflowY: 'auto'
+                      }
+                    }
+                  }}
+                >
+                  {Array.isArray(locations) && locations.map((location) => (
+                    <MenuItem key={location.id} value={location.id}>
+                      {location.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            
+            {/* Description */}
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Mô tả"
+                value={newCamera.description}
+                onChange={(e) => handleInputChange('description', e.target.value)}
+                placeholder="Mô tả về camera này..."
+                variant="outlined"
+                multiline
+                rows={3}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        
+        <DialogActions sx={{ p: 3, gap: 2 }}>
+          <Button
+            onClick={() => setShowAddCameraModal(false)}
+            variant="outlined"
+            sx={{ borderRadius: 2 }}
+          >
+            Hủy
+          </Button>
+          <Button
+            onClick={handleAddCamera}
+            variant="contained"
+            sx={{ 
+              borderRadius: 2,
+              bgcolor: '#1976d2',
+              '&:hover': { bgcolor: '#1565c0' }
+            }}
+          >
+            Thêm Camera
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
     </Box>
+    
+    {/* Snackbar Notification - Outside of fixed positioned Box */}
+    <Snackbar
+      open={notification.open}
+      autoHideDuration={4000}
+      onClose={closeNotification}
+      anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      TransitionComponent={Fade}
+      sx={{ zIndex: 9999 }}
+    >
+      <Alert
+        onClose={closeNotification}
+        severity={notification.severity}
+        variant="filled"
+        sx={{ width: '100%' }}
+      >
+        {notification.message}
+      </Alert>
+    </Snackbar>
+    </>
   );
 }
 

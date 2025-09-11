@@ -7,11 +7,12 @@ import {
 } from '@mui/material';
 import { 
   Tooltip, Legend, Bar, XAxis, YAxis, 
-  ResponsiveContainer, Line, AreaChart, Area, ComposedChart, CartesianGrid
+  ResponsiveContainer, Line, AreaChart, Area, ComposedChart, CartesianGrid,
+  LineChart
 } from 'recharts';
 import {
   Videocam, DirectionsCar, EventNote, CheckCircle,
-  Speed, LocationOn, Assessment, Timeline, BarChart as BarChartIcon, Notifications
+  Speed, Assessment, Timeline, BarChart as BarChartIcon, Notifications
 } from '@mui/icons-material';
 
 
@@ -35,7 +36,13 @@ function Dashboard() {
     systemHealth: {},
     performanceMetrics: {},
     locationStats: [],
-    alerts: []
+    alerts: [],
+    // Enhanced charts data
+    timeSeriesData: [],
+    heatmapData: [],
+    speedAnalysis: [],
+    alertTrends: [],
+    efficiencyMetrics: {}
   });
 
   // Process raw API data into dashboard format
@@ -76,14 +83,12 @@ const summary = [
     // Weekly detection data (last 7 days)
     const eventStats = generateWeeklyStats(detections);
 
-    // Hourly detection data (today)
-    const lineData = generateHourlyStats(detections);
+    // Hourly detection data (today) - use this for both lineData and hourlyStats
+    const hourlyStats = generateHourlyStats(detections);
+    const lineData = hourlyStats; // Use the same data
 
     // Camera detection counts
     const camBarData = generateCameraStats(detections, cameraData.data?.top_detection_cameras || []);
-
-    // Generate additional statistics
-    const hourlyStats = generateHourlyStats(detections);
     const weeklyTrends = generateWeeklyTrends(detections);
     const monthlyStats = generateMonthlyStats(detections);
     const topPlates = generateTopPlates(detections);
@@ -92,6 +97,13 @@ const summary = [
     const performanceMetrics = generatePerformanceMetrics(detections);
     const locationStats = generateLocationStats(detections, cameraData.data?.by_location || []);
     const alerts = generateAlerts(cameraStats, detections);
+    
+    // Enhanced charts data
+    const timeSeriesData = generateTimeSeriesData(detections);
+    const heatmapData = generateHeatmapData(detections);
+    const speedAnalysis = generateSpeedAnalysis(detections);
+    const alertTrends = generateAlertTrends(detections);
+    const efficiencyMetrics = generateEfficiencyMetrics(detections, cameraStats);
 
     return {
       summary,
@@ -106,7 +118,12 @@ const summary = [
       systemHealth,
       performanceMetrics,
       locationStats,
-      alerts
+      alerts,
+      timeSeriesData,
+      heatmapData,
+      speedAnalysis,
+      alertTrends,
+      efficiencyMetrics
     };
   }, []);
 
@@ -174,7 +191,21 @@ const summary = [
         const accessData = await accessResponse.json();
 
         // Process data
+        console.log('Raw detection data:', detectionData);
+        console.log('Sample detections:', detectionData.data?.detections?.slice(0, 3) || detectionData.detections?.slice(0, 3));
+        
+        // Debug confidence data specifically
+        const detections = detectionData.data?.detections || detectionData.detections || [];
+        console.log('Confidence analysis:', detections.slice(0, 5).map(d => ({
+          id: d.id,
+          plate_number: d.plate_number,
+          detection_confidence: d.detection_confidence,
+          ocr_confidence: d.ocr_confidence,
+          combined: d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 'N/A'
+        })));
+        
         const processedData = processDashboardData(cameraData, detectionData, journeyData, accessData);
+        console.log('Processed dashboard data:', processedData);
         setDashboardData(processedData);
 
       } catch (err) {
@@ -218,7 +249,20 @@ const summary = [
               accuracyRate: 0
             },
             locationStats: [],
-            alerts: []
+            alerts: [],
+            timeSeriesData: [],
+            heatmapData: [],
+            speedAnalysis: [],
+            alertTrends: [],
+            efficiencyMetrics: {
+              accuracyRate: 0,
+              verificationRate: 0,
+              whitelistRate: 0,
+              blacklistRate: 0,
+              totalCameras: 0,
+              onlineCameras: 0,
+              offlineCameras: 0
+            }
           });
         }
       } finally {
@@ -260,12 +304,12 @@ const summary = [
     const hourlyData = [];
     
     for (let hour = 6; hour <= 17; hour++) {
-      const hourStr = hour.toString().padStart(2, '0');
-      const hourDetections = detections.filter(d => 
-        d.detected_at && 
-        d.detected_at.startsWith(today) &&
-        d.detected_at.includes(`T${hourStr}:`)
-      );
+      const hourDetections = detections.filter(d => {
+        if (!d.detected_at) return false;
+        const detectionDate = new Date(d.detected_at);
+        const detectionHour = detectionDate.getHours();
+        return detectionDate.toISOString().split('T')[0] === today && detectionHour === hour;
+      });
 
       hourlyData.push({
         hour: `${hour}h`,
@@ -273,6 +317,7 @@ const summary = [
       });
     }
 
+    console.log('Generated hourly stats:', hourlyData);
     return hourlyData;
   };
 
@@ -401,6 +446,16 @@ const summary = [
   // Generate performance metrics
   const generatePerformanceMetrics = (detections) => {
     const totalDetections = detections.length;
+    
+    // Debug: Log confidence scores to see what we're working with
+    console.log('Sample detections confidence scores:', detections.slice(0, 5).map(d => ({
+      id: d.id,
+      detection_confidence: d.detection_confidence,
+      ocr_confidence: d.ocr_confidence,
+      combined_confidence: d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : null
+    })));
+    
+    // Calculate combined confidence from detection_confidence and ocr_confidence
     const avgConfidence = totalDetections > 0 
       ? detections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / totalDetections 
       : 0;
@@ -408,6 +463,14 @@ const summary = [
     const highConfidence = detections.filter(d => (d.confidence_score || 0) >= 0.8).length;
     const mediumConfidence = detections.filter(d => (d.confidence_score || 0) >= 0.5 && (d.confidence_score || 0) < 0.8).length;
     const lowConfidence = detections.filter(d => (d.confidence_score || 0) < 0.5).length;
+
+    console.log('Performance metrics:', {
+      totalDetections,
+      avgConfidence,
+      highConfidence,
+      mediumConfidence,
+      lowConfidence
+    });
 
     return {
       totalDetections,
@@ -480,6 +543,128 @@ const summary = [
     }
 
     return alerts;
+  };
+
+
+  // Generate time series data for detailed analysis
+  const generateTimeSeriesData = (detections) => {
+    const today = new Date();
+    const data = [];
+    
+    console.log('Generating time series data for', detections.length, 'detections');
+    
+    for (let i = 23; i >= 0; i--) {
+      const hour = new Date(today);
+      hour.setHours(hour.getHours() - i);
+      
+      const hourDetections = detections.filter(d => {
+        if (!d.detected_at) return false;
+        const detectionDate = new Date(d.detected_at);
+        const detectionHour = detectionDate.getHours();
+        return detectionDate.toISOString().split('T')[0] === hour.toISOString().split('T')[0] && detectionHour === hour.getHours();
+      });
+
+      const highConfidence = hourDetections.filter(d => (d.confidence_score || 0) >= 0.8).length;
+
+      data.push({
+        time: hour.getHours() + ':00',
+        detections: hourDetections.length,
+        highConfidence: highConfidence,
+        whitelist: hourDetections.filter(d => d.is_whitelist_match).length,
+        blacklist: hourDetections.filter(d => d.is_blacklist_match).length
+      });
+    }
+
+    console.log('Time series data:', data);
+    return data;
+  };
+
+  // Generate heatmap data for hourly patterns
+  const generateHeatmapData = (detections) => {
+    const data = [];
+    const days = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    
+    for (let day = 0; day < 7; day++) {
+      for (let hour = 0; hour < 24; hour++) {
+        const dayDetections = detections.filter(d => {
+          if (!d.detected_at) return false;
+          const date = new Date(d.detected_at);
+          return date.getDay() === day && date.getHours() === hour;
+        });
+
+        data.push({
+          day: days[day],
+          hour: hour,
+          value: dayDetections.length,
+          detections: dayDetections.length
+        });
+      }
+    }
+
+    return data;
+  };
+
+  // Generate speed analysis data
+  const generateSpeedAnalysis = (detections) => {
+    const speeds = detections
+      .filter(d => d.vehicle_speed && d.vehicle_speed > 0)
+      .map(d => d.vehicle_speed);
+
+    if (speeds.length === 0) return [];
+
+    const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
+    const maxSpeed = Math.max(...speeds);
+    const minSpeed = Math.min(...speeds);
+
+    return [
+      { metric: 'Tốc độ TB', value: avgSpeed.toFixed(1), unit: 'km/h', color: '#4caf50' },
+      { metric: 'Tốc độ Max', value: maxSpeed.toFixed(1), unit: 'km/h', color: '#f44336' },
+      { metric: 'Tốc độ Min', value: minSpeed.toFixed(1), unit: 'km/h', color: '#2196f3' }
+    ];
+  };
+
+  // Generate alert trends
+  const generateAlertTrends = (detections) => {
+    const today = new Date();
+    const trends = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      
+      const dayDetections = detections.filter(d => 
+        d.detected_at && d.detected_at.startsWith(dateStr)
+      );
+
+      trends.push({
+        date: dateStr,
+        whitelist: dayDetections.filter(d => d.is_whitelist_match).length,
+        blacklist: dayDetections.filter(d => d.is_blacklist_match).length,
+        alerts: dayDetections.filter(d => d.alert_triggered).length
+      });
+    }
+
+    return trends;
+  };
+
+  // Generate efficiency metrics
+  const generateEfficiencyMetrics = (detections, cameraStats) => {
+    const totalDetections = detections.length;
+    const highConfidenceDetections = detections.filter(d => (d.confidence_score || 0) >= 0.8).length;
+    const verifiedDetections = detections.filter(d => d.is_verified).length;
+    const whitelistMatches = detections.filter(d => d.is_whitelist_match).length;
+    const blacklistMatches = detections.filter(d => d.is_blacklist_match).length;
+
+    return {
+      accuracyRate: totalDetections > 0 ? ((highConfidenceDetections / totalDetections) * 100).toFixed(1) : 0,
+      verificationRate: totalDetections > 0 ? ((verifiedDetections / totalDetections) * 100).toFixed(1) : 0,
+      whitelistRate: totalDetections > 0 ? ((whitelistMatches / totalDetections) * 100).toFixed(1) : 0,
+      blacklistRate: totalDetections > 0 ? ((blacklistMatches / totalDetections) * 100).toFixed(1) : 0,
+      totalCameras: cameraStats.total_cameras || 0,
+      onlineCameras: cameraStats.online_cameras || 0,
+      offlineCameras: cameraStats.offline_cameras || 0
+    };
   };
 
 
@@ -592,98 +777,6 @@ const summary = [
           </Grid>
         ))}
 
-        {/* System Health & Performance */}
-        <Grid item xs={12} md={6}>
-          <Fade in={true} timeout={1000}>
-            <Paper sx={{ 
-              p: 4, 
-              borderRadius: 4, 
-              boxShadow: 6, 
-              height: 450,
-              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-              border: '1px solid #e3f2fd',
-              position: 'relative',
-              overflow: 'hidden',
-              '&::before': {
-                content: '""',
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: 'linear-gradient(45deg, rgba(25, 118, 210, 0.05), transparent)',
-                opacity: 0.5
-              }
-            }}>
-              <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 4, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1,
-                color: '#1976d2',
-                position: 'relative',
-                zIndex: 1
-              }}>
-                <Assessment color="primary" />
-                Tình Trạng Hệ Thống
-              </Typography>
-              
-              <Box sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">Tổng thể</Typography>
-                  <Typography variant="body2" fontWeight={700}>
-                    {dashboardData.systemHealth?.healthScore || 0}%
-                  </Typography>
-                </Box>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={dashboardData.systemHealth?.healthScore || 0}
-                  sx={{ 
-                    height: 8, 
-                    borderRadius: 4,
-                    bgcolor: '#e0e0e0',
-                    '& .MuiLinearProgress-bar': {
-                      borderRadius: 4,
-                      background: (dashboardData.systemHealth?.healthScore || 0) >= 90 
-                        ? 'linear-gradient(90deg, #4caf50, #8bc34a)'
-                        : (dashboardData.systemHealth?.healthScore || 0) >= 70
-                        ? 'linear-gradient(90deg, #ff9800, #ffc107)'
-                        : 'linear-gradient(90deg, #f44336, #ff5722)'
-                    }
-                  }}
-                />
-              </Box>
-
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e8f5e8', borderRadius: 2 }}>
-                    <Typography variant="h4" color="success.main" fontWeight={700}>
-                      {dashboardData.systemHealth?.onlineCameras || 0}
-                    </Typography>
-                    <Typography variant="body2">Online</Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
-                    <Typography variant="h4" color="error.main" fontWeight={700}>
-                      {dashboardData.systemHealth?.offlineCameras || 0}
-                    </Typography>
-                    <Typography variant="body2">Offline</Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-
-              <Box sx={{ mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Trạng thái: <strong>{dashboardData.systemHealth?.status || 'Unknown'}</strong>
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Cập nhật: {dashboardData.systemHealth?.lastUpdate || 'N/A'}
-                </Typography>
-              </Box>
-            </Paper>
-          </Fade>
-        </Grid>
 
         {/* Performance Metrics */}
         <Grid item xs={12} md={6}>
@@ -767,7 +860,7 @@ const summary = [
                   Tổng phát hiện: <strong>{dashboardData.performanceMetrics?.totalDetections || 0}</strong>
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Độ tin cậy TB: <strong>{dashboardData.performanceMetrics?.avgConfidence || 0}</strong>
+                  Độ tin cậy TB: <strong>{((dashboardData.performanceMetrics?.avgConfidence || 0) * 100).toFixed(1)}%</strong>
                 </Typography>
               </Box>
             </Paper>
@@ -883,7 +976,7 @@ const summary = [
                 Phát Hiện Theo Giờ (Hôm Nay)
               </Typography>
               <ResponsiveContainer width="100%" height={350}>
-                <AreaChart data={dashboardData.lineData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                <AreaChart data={dashboardData.hourlyStats} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                   <XAxis 
                     dataKey="hour" 
@@ -928,9 +1021,77 @@ const summary = [
         </Grid>
 
 
+
+        {/* Enhanced Performance Metrics Row */}
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={2600}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 400,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e8f5e8'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#2e7d32'
+              }}>
+                <Assessment color="primary" />
+                Hiệu Suất Hệ Thống
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e8f5e8', borderRadius: 2 }}>
+                    <Typography variant="h4" color="success.main" fontWeight={700}>
+                      {dashboardData.efficiencyMetrics?.accuracyRate || 0}%
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Độ chính xác
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e3f2fd', borderRadius: 2 }}>
+                    <Typography variant="h4" color="info.main" fontWeight={700}>
+                      {dashboardData.efficiencyMetrics?.verificationRate || 0}%
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Tỷ lệ xác minh
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#fff3e0', borderRadius: 2 }}>
+                    <Typography variant="h4" color="warning.main" fontWeight={700}>
+                      {dashboardData.efficiencyMetrics?.whitelistRate || 0}%
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      WhiteList
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6}>
+                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
+                    <Typography variant="h4" color="error.main" fontWeight={700}>
+                      {dashboardData.efficiencyMetrics?.blacklistRate || 0}%
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      BlackList
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Fade>
+        </Grid>
+
         {/* Data Tables Row */}
         <Grid item xs={12} md={6}>
-          <Fade in={true} timeout={2200}>
+          <Fade in={true} timeout={2800}>
             <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 4, height: 400 }}>
               <Typography variant="h6" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                 <DirectionsCar color="primary" />
@@ -982,8 +1143,84 @@ const summary = [
           </Fade>
         </Grid>
 
+        {/* Real-time Trends Chart */}
         <Grid item xs={12} md={6}>
-          <Fade in={true} timeout={2400}>
+          <Fade in={true} timeout={3000}>
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 3, 
+              boxShadow: 4, 
+              height: 400,
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              border: '1px solid #e3f2fd'
+            }}>
+              <Typography variant="h6" fontWeight={700} sx={{ 
+                mb: 3, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 1,
+                color: '#1976d2'
+              }}>
+                <Timeline color="primary" />
+                Xu Hướng Thời Gian Thực
+              </Typography>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={dashboardData.timeSeriesData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                  <XAxis 
+                    dataKey="time" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <YAxis 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 12, fill: '#666' }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      borderRadius: 8, 
+                      border: '1px solid #e0e0e0',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      backgroundColor: '#ffffff'
+                    }}
+                    labelStyle={{ fontWeight: 600 }}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="detections" 
+                    stroke="#1976d2" 
+                    strokeWidth={3}
+                    name="Tổng phát hiện"
+                    dot={{ fill: '#1976d2', strokeWidth: 2, r: 4 }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="highConfidence" 
+                    stroke="#4caf50" 
+                    strokeWidth={2}
+                    name="Độ tin cậy cao"
+                    dot={{ fill: '#4caf50', strokeWidth: 2, r: 3 }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="whitelist" 
+                    stroke="#ff9800" 
+                    strokeWidth={2}
+                    name="WhiteList"
+                    dot={{ fill: '#ff9800', strokeWidth: 2, r: 3 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </Paper>
+          </Fade>
+        </Grid>
+
+        {/* Recent Detections */}
+        <Grid item xs={12} md={6}>
+          <Fade in={true} timeout={3200}>
             <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 4, height: 400 }}>
               <Typography variant="h6" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                 <EventNote color="primary" />
@@ -1073,89 +1310,6 @@ const summary = [
           </Grid>
         )}
 
-        {/* Additional Statistics */}
-        <Grid item xs={12} md={4}>
-          <Fade in={true} timeout={2800}>
-            <Paper sx={{ 
-              p: 3, 
-              borderRadius: 3, 
-              boxShadow: 4, 
-              height: 350,
-              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-              border: '1px solid #e3f2fd'
-            }}>
-              <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 3, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1,
-                color: '#1976d2'
-              }}>
-                <LocationOn color="primary" />
-                Thống Kê Theo Vị Trí
-              </Typography>
-              <Box sx={{ maxHeight: 280, overflow: 'auto', pr: 1 }}>
-                {dashboardData.locationStats.slice(0, 5).map((location, index) => (
-                  <Box key={location.name} sx={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    p: 2,
-                    mb: 1,
-                    borderRadius: 2,
-                    bgcolor: index % 2 === 0 ? '#f5f5f5' : 'transparent',
-                    transition: 'all 0.2s ease',
-                    '&:hover': {
-                      bgcolor: '#e3f2fd',
-                      transform: 'translateX(2px)'
-                    }
-                  }}>
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="body2" fontWeight={600} sx={{ 
-                        color: '#1976d2', 
-                        fontSize: '0.9rem',
-                        mb: 0.5,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {location.name}
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 2 }}>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
-                          {location.detections} phát hiện
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
-                          {location.cameras} camera
-                        </Typography>
-                      </Box>
-                    </Box>
-                    <Box sx={{ 
-                      textAlign: 'right', 
-                      minWidth: 60,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-end'
-                    }}>
-                      <Typography variant="h6" fontWeight={700} color="primary" sx={{ 
-                        fontSize: '1rem',
-                        lineHeight: 1
-                      }}>
-                        {location.efficiency}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ 
-                        fontSize: '0.75rem',
-                        lineHeight: 1
-                      }}>
-                        hiệu suất
-                      </Typography>
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            </Paper>
-          </Fade>
-        </Grid>
 
       </Grid>
     </Box>

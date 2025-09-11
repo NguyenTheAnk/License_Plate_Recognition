@@ -194,7 +194,7 @@ const ImagePreviewDialog = ({ open, onClose, src, title = "Xem ảnh" }) => (
         </IconButton>
       </Box>
     </DialogTitle>
-    <DialogContent sx={{ p: 2, textAlign: 'center' }}>
+    <DialogContent sx={{ p: 2, pt: 4, textAlign: 'center' }}>
       {src ? (
         <img 
           src={src} 
@@ -2698,7 +2698,7 @@ const handleFilterChange = (key, value) => {
             </Typography>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ p: 3, pt: 4 }}>
           <Typography variant="body1" sx={{ mb: 2, color: '#222' }}>
             Bạn có chắc chắn muốn xóa blacklist với biển số <strong>"{deleteDialog.plateName}"</strong>?
           </Typography>
