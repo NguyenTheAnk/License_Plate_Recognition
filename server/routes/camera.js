@@ -401,7 +401,7 @@ router.get('/:id/config',
                 SELECT 
                     c.*,
                     l.name as location_name,
-                    ml.name as monitoring_location_name,
+,
                     JSON_OBJECT(
                         'detection_enabled', true,
                         'recording_enabled', false,
@@ -415,7 +415,6 @@ router.get('/:id/config',
                     ) as config_data
                 FROM cameras c
                 JOIN locations l ON c.location_id = l.id
-                LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
                 WHERE c.id = ? AND c.is_active = 1
             `, [cameraId]);
 
@@ -471,10 +470,8 @@ router.get('/export/excel',
                     c.created_at,
                     l.name as location_name,
                     l.address as location_address,
-                    ml.name as monitoring_location_name
                 FROM cameras c
                 JOIN locations l ON c.location_id = l.id
-                LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
                 WHERE c.is_active = 1
                 ORDER BY c.id
             `);

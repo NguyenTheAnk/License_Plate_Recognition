@@ -130,10 +130,10 @@ router.post('/bulk/delete',
             for (const locationId of locationIds) {
                 const [dependencies] = await connection.execute(`
                     SELECT 
-                        (SELECT COUNT(*) FROM cameras WHERE location_id = ? OR monitoring_location_id = ?) as camera_count,
+                        (SELECT COUNT(*) FROM cameras WHERE location_id = ?) as camera_count,
                         (SELECT COUNT(*) FROM locations WHERE parent_location_id = ?) as child_count,
                         (SELECT COUNT(*) FROM license_plate_detections WHERE location_id = ?) as detection_count
-                `, [locationId, locationId, locationId, locationId]);
+                `, [locationId, locationId, locationId]);
 
                 const dep = dependencies[0];
                 if (dep.camera_count > 0 || dep.child_count > 0 || dep.detection_count > 0) {
