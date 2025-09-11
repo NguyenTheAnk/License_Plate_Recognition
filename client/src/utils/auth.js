@@ -80,6 +80,16 @@ export const fetchDataFromAPI = async (url, token = null, options = {}) => {
             headers['Authorization'] = `Bearer ${token}`;
         }
         
+        // Add Content-Type for POST/PUT requests
+        if (options.method && ['POST', 'PUT', 'PATCH'].includes(options.method.toUpperCase())) {
+            headers['Content-Type'] = 'application/json';
+        }
+        
+        // Merge custom headers from options
+        if (options.headers) {
+            Object.assign(headers, options.headers);
+        }
+        
         let fullUrl = `${API_BASE_URL}/${cleanUrl(url)}`;
         if (options.params) {
             fullUrl += buildQueryString(options.params);
@@ -87,17 +97,26 @@ export const fetchDataFromAPI = async (url, token = null, options = {}) => {
         
         console.log('Making request to:', fullUrl);
         console.log('Request headers:', headers);
+        console.log('Request method:', options.method || 'GET');
         
-        const response = await fetch(fullUrl, {
-            method: 'GET',
+        const fetchOptions = {
+            method: options.method || 'GET',
             headers
-        });
+        };
+        
+        // Add body for POST/PUT/PATCH requests
+        if (options.body && ['POST', 'PUT', 'PATCH'].includes(fetchOptions.method.toUpperCase())) {
+            fetchOptions.body = options.body;
+        }
+        
+        const response = await fetch(fullUrl, fetchOptions);
         
         console.log('Response status:', response.status);
         
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             console.error('API Error Response:', errorData);
+            console.error('Validation Errors Detail:', errorData.errors);
             
             const error = new Error(errorData.message || `HTTP error! status: ${response.status}`);
             error.status = response.status;
@@ -169,13 +188,13 @@ export const postData = async (url, requestData, token = null, isMultipart = fal
         // SỬA: Kiểm tra FormData hoặc isMultipart flag
         if (requestData instanceof FormData || isMultipart) {
             // KHÔNG set Content-Type cho FormData, browser sẽ tự động set với boundary
-            if (token && token.trim() !== '') {
+            if (token && typeof token === 'string' && token.trim() !== '') {
                 headers['Authorization'] = `Bearer ${token}`;
             }
             body = requestData;
         } else {
             headers['Content-Type'] = 'application/json';
-            if (token && token.trim() !== '') {
+            if (token && typeof token === 'string' && token.trim() !== '') {
                 headers['Authorization'] = `Bearer ${token}`;
             }
             body = JSON.stringify(requestData);
