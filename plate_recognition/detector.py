@@ -26,48 +26,89 @@ import hashlib
 ENHANCEMENT_AVAILABLE = True
 ENABLE_REALTIME_ENHANCEMENT = False  # Tắt enhancement để tăng tốc
 
-def refine_plate_crop(plate_img: np.ndarray) -> np.ndarray:
-    """Conservative enhancement optimized for OCR accuracy."""
+def crop_and_enhance_plate(frame, bbox, enhancement_level="light"):
+    """
+    Crop chỉ vùng biển số thực tế và enhance chất lượng ảnh.
+    
+    Args:
+        frame: Frame gốc
+        bbox: Bounding box [x1, y1, x2, y2] 
+        enhancement_level: "none", "light", "medium", "high"
+    
+    Returns:
+        Enhanced crop image chỉ chứa biển số
+    """
     try:
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-        img = plate_img.copy()
+        if frame is None or bbox is None or len(bbox) < 4:
+            return None
+            
+        x1, y1, x2, y2 = bbox[:4]
         
+        # Crop chỉ vùng biển số, KHÔNG có padding
+        crop = frame[y1:y2, x1:x2]
+        
+        if crop.size == 0:
+            return None
+            
         # Ensure BGR uint8
-        if len(img.shape) == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        elif len(img.shape) == 3 and img.shape[2] == 4:
-            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-        if img.dtype != np.uint8:
-            img = np.clip(img, 0, 255).astype(np.uint8)
+        if len(crop.shape) == 2:
+            crop = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
+        elif len(crop.shape) == 3 and crop.shape[2] == 4:
+            crop = cv2.cvtColor(crop, cv2.COLOR_RGBA2BGR)
+        if crop.dtype != np.uint8:
+            crop = np.clip(crop, 0, 255).astype(np.uint8)
 
-        h, w = img.shape[:2]
+        h, w = crop.shape[:2]
         
-        # Only enhance if image is very small
-        if h < 40 or w < 120:
-            # Conservative resize - only 1.5x upscale max
-            target_h = min(120, max(60, int(h * 1.5)))
-            scale = target_h / max(1, float(h))
-            new_w, new_h = int(round(w * scale)), int(round(h * scale))
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        # Apply enhancement based on level
+        if enhancement_level == "none":
+            return crop
+        elif enhancement_level == "light":
+            # Minimal enhancement - chỉ resize nếu quá nhỏ
+            if h < 30 or w < 80:
+                scale = max(30/h, 80/w, 1.2)
+                new_w, new_h = int(w * scale), int(h * scale)
+                crop = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            # Minimal padding
+            pad = 2
+            crop = cv2.copyMakeBorder(crop, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+        elif enhancement_level == "medium":
+            # Medium enhancement
+            if h < 40 or w < 120:
+                scale = max(40/h, 120/w, 1.5)
+                new_w, new_h = int(w * scale), int(h * scale)
+                crop = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+            # Contrast enhancement
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            enhanced = cv2.equalizeHist(gray)
+            crop = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+            # Padding
+            pad = 3
+            crop = cv2.copyMakeBorder(crop, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+        elif enhancement_level == "high":
+            # High enhancement - chỉ dùng khi cần thiết
+            if h < 50 or w < 150:
+                scale = max(50/h, 150/w, 2.0)
+                new_w, new_h = int(w * scale), int(h * scale)
+                crop = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+            # Advanced enhancement
+            try:
+                crop = cv2.fastNlMeansDenoisingColored(crop, None, 3, 3, 7, 21)
+            except:
+                pass
+            # CLAHE
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            enhanced = clahe.apply(gray)
+            crop = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+            # Padding
+            pad = 5
+            crop = cv2.copyMakeBorder(crop, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
         
-        # Very gentle contrast enhancement
-        try:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # Use histogram equalization instead of CLAHE for more natural results
-            equalized = cv2.equalizeHist(gray)
-            img = cv2.cvtColor(equalized, cv2.COLOR_GRAY2BGR)
-        except Exception:
-            pass
-        
-        # Minimal padding - just enough to avoid edge text
-        pad = 4
-        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-
-        return img
+        return crop
     except Exception as e:
-        logger.debug(f"refine_plate_crop error: {e}")
-        return plate_img
+        logger.error(f"crop_and_enhance_plate error: {e}")
+        return None
 
 def enhance_plate_crop_highres(plate_img: np.ndarray) -> np.ndarray:
     """Aggressively enhance and upscale plate crop to high-res, OCR-friendly image.
@@ -383,69 +424,7 @@ def save_debug_crop(original_crop, enhanced_crop, filename_prefix):
     except Exception as e:
         logger.warning(f"Failed to save debug crops: {e}")
 
-def ultra_light_enhancement(plate_img: np.ndarray) -> np.ndarray:
-    """Ultra-light enhancement - minimal processing for OCR accuracy."""
-    try:
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-        
-        img = plate_img.copy()
-        h, w = img.shape[:2]
-        
-        # Only resize if extremely small AND low quality
-        if h < 25 or w < 60:
-            # Very conservative resize - only 1.2x max
-            target_h = max(40, min(60, int(h * 1.2)))
-            scale = target_h / max(1, float(h))
-            new_w, new_h = int(round(w * scale)), int(round(h * scale))
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        
-        # Add minimal padding only if needed
-        pad = 2
-        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-        
-        return img
-    except Exception as e:
-        logger.debug(f"ultra_light_enhancement error: {e}")
-        return plate_img
 
-def smart_enhancement(plate_img: np.ndarray) -> np.ndarray:
-    """Smart enhancement - only enhance when absolutely necessary."""
-    try:
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-        
-        img = plate_img.copy()
-        h, w = img.shape[:2]
-        
-        # Calculate image quality
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
-        contrast = gray.std()
-        
-        # Only enhance if image is both small AND low quality
-        needs_enhancement = (h < 40 or w < 100) and (sharpness < 2000 or contrast < 40)
-        
-        if needs_enhancement:
-            # Very conservative enhancement
-            if h < 25 or w < 60:
-                target_h = max(40, min(60, int(h * 1.2)))
-                scale = target_h / max(1, float(h))
-                new_w, new_h = int(round(w * scale)), int(round(h * scale))
-                img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-            
-            # Minimal padding
-            pad = 2
-            img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-        else:
-            # For good quality images, just add minimal padding
-            pad = 2
-            img = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=[255, 255, 255])
-        
-        return img
-    except Exception as e:
-        logger.debug(f"smart_enhancement error: {e}")
-        return plate_img
 
 def enable_realtime_enhancement(enable=True):
     """Enable or disable real-time enhancement for performance tuning"""
@@ -500,36 +479,6 @@ def _get_cached_result(frame_hash):
     
     return None
 
-def _lightweight_enhancement(plate_img: np.ndarray) -> np.ndarray:
-    """Lightweight enhancement for better performance"""
-    try:
-        if plate_img is None or plate_img.size == 0:
-            return plate_img
-        
-        img = plate_img.copy()
-        h, w = img.shape[:2]
-        
-        # Only enhance if very small
-        if w < 100 or h < 30:
-            scale = max(100/w, 30/h, 1.5)
-            new_w, new_h = int(w * scale), int(h * scale)
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        
-        # Simple contrast enhancement
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        enhanced = cv2.equalizeHist(gray)
-        img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-        
-        # Minimal padding
-        pad = 3
-        img = cv2.copyMakeBorder(img, pad, pad, pad, pad, 
-                                cv2.BORDER_CONSTANT, value=[255, 255, 255])
-        
-        return img
-        
-    except Exception as e:
-        logger.error(f"Lightweight enhancement error: {e}")
-        return plate_img
 
 def is_redis_running():
     """Kiểm tra xem Redis có đang chạy không"""
@@ -723,21 +672,21 @@ ROI_PERCENT_YMIN = 0.15   # Bắt đầu từ 15% chiều cao (mở rộng lên 
 ROI_PERCENT_XMAX = 1.0    # Kết thúc ở 100% chiều rộng (toàn bộ chiều rộng)
 ROI_PERCENT_YMAX = 0.85   # Kết thúc ở 85% chiều cao (mở rộng xuống dưới)
 
-# Dynamic configuration optimized for 20 FPS
+# Dynamic configuration optimized for 20 FPS - LOWERED THRESHOLDS FOR FASTER DISPLAY
 if GPU_INFO['cuda_available']:
-    # GPU-optimized settings for 20 FPS
-    MIN_CONFIDENCE = 0.7      # Lower threshold for faster detection
-    MIN_OCR_CONFIDENCE = 0.8  # Lower threshold for faster detection
-    MIN_PLATE_LENGTH = 6      # Keep minimum length
+    # GPU-optimized settings for 20 FPS - LOWERED for faster display
+    MIN_CONFIDENCE = 0.5      # Much lower threshold for immediate display
+    MIN_OCR_CONFIDENCE = 0.6  # Much lower threshold for immediate display
+    MIN_PLATE_LENGTH = 5      # Reduced minimum length
     MAX_PLATE_LENGTH = 12
-    print("🎮 Using GPU-optimized settings for 20 FPS")
+    print("🎮 Using GPU-optimized settings for 20 FPS - FAST DISPLAY MODE")
 else:
-    # CPU-optimized settings for 20 FPS
-    MIN_CONFIDENCE = 0.75     # Lower threshold for faster detection
-    MIN_OCR_CONFIDENCE = 0.85 # Lower threshold for faster detection
-    MIN_PLATE_LENGTH = 6      # Keep minimum length
+    # CPU-optimized settings for 20 FPS - LOWERED for faster display
+    MIN_CONFIDENCE = 0.55     # Much lower threshold for immediate display
+    MIN_OCR_CONFIDENCE = 0.65 # Much lower threshold for immediate display
+    MIN_PLATE_LENGTH = 5      # Reduced minimum length
     MAX_PLATE_LENGTH = 12
-    print("💻 Using CPU-optimized settings for 20 FPS")
+    print("💻 Using CPU-optimized settings for 20 FPS - FAST DISPLAY MODE")
 
 # Vehicle classes to track (COCO: car=2, motorbike=3, bus=5, truck=7)
 VEHICLE_CLASSES = [2, 3, 5, 7]
@@ -763,13 +712,13 @@ ENABLE_THREADING = True
 ENABLE_CACHING = True   # Bật caching để tăng hiệu suất
 ENABLE_LIGHTWEIGHT_MODE = True
 ENABLE_FPS_THROTTLING = True  # Bật FPS throttling để ổn định
-TARGET_FPS = 30  # Mục tiêu FPS cao hơn
+TARGET_FPS = 20  # Mục tiêu FPS ổn định
 
 # Database throttling - OPTIMIZED FOR STABLE FPS
 last_db_send_time = 0
-db_send_interval = 0.1  # Tăng interval để giảm database calls
+db_send_interval = 0.05  # Giảm interval để responsive hơn
 last_detection_time = 0
-detection_cooldown = 0.02  # Cooldown giữa các detection để tránh spam (nhanh nhất)
+detection_cooldown = 0.05  # Giảm cooldown để responsive hơn
 last_alpr_call_time = 0  # Cooldown cho FastALPR calls
 
 # Khởi tạo Redis với auto-start
@@ -817,6 +766,20 @@ try:
     )
     
     logger.info("FastALPR initialized successfully")
+    
+    # Khởi tạo ByteTracker với tham số tối ưu cho hiển thị nhanh
+    try:
+        byte_tracker = BYTETracker(
+            track_thresh=0.1,   # Rất thấp để track ngay lập tức
+            track_buffer=15,    # Giảm buffer để track nhanh hơn
+            match_thresh=0.5,   # Rất thấp để match dễ hơn
+            frame_rate=30
+        )
+        logger.info("ByteTracker initialized successfully - FAST TRACKING MODE")
+    except Exception as e:
+        logger.error(f"Failed to initialize ByteTracker: {e}")
+        raise
+    
     logger.info(f"🚀 Performance optimizations enabled")
     logger.info(f"⚖️ Performance mode set to BALANCED")
     logger.info(f"🎮 GPU optimization level: {GPU_INFO['optimization_level']}")
@@ -832,11 +795,11 @@ except Exception as e:
     logger.warning("Running without FastALPR - detection will be disabled")
     alpr = None
 
-# Khởi tạo ByteTrack với tham số tối ưu cho phát hiện sớm (luôn khởi tạo)
+# Khởi tạo ByteTrack với tham số tối ưu cho phát hiện sớm (luôn khởi tạo) - FAST MODE
 tracker = BYTETracker(
-    track_thresh=0.2,  # Giảm threshold để track sớm hơn
-    track_buffer=50,   # Tăng buffer để duy trì track lâu hơn
-    match_thresh=0.7,  # Giảm match threshold
+    track_thresh=0.05, # Rất thấp để track ngay lập tức
+    track_buffer=10,   # Giảm buffer để track nhanh hơn
+    match_thresh=0.4,  # Rất thấp để match dễ hơn
     frame_rate=30
 )
 
@@ -855,7 +818,9 @@ plate_cooldown = 300  # 5 phút (300 giây)
 FRAMES_FOLDER = 'static/crops'
 os.makedirs(FRAMES_FOLDER, exist_ok=True)
 
-# Gửi dữ liệu biển số tới server Node.js - SIMPLIFIED VERSION
+# REMOVED: Vietnamese plate validation function - using original logic
+
+# Gửi dữ liệu biển số tới server Node.js - ORIGINAL VERSION
 def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
     try:
         current_time = time.time()
@@ -918,6 +883,7 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             "detection_confidence": detection_confidence,
             "bbox": plate_data['bbox'],
             "frame_path": frame_path or "",
+            "crop_image_path": frame_path or "",  # Add crop image path
             "detected_vehicle_type": "other",
             "source_type": source_type,
             "video_filename": video_filename,
@@ -1631,38 +1597,33 @@ def cleanup_tracked_objects():
                 vehicles_without_plates[track_id] = obj
                 continue
             
-            # STRICT: Chỉ giữ lại biển số có format chính xác
-            processed_plate = process_plate_text(plate_num)
-            if not processed_plate:
-                logger.info(f"🧹 Removing invalid format plate: '{plate_num}'")
-                continue
-            
-            # Group by processed plate number
-            if processed_plate not in plate_groups:
-                plate_groups[processed_plate] = []
-            plate_groups[processed_plate].append((track_id, obj, confidence, is_consistent))
+            # Keep plates with reasonable confidence
+            if plate_num and confidence > 0.5:  # Lower threshold
+                if plate_num not in plate_groups:
+                    plate_groups[plate_num] = []
+                plate_groups[plate_num].append((track_id, obj))
+            else:
+                # Remove low confidence plates
+                logger.info(f"🧹 Removing low confidence plate: '{plate_num}' (conf: {confidence:.3f})")
         
-        # For each plate number, prioritize consistent results
+        # Keep only the BEST object for each plate number
         valid_objects = {}
         duplicates_removed = 0
         
         for plate_num, group in plate_groups.items():
             if len(group) == 1:
                 # Only one result, keep it
-                track_id, obj, confidence, is_consistent = group[0]
+                track_id, obj = group[0]
                 valid_objects[track_id] = obj
             else:
-                # Multiple results - prioritize consistent ones
-                # Sort by consistency first, then by confidence
-                group.sort(key=lambda x: (not x[3], -x[2]))
-                best_track_id, best_obj, best_confidence, best_consistent = group[0]
-                
-                # Keep only the best
+                # Multiple results - find the best one (highest confidence, most recent)
+                best_track_id, best_obj = max(group, key=lambda x: (
+                    x[1].get('confidence', 0),
+                    x[1].get('last_seen', 0)
+                ))
                 valid_objects[best_track_id] = best_obj
-                logger.info(f"🎯 Kept BEST result for '{plate_num}': conf {best_confidence:.3f}, consistent: {best_consistent}")
-                
-                # Remove all others
                 duplicates_removed += len(group) - 1
+                logger.info(f"🎯 Kept BEST result for '{plate_num}': {best_track_id}")
         
         # Add back vehicles without plates
         valid_objects.update(vehicles_without_plates)
@@ -1671,10 +1632,10 @@ def cleanup_tracked_objects():
         tracked_objects = valid_objects
         new_count = len(tracked_objects)
         
-        logger.info(f"🧹 ENHANCED cleanup completed:")
+        logger.info(f"🧹 STRICT cleanup completed:")
         logger.info(f"   Total objects: {old_count} -> {new_count}")
         logger.info(f"   Duplicates removed: {duplicates_removed}")
-        logger.info(f"   Unique plates: {len(plate_groups)}")
+        logger.info(f"   Valid Vietnamese plates: {len(plate_groups)}")
         logger.info(f"   Vehicles without plates: {len(vehicles_without_plates)}")
         
     except Exception as e:
@@ -1732,19 +1693,43 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
         logger.error(f"Redis error: {str(e)}")
 
 def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
-    """Main detection function with enhanced plate detection and CENTERED ROI"""
+    """Main detection function with enhanced plate detection and CENTERED ROI - OPTIMIZED FOR 20 FPS"""
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
     global frame_count, tracked_objects, skip_frame_count, last_detection_time, last_alpr_call_time
     
     frame_count += 1
     
-    # Tính FPS
+    # Early return for invalid frames
+    if frame is None or frame.size == 0:
+        return {
+            'frame': b'',
+            'boxes': [],
+            'labels': [],
+            'ocr_results': [],
+            'tracked_objects': {},
+            'ids': [],
+            'frame_width': 0,
+            'frame_height': 0,
+            'roi': [0, 0, 0, 0],
+            'fps': 0,
+            'detection_count': 0,
+            'track_count': 0,
+            'skipped': True
+        }
+    
+    # Tính FPS với smoothing để giảm fluctuation
     current_time = time.time()
     fps_counter += 1
-    if current_time - last_fps_time >= 1.0:
-        current_fps = fps_counter / (current_time - last_fps_time)
+    if current_time - last_fps_time >= 1.0:  # Cập nhật FPS mỗi 1 giây để ổn định hơn
+        raw_fps = fps_counter / (current_time - last_fps_time)
+        # Smooth FPS calculation để giảm fluctuation
+        if current_fps == 0:
+            current_fps = raw_fps
+        else:
+            current_fps = 0.8 * current_fps + 0.2 * raw_fps  # Less aggressive smoothing
         fps_counter = 0
         last_fps_time = current_time
+        logger.info(f"📊 Current FPS: {current_fps:.1f} (raw: {raw_fps:.1f})")
     
     curr_time = time.time()
     original_height, original_width = frame.shape[:2]
@@ -1765,32 +1750,18 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # Kiểm tra motion trong ROI trước
     has_motion = has_motion_in_roi(frame, roi)
     
-    # OPTIMIZED: Minimal frame skipping for maximum FPS
+    # SIMPLIFIED: Minimal frame skipping for stable 20 FPS
     if ENABLE_FPS_THROTTLING:
-        # Throttle based on current FPS to maintain stability
-        if current_fps > TARGET_FPS * 1.3:  # Nếu FPS quá cao (>39)
-            if frame_count % 3 == 0:  # Skip every 3rd frame
-                should_skip = True
-        elif current_fps < TARGET_FPS * 0.9:  # Nếu FPS quá thấp (<27)
-            should_skip = False  # Process all frames
-        else:
-            # FPS ổn định, skip rất ít để tăng FPS
-            if not has_motion and len(tracked_objects) == 0:
-                if frame_count % 20 == 0:  # Skip every 20th frame (rất ít)
-                    should_skip = True
-            else:
-                # Khi có motion hoặc objects, skip rất ít
-                if frame_count % 25 == 0:  # Skip every 25th frame (rất ít)
-                    should_skip = True
-                else:
-                    should_skip = False
-    else:
-        # Fallback to original logic
+        # Simple throttling - only skip when no motion and no objects
         if not has_motion and len(tracked_objects) == 0:
-            if frame_count % 15 == 0:  # Skip every 15th frame
+            if frame_count % 4 == 0:  # Skip every 4th frame only
                 should_skip = True
         else:
+            # Never skip when there's motion or objects
             should_skip = False
+    else:
+        # No throttling
+        should_skip = False
     
     if should_skip:
         # Skip frame này nhưng vẫn vẽ ROI và text
@@ -1806,7 +1777,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
         
         return {
-            'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 20])[1].tobytes(),  # Giảm quality cho skip frames
+            'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 30])[1].tobytes(),  # Tăng quality cho skip frames
             'boxes': [],
             'labels': [],
             'ocr_results': [],
@@ -1873,32 +1844,31 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     # OPTIMIZED: Throttle FastALPR calls to prevent video pause
                     current_time = time.time()
                     
-                    # Chỉ gọi FastALPR nếu đã qua cooldown period
-                    if current_time - last_alpr_call_time >= 0.01:  # 10ms cooldown (nhanh nhất)
-                        # OPTIMIZED: Skip enhancement for better performance
-                        enhanced_frame = roi_frame_rgb
-                        # Disable enhancement to improve FPS stability
-                        # Enhancement is CPU/GPU intensive and causes FPS drops
-                        
-                        # OPTIMIZED: Gọi FastALPR trực tiếp (không resize để tránh lỗi)
-                        alpr_results = alpr.predict(enhanced_frame)
-                        
-                        # Convert to list if needed
-                        if hasattr(alpr_results, '__iter__') and not isinstance(alpr_results, str):
-                            alpr_results = list(alpr_results)
-                        else:
+                    # OPTIMIZED: FastALPR with minimal cooldown for 20 FPS
+                    if current_time - last_alpr_call_time >= 0.01:  # 10ms cooldown (50 FPS max)
+                        try:
+                            # OPTIMIZED: Gọi FastALPR trực tiếp (không enhancement)
+                            alpr_results = alpr.predict(roi_frame_rgb)
+                            
+                            # Convert to list if needed
+                            if hasattr(alpr_results, '__iter__') and not isinstance(alpr_results, str):
+                                alpr_results = list(alpr_results)
+                            else:
+                                alpr_results = []
+                            
+                            logger.debug(f"FastALPR detected {len(alpr_results)} objects")
+                            last_alpr_call_time = current_time
+                            
+                            # Cache result
+                            if ENABLE_CACHING:
+                                result = {
+                                    'alpr_results': alpr_results,
+                                    'roi_coords': (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
+                                }
+                                _cache_detection_result(frame_hash, result)
+                        except Exception as e:
+                            logger.error(f"FastALPR prediction error: {e}")
                             alpr_results = []
-                        
-                        logger.debug(f"FastALPR detected {len(alpr_results)} objects in enhanced ROI")
-                        last_alpr_call_time = current_time
-                        
-                        # Cache result
-                        if ENABLE_CACHING:
-                            result = {
-                                'alpr_results': alpr_results,
-                                'roi_coords': (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
-                            }
-                            _cache_detection_result(frame_hash, result)
                     else:
                         # Sử dụng kết quả cũ nếu chưa đến lúc gọi FastALPR
                         logger.debug(f"⏱️ FastALPR throttled - using previous results")
@@ -2000,22 +1970,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 # Tạo frame path
                 clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
                 frame_filename = f"plate_direct_{clean_plate_text}_{int(time.time())}.jpg"
-                frame_path = f"/static/crops/{frame_filename}"
+                frame_path = f"static/crops/{frame_filename}"
                 
-                # Lưu crop image
+                # Lưu crop image - CHỈ CROP BIỂN SỐ, KHÔNG CÓ PADDING
                 try:
-                    x1, y1, x2, y2 = detection['bbox']
-                    padding = 20  # Increased padding for better crop quality
-                    x1_crop = max(x1-padding, 0)
-                    y1_crop = max(y1-padding, 0)
-                    x2_crop = min(x2+padding, frame.shape[1])
-                    y2_crop = min(y2+padding, frame.shape[0])
-                    crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
+                    bbox = detection['bbox']
+                    crop = crop_and_enhance_plate(frame, bbox, enhancement_level="light")
                     
-                    if crop.size > 0:
-                        # OPTIMIZED: Skip enhancement for better FPS stability
-                        # Enhancement is CPU/GPU intensive and causes FPS drops
-                        
+                    if crop is not None and crop.size > 0:
                         crop_path = os.path.join(FRAMES_FOLDER, frame_filename)
                         success_save = cv2.imwrite(crop_path, crop)
                         if success_save:
@@ -2072,24 +2034,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     labels = []
     ocr_results = []
     
-    # Hiển thị tất cả tracked objects (kể cả khi không có detection mới)
-    for track_id, obj in tracked_objects.items():
-        if obj['disappeared'] < 10:  # Tăng thời gian hiển thị lên 10 frames
-            x1, y1, x2, y2 = obj['bbox']
-            plate_text = obj.get('plate_text', '')
-            
-            if plate_text and plate_text != "Đang nhận diện...":
-                # Draw bounding box
-                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
-                # Draw plate text - SIMPLIFIED DISPLAY
-                label = f"{plate_text}"
-                cv2.putText(display_frame, label, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                
-                boxes.append([x1, y1, x2, y2])
-                labels.append(plate_text)
-                ocr_results.append(plate_text)
+    # REMOVED: Duplicate display logic - using ByteTracker display only
     
     # Hiển thị detections mới (nếu có)
     for detection in plate_detections:
@@ -2110,10 +2055,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         ocr_conf = detection.get('ocr_conf', confidence)
         
         if processed_text and confidence > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
-            # Draw plate text - SIMPLIFIED DISPLAY
-            label = f"{processed_text}"
-            cv2.putText(display_frame, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            # Don't draw here - will be drawn in tracking section
             
             
             # Draw smaller plate bounding box (WHITE for processed plates)
@@ -2123,34 +2065,204 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             plate_x2 = min(x2 - plate_padding, original_width)
             plate_y2 = min(y2 - plate_padding, original_height)
             
-            cv2.rectangle(display_frame, (plate_x1, plate_y1), (plate_x2, plate_y2), (255, 255, 255), 2)
+            # Don't draw here - will be drawn in tracking section
             
             # Add to response arrays
             boxes.append([x1, y1, x2, y2])
             labels.append(f"Plate: {processed_text}")
             ocr_results.append([processed_text, confidence])
             
-            logger.info(f"✅ Displayed ENHANCED plate: '{processed_text}' at ({x1},{y1})-({x2},{y2})")
+            logger.info(f"✅ Processed plate: '{processed_text}' at ({x1},{y1})-({x2},{y2})")
         else:
-            # Show detection but mark as unprocessed (WHITE text)
-            no_text_label = "NO VALID TEXT"
-            cv2.putText(display_frame, no_text_label, (x1, y1 - 45),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # OPTIMIZED: Don't display invalid detections to reduce visual clutter
+            # Only show valid plate detections
+            logger.debug(f"⏭️ Skipping invalid detection: '{raw_text}' (conf: {confidence:.3f})")
+
+    # Gọi FastALPR trên toàn bộ frame nếu chưa có kết quả
+    if not alpr_results:
+        try:
+            roi_frame_rgb = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2RGB)
+            alpr_results = alpr.predict(roi_frame_rgb)
+            logger.info(f"🔍 FastALPR detected {len(alpr_results)} objects in ROI")
+        except Exception as e:
+            logger.error(f"FastALPR prediction failed: {e}")
+            alpr_results = []
+
+    # OPTIMIZED: Use ByteTracker for better object tracking
+    # Prepare detections for ByteTracker
+    detections = []
+    for res in alpr_results:
+        bbox = res.detection.bounding_box
+        x1 = max(int(bbox.x1) + roi_xmin, 0)
+        y1 = max(int(bbox.y1) + roi_ymin, 0)
+        x2 = min(int(bbox.x2) + roi_xmin, original_width)
+        y2 = min(int(bbox.y2) + roi_ymin, original_height)
+        conf = res.detection.confidence or 0.7
+        
+        if is_bbox_in_roi((x1, y1, x2, y2), (roi_xmin, roi_ymin, roi_xmax, roi_ymax)):
+            # ByteTracker expects [x1, y1, x2, y2, conf] format
+            detections.append([x1, y1, x2, y2, conf])
+
+    # Convert to numpy array for ByteTracker
+    if detections:
+        detections_np = np.array(detections, dtype=np.float32)
+        logger.info(f"🔍 Prepared {len(detections)} detections for ByteTracker")
+    else:
+        detections_np = np.zeros((0, 5), dtype=np.float32)
+        logger.info(f"🔍 No detections for ByteTracker")
+
+    # Update ByteTracker - use same format as test1.py
+    try:
+        if len(detections_np) > 0:
+            logger.info(f"🔍 ByteTracker input shape: {detections_np.shape}")
+            logger.info(f"🔍 ByteTracker input sample: {detections_np[0] if len(detections_np) > 0 else 'None'}")
             
-            det_conf_text = f"Det: {detection_conf:.3f}"
-            cv2.putText(display_frame, det_conf_text, (x1, y2 + 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            # Use same format as test1.py: [x1, y1, x2, y2, conf]
+            tracks = byte_tracker.update(
+                output_results=detections_np,
+                img_info=(original_height, original_width),
+                img_size=(original_height, original_width)
+            )
+            logger.info(f"🔍 ByteTracker output: {len(tracks)} tracks")
             
-            # Show raw text for debugging (WHITE text)
-            if raw_text:
-                raw_debug = f"Raw: {raw_text}"
-                cv2.putText(display_frame, raw_debug, (x1, y2 + 55),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            # If ByteTracker returns 0 tracks but we have detections, try with lower threshold
+            if len(tracks) == 0 and len(detections_np) > 0:
+                logger.warning("⚠️ ByteTracker returned 0 tracks, trying with lower confidence threshold")
+                # Create new tracker with lower threshold
+                temp_tracker = BYTETracker(
+                    track_thresh=0.1,  # Very low threshold
+                    track_buffer=30,
+                    match_thresh=0.5,
+                    frame_rate=30
+                )
+                tracks = temp_tracker.update(
+                    output_results=detections_np,
+                    img_info=(original_height, original_width),
+                    img_size=(original_height, original_width)
+                )
+                logger.info(f"🔍 ByteTracker retry output: {len(tracks)} tracks")
+        else:
+            tracks = []
+    except Exception as e:
+        logger.error(f"ByteTracker update failed: {e}")
+        logger.error(f"ByteTracker input was: {detections_np}")
+        tracks = []
+    
+    # Debug ByteTracker
+    if len(detections) > 0:
+        logger.info(f"🔍 ByteTracker input: {len(detections)} detections, output: {len(tracks)} tracks")
+        if len(tracks) == 0:
+            logger.warning(f"⚠️ ByteTracker received {len(detections)} detections but returned 0 tracks")
 
     # Process tracker results for vehicles
     current_track_ids = set()
     
-    logger.info(f"🔍 Tracker results: {len(tracks)} tracks found")
+    logger.info(f"🔍 ByteTracker results: {len(tracks)} tracks found")
+    
+    # REMOVED: Immediate tracking logic - using ByteTracker only
+    
+    # If no tracks but we have detections, find BEST detection only
+    if len(tracks) == 0 and len(detections) > 0:
+        logger.info(f"🔍 No tracks from ByteTracker, finding BEST detection only")
+        
+        # Find the BEST detection with highest confidence
+        best_detection = None
+        best_plate_text = ""
+        best_conf_val = 0
+        best_ocr_conf = 0
+        
+        for i, detection in enumerate(detections):
+            x1, y1, x2, y2, conf = detection
+            
+            # Find best OCR result for this detection
+            plate_text = ""
+            conf_val = 0
+            ocr_conf = 0
+            
+            for res in alpr_results:
+                bbox = res.detection.bounding_box
+                res_x1 = int(bbox.x1) + roi_xmin
+                res_y1 = int(bbox.y1) + roi_ymin
+                
+                if (abs(res_x1 - x1) < 30 and abs(res_y1 - y1) < 30 and 
+                    res.ocr and res.ocr.text):
+                    plate_text = res.ocr.text
+                    ocr_conf = res.ocr.confidence
+                    conf_val = mean(ocr_conf) if isinstance(ocr_conf, list) else ocr_conf
+                    break
+            
+            # Check if this is the best detection so far - LOWERED THRESHOLD
+            if (plate_text and conf_val > 0.4 and len(plate_text) >= 4 and 
+                conf_val > best_conf_val):
+                best_detection = detection
+                best_plate_text = plate_text
+                best_conf_val = conf_val
+                best_ocr_conf = conf_val
+        
+        # Process only the BEST detection
+        if best_detection and best_plate_text:
+            x1, y1, x2, y2, conf = best_detection
+            track_id = "1"  # Single ID for best detection
+            
+            processed_text = process_plate_text(best_plate_text)
+            if processed_text:
+                # Check if this plate was already sent recently
+                plate_key = f"direct_{processed_text}"
+                if plate_key in plate_history and time.time() - plate_history[plate_key] < 5.0:
+                    logger.info(f"⏭️ Direct plate '{processed_text}' đã được gửi gần đây, bỏ qua")
+                else:
+                    logger.info(f"🎯 BEST DIRECT DETECTION: '{processed_text}' (conf: {best_conf_val:.3f})")
+                    plate_history[plate_key] = time.time()  # Record when sent
+                
+                    # Find the actual plate bounding box from OCR results
+                    plate_x1, plate_y1, plate_x2, plate_y2 = x1, y1, x2, y2
+                    for res in alpr_results:
+                        bbox = res.detection.bounding_box
+                        res_x1 = int(bbox.x1) + roi_xmin
+                        res_y1 = int(bbox.y1) + roi_ymin
+                        res_x2 = int(bbox.x2) + roi_xmin
+                        res_y2 = int(bbox.y2) + roi_ymin
+                        
+                        if (abs(res_x1 - x1) < 30 and abs(res_y1 - y1) < 30 and 
+                            res.ocr and res.ocr.text and res.ocr.text == best_plate_text):
+                            plate_x1, plate_y1, plate_x2, plate_y2 = res_x1, res_y1, res_x2, res_y2
+                            break
+                    
+                    # Save crop directly - CHỈ CROP BIỂN SỐ, KHÔNG CÓ PADDING
+                    clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
+                    crop_filename = f"plate_direct_{clean_plate_text}_{int(curr_time)}.jpg"
+                
+                    # Crop chỉ vùng biển số thực tế
+                    bbox = [plate_x1, plate_y1, plate_x2, plate_y2]
+                    crop = crop_and_enhance_plate(frame, bbox, enhancement_level="medium")
+                    
+                    if crop.size > 0:
+                        crop_path = os.path.join(CROPS_FOLDER, crop_filename)
+                        success_save = cv2.imwrite(crop_path, crop)
+                        if success_save:
+                            logger.info(f"✅ Direct crop image saved: {crop_path}")
+                            
+                            # Send to database directly
+                            frame_path = f"static/crops/{crop_filename}"
+                            logger.info(f"🔗 Sending frame_path to database: {frame_path}")
+                            if ENABLE_THREADING:
+                                thread_pool.submit(
+                                    send_plate_to_server, track_id, {
+                                        'plate': processed_text,
+                                        'confidence': best_conf_val,
+                                        'bbox': [plate_x1, plate_y1, plate_x2, plate_y2],
+                                        'crop_image_path': frame_path
+                                    }, frame_path, camera_id, source_type, video_filename, camera_location
+                                )
+                                logger.info(f"🚀 Direct plate '{processed_text}' queued for database")
+                
+                # Display on frame - ONLY ONE TEXT
+                display_text = f"ID: {track_id} {processed_text}"
+                text_y = max(plate_y1 - 20, 20)
+                cv2.putText(display_frame, display_text, (plate_x1, text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                # Draw only the plate bounding box
+                cv2.rectangle(display_frame, (plate_x1, plate_y1), (plate_x2, plate_y2), (0, 255, 0), 2)
     
     for track in tracks:
         tlwh = track.tlwh
@@ -2158,56 +2270,39 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         x1, y1, w, h = map(int, tlwh)
         x2, y2 = x1 + w, y1 + h
         
-        # Check bbox size
-        if (x2 - x1) < 30 or (y2 - y1) < 15:
+        # Check bbox size and ROI
+        if (x2 - x1) < 30 or (y2 - y1) < 15 or not is_bbox_in_roi((x1, y1, x2, y2), (roi_xmin, roi_ymin, roi_xmax, roi_ymax)):
             continue
 
-        # Try to match track with plate detections
-        best_plate_match = None
-        best_overlap = 0
+        # Tìm kết quả OCR tốt nhất cho track này
+        best_plate_text = ""
+        best_conf_val = 0
+        best_ocr_conf = 0
         
-        for detection in plate_detections:
-            det_x1, det_y1, det_x2, det_y2 = detection['bbox']
+        for res in alpr_results:
+            bbox = res.detection.bounding_box
+            res_x1 = int(bbox.x1) + roi_xmin
+            res_y1 = int(bbox.y1) + roi_ymin
             
-            # Calculate overlap between track and detection
-            overlap_x1 = max(x1, det_x1)
-            overlap_y1 = max(y1, det_y1)
-            overlap_x2 = min(x2, det_x2)
-            overlap_y2 = min(y2, det_y2)
-            
-            if overlap_x1 < overlap_x2 and overlap_y1 < overlap_y2:
-                overlap_area = (overlap_x2 - overlap_x1) * (overlap_y2 - overlap_y1)
-                detection_area = (det_x2 - det_x1) * (det_y2 - det_y1)
-                overlap_ratio = overlap_area / detection_area if detection_area > 0 else 0
+            if (abs(res_x1 - x1) < 30 and abs(res_y1 - y1) < 30 and 
+                res.ocr and res.ocr.text):
+                plate_text = res.ocr.text
+                conf = res.ocr.confidence
+                conf_val = mean(conf) if isinstance(conf, list) else conf
                 
-                if overlap_ratio > best_overlap:
-                    best_overlap = overlap_ratio
-                    best_plate_match = detection
-
-        # Process plate text for this track - ENHANCED
-        plate_text = ""
-        conf_val = 0
+                # Chọn kết quả có confidence cao nhất
+                if conf_val > best_conf_val:
+                    best_plate_text = plate_text
+                    best_conf_val = conf_val
+                    best_ocr_conf = conf_val
         
-        if best_plate_match and best_overlap > 0.1:  # 10% overlap threshold
-            raw_text = best_plate_match['plate_text']
-            conf_val = best_plate_match['confidence']
-            
-            if raw_text and conf_val > MIN_CONFIDENCE:
-                processed_text = process_plate_text(raw_text)
-                if processed_text:
-                    plate_text = processed_text
-
-        # Filter plates - kiểm tra cả detection và OCR confidence
-        ocr_conf = best_plate_match.get('ocr_conf', conf_val) if 'best_plate_match' in locals() else conf_val
-        logger.info(f"🔍 Processing track {current_track_id}: plate='{plate_text}', det_conf={conf_val:.3f}, ocr_conf={ocr_conf:.3f}, MIN_CONFIDENCE={MIN_CONFIDENCE}, MIN_OCR_CONFIDENCE={MIN_OCR_CONFIDENCE}")
-        
-        if not plate_text or conf_val < MIN_CONFIDENCE or ocr_conf < MIN_OCR_CONFIDENCE:
-            plate_text = "Đang nhận diện..."
-            conf_val = 0.0
-            logger.info(f"⏭️ Skipping track {current_track_id} - invalid plate or low confidence (det: {conf_val:.3f}, ocr: {ocr_conf:.3f})")
+        # Lọc biển số - đơn giản hóa
+        if best_conf_val < 0.5 or len(best_plate_text) < 4:
+            best_plate_text = "Đang nhận diện..."
+            best_conf_val = 0.0
 
         # Find existing track_id for similar plates
-        existing_track_id = find_existing_track_id(plate_text) if plate_text != "Đang nhận diện..." else None
+        existing_track_id = find_existing_track_id(best_plate_text) if best_plate_text != "Đang nhận diện..." else None
         
         # Determine final track_id to use
         if existing_track_id and existing_track_id != current_track_id:
@@ -2217,30 +2312,31 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             final_track_id = current_track_id
         
         # Update plate to track_id mapping
-        if plate_text != "Đang nhận diện...":
-            if plate_text not in plate_to_track_id:
-                plate_to_track_id[plate_text] = []
-            if final_track_id not in plate_to_track_id[plate_text]:
-                plate_to_track_id[plate_text].append(final_track_id)
+        if best_plate_text != "Đang nhận diện...":
+            if best_plate_text not in plate_to_track_id:
+                plate_to_track_id[best_plate_text] = []
+            if final_track_id not in plate_to_track_id[best_plate_text]:
+                plate_to_track_id[best_plate_text].append(final_track_id)
         
-        # Update plate history
+        # Update plate history - chỉ lưu kết quả tốt nhất
         if final_track_id not in plate_history:
             plate_history[final_track_id] = []
         
-        if len(plate_history[final_track_id]) >= 5:
-            plate_history[final_track_id].pop(0)
-            
-        plate_history[final_track_id].append((plate_text, conf_val))
+        # Chỉ cập nhật nếu kết quả mới tốt hơn
+        if best_plate_text != "Đang nhận diện...":
+            if not plate_history[final_track_id] or best_conf_val > plate_history[final_track_id][-1][1]:
+                # Chỉ giữ 1 kết quả tốt nhất cho mỗi đối tượng
+                plate_history[final_track_id] = [(best_plate_text, best_conf_val)]
 
         # Update Redis immediately
-        if plate_text != "Đang nhận diện...":
+        if best_plate_text != "Đang nhận diện...":
             bbox_str = f"{x1},{y1},{x2},{y2}"
-            update_redis_plate(final_track_id, plate_text, conf_val, bbox_str)
+            update_redis_plate(final_track_id, best_plate_text, best_conf_val, bbox_str)
 
         # Update track_info
         track_info[final_track_id] = {
-            'plate': plate_text,
-            'confidence': conf_val,
+            'plate': best_plate_text,
+            'confidence': best_conf_val,
             'bbox': f"{x1},{y1},{x2},{y2}",
             'last_seen': curr_time
         }
@@ -2249,7 +2345,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         if final_track_id not in tracked_objects:
             logger.info(f"🆕 Creating NEW tracked object for track_id: {final_track_id}")
             # Process plate text for new object
-            processed_text = process_plate_text(plate_text) if plate_text != "Đang nhận diện..." else plate_text
+            processed_text = process_plate_text(best_plate_text) if best_plate_text != "Đang nhận diện..." else best_plate_text
             
             tracked_objects[final_track_id] = {
                 'track_id': final_track_id,
@@ -2275,7 +2371,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 # Tạo frame path
                 clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
                 frame_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
-                frame_path = f"/static/crops/{frame_filename}"
+                frame_path = f"static/crops/{frame_filename}"
                 
                 logger.info(f"📁 Frame path: {frame_path}")
                 logger.info(f"📹 Camera ID: {camera_id}")
@@ -2329,12 +2425,25 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     # Tạo frame path
                     clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
                     frame_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
-                    frame_path = f"/static/crops/{frame_filename}"
+                    frame_path = f"static/crops/{frame_filename}"  # Sửa đường dẫn
+                    
+                    # Tạo crop image trước khi gửi database - CHỈ CROP BIỂN SỐ
+                    bbox = [x1, y1, x2, y2]
+                    crop = crop_and_enhance_plate(frame, bbox, enhancement_level="light")
+                    
+                    if crop is not None and crop.size > 0:
+                        crop_path = os.path.join(CROPS_FOLDER, frame_filename)
+                        success_save = cv2.imwrite(crop_path, crop)
+                        if success_save:
+                            logger.info(f"✅ Crop image saved for database: {crop_path}")
+                        else:
+                            logger.warning(f"❌ Failed to save crop image: {crop_path}")
+                            frame_path = ""  # Clear path if save failed
                     
                     logger.info(f"📁 Frame path: {frame_path}")
                     logger.info(f"📹 Camera ID: {camera_id}")
                     
-                    # OPTIMIZED: Async database sending to prevent video pause
+                    # OPTIMIZED: Always async database sending to prevent video pause
                     if ENABLE_THREADING:
                         thread_pool.submit(
                             send_plate_to_server, final_track_id, {
@@ -2343,7 +2452,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                 'bbox': [x1, y1, x2, y2]
                             }, frame_path, camera_id, source_type, video_filename, camera_location
                         )
+                        logger.debug(f"🚀 NEW plate '{processed_text}' queued for database (async)")
                     else:
+                        # Fallback: sync sending
                         send_plate_to_server(final_track_id, {
                             'plate': processed_text,
                             'confidence': conf_val,
@@ -2356,45 +2467,62 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         
         current_track_ids.add(final_track_id)
 
-        # Draw vehicle bounding box (WHITE for tracked vehicles)
-        cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 255, 255), 3)
-        
-        # Vehicle label with track ID and plate (WHITE text)
-        vehicle_label = f"VEHICLE T{final_track_id}: {plate_text}"
-        cv2.putText(display_frame, vehicle_label, (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        # Confidence score (WHITE text)
-        if plate_text != "Đang nhận diện...":
-            conf_text = f"Conf: {conf_val:.3f}"
-            cv2.putText(display_frame, conf_text, (x1, y2 + 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # OPTIMIZED: Show tracking ID and plate text ABOVE the bounding box
+        if best_plate_text and best_plate_text != "Đang nhận diện...":
+            # Draw tracking ID and plate text ABOVE the bounding box (GREEN for valid plates)
+            display_text = f"ID: {final_track_id} {best_plate_text}"
+            text_y = max(y1 - 20, 20)  # Ensure text is above the bounding box
+            cv2.putText(display_frame, display_text, (x1, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            
+            # Draw plate bounding box (GREEN for valid plates)
+            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Add to display lists
+            boxes.append([x1, y1, x2, y2])
+            labels.append(best_plate_text)
+            ocr_results.append(best_plate_text)
+        else:
+            # Show only tracking ID for objects without valid plates
+            display_text = f"ID: {final_track_id}"
+            text_y = max(y1 - 20, 20)  # Ensure text is above the bounding box
+            cv2.putText(display_frame, display_text, (x1, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+            
+            # Draw vehicle bounding box (YELLOW for tracked objects)
+            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
-        # Save crop for every detection with valid plate
-        if plate_text and plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
+        # Save crop ONLY if this is the BEST result for this track - CROP ONLY THE PLATE
+        should_save = (best_plate_text and best_plate_text != "Đang nhận diện..." and 
+                      best_conf_val > MIN_CONFIDENCE and best_ocr_conf > MIN_OCR_CONFIDENCE)
+        
+        # Only save if this is better than previous result for this track
+        if should_save and final_track_id in tracked_objects:
+            prev_conf = tracked_objects[final_track_id].get('confidence', 0)
+            if best_conf_val <= prev_conf:
+                should_save = False  # Don't save if not better
+        
+        if should_save:
             # Tạo tên file với format: plate_{track_id}_{plate_text}_{timestamp}.jpg
-            clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text) if plate_text else f"unknown_{final_track_id}"
+            clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", best_plate_text) if best_plate_text else f"unknown_{final_track_id}"
             crop_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
-            padding = 20  # Increased padding for better crop quality
-            x1_crop = max(x1-padding, 0)
-            y1_crop = max(y1-padding, 0)
-            x2_crop = min(x2+padding, original_width)
-            y2_crop = min(y2+padding, original_height)
-            crop = display_frame[y1_crop:y2_crop, x1_crop:x2_crop]
-            if crop.size > 0:
-                # OPTIMIZED: Skip enhancement for better FPS stability
-                # Enhancement is CPU/GPU intensive and causes FPS drops
-                
+            
+            # Crop CHỈ vùng biển số thực tế - KHÔNG CÓ PADDING
+            bbox = [x1, y1, x2, y2]
+            crop = crop_and_enhance_plate(frame, bbox, enhancement_level="medium")
+            if crop is not None and crop.size > 0:
                 crop_path = os.path.join(CROPS_FOLDER, crop_filename)
                 success_save = cv2.imwrite(crop_path, crop)
                 if success_save:
-                    logger.info(f"✅ Crop image saved: {crop_path}")
+                    logger.info(f"✅ Plate crop saved: {crop_path}")
+                    
+                    # Update crop filename in tracked object
+                    if final_track_id in tracked_objects:
+                        tracked_objects[final_track_id]['crop_filename'] = crop_filename
+                        tracked_objects[final_track_id]['crop_path'] = crop_path
+                        tracked_objects[final_track_id]['sent_to_db'] = False  # Mark for database sending
                 else:
-                    logger.warning(f"❌ Failed to save crop image: {crop_path}")
-                
-                # Update crop filename in tracked object
-                if final_track_id in tracked_objects:
-                    tracked_objects[final_track_id]['crop_filename'] = crop_filename
+                    logger.warning(f"❌ Failed to save plate crop: {crop_path}")
 
     # OPTIMIZED: Less frequent cleanup to improve FPS stability
     if len(plate_history) > 100:  # Tăng từ 50 lên 100
@@ -2417,7 +2545,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     
                     # Create frame filename: plate_trackID_plate_number_timestamp.jpg
                     frame_filename = f"plate_{track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
-                    frame_path = f"/static/crops/{frame_filename}"
+                    frame_path = f"static/crops/{frame_filename}"
                     
                     # Save crop image
                     absolute_frame_path = os.path.join(FRAMES_FOLDER, frame_filename)
@@ -2428,18 +2556,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         bbox = [int(x) for x in bbox.split(',')]
                     
                     if len(bbox) >= 4:
-                        x1, y1, x2, y2 = bbox[:4]
-                        padding = 20  # Increased padding for better crop quality
-                        x1_crop = max(x1-padding, 0)
-                        y1_crop = max(y1-padding, 0)
-                        x2_crop = min(x2+padding, frame.shape[1])
-                        y2_crop = min(y2+padding, frame.shape[0])
-                        crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
+                        crop = crop_and_enhance_plate(frame, bbox, enhancement_level="light")
                         
-                        if crop.size > 0:
-                            # OPTIMIZED: Skip enhancement for better FPS stability
-                            # Enhancement is CPU/GPU intensive and causes FPS drops
-                            
+                        if crop is not None and crop.size > 0:
                             success = cv2.imwrite(absolute_frame_path, crop)
                             if success:
                                 logger.info(f"Crop image saved to {absolute_frame_path}")
@@ -2484,9 +2603,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     if frame_count % 50000000000000000000000 == 0:  # Giảm từ 20000000000000000000000 xuống 50000000000000000000000 frames
         cleanup_tracked_objects()
 
-    # OPTIMIZED: Reduce JPEG quality for better performance
+    # OPTIMIZED: Balanced JPEG quality for stable FPS
     result = {
-        'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 30])[1].tobytes(),  # Giảm từ 40 xuống 30
+        'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 40])[1].tobytes(),  # Tăng lên 40 để ổn định
         'boxes': boxes,
         'labels': labels,
         'ocr_results': ocr_results,
