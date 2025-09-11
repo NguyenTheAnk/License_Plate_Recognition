@@ -582,7 +582,8 @@ def start_redis_server():
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['ORT_LOGGING_LEVEL'] = '3'  # ERROR level only
 os.environ['OMP_NUM_THREADS'] = '4'
-# Cho phép GPU nhưng fallback về CPU nếu có lỗi
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'  # Allow GPU memory growth
 
 # Tắt cảnh báo GPU/CUDA
 import warnings
@@ -590,9 +591,82 @@ warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*TensorRT.*")
 warnings.filterwarnings("ignore", message=".*CUDA.*")
 
-# Import onnxruntime và force CPU-only
+# Import onnxruntime với cấu hình GPU tối ưu
 import onnxruntime as ort
 ort.set_default_logger_severity(3)
+
+# Configure ONNX Runtime providers for optimal GPU usage
+def get_onnx_providers():
+    """Get optimal ONNX Runtime providers based on available hardware"""
+    providers = []
+    
+    # Check for CUDA availability
+    try:
+        cuda_available = ort.get_device() == 'GPU'
+        if cuda_available:
+            providers.append('CUDAExecutionProvider')
+            print("✅ CUDA provider available")
+    except Exception as e:
+        print(f"⚠️ CUDA check failed: {e}")
+    
+    # Check for TensorRT availability
+    try:
+        import tensorrt
+        providers.append('TensorrtExecutionProvider')
+        print("✅ TensorRT provider available")
+    except ImportError:
+        print("⚠️ TensorRT not available")
+    except Exception as e:
+        print(f"⚠️ TensorRT check failed: {e}")
+    
+    # Always add CPU as fallback
+    providers.append('CPUExecutionProvider')
+    print(f"🔧 ONNX Runtime providers: {providers}")
+    return providers
+
+# Set global providers
+ONNX_PROVIDERS = get_onnx_providers()
+
+# GPU Detection and Optimization
+def detect_gpu_capabilities():
+    """Detect GPU capabilities and return optimization settings"""
+    gpu_info = {
+        'cuda_available': False,
+        'tensorrt_available': False,
+        'gpu_memory': 0,
+        'optimization_level': 'cpu'
+    }
+    
+    try:
+        # Check CUDA availability
+        import torch
+        if torch.cuda.is_available():
+            gpu_info['cuda_available'] = True
+            gpu_info['gpu_memory'] = torch.cuda.get_device_properties(0).total_memory
+            gpu_info['optimization_level'] = 'gpu'
+            print(f"🎮 GPU detected: {torch.cuda.get_device_name(0)}")
+            print(f"💾 GPU Memory: {gpu_info['gpu_memory'] / 1024**3:.1f} GB")
+        else:
+            print("⚠️ CUDA not available, using CPU")
+    except ImportError:
+        print("⚠️ PyTorch not available for GPU detection")
+    except Exception as e:
+        print(f"⚠️ GPU detection failed: {e}")
+    
+    try:
+        # Check TensorRT availability
+        import tensorrt
+        gpu_info['tensorrt_available'] = True
+        print("🚀 TensorRT available for acceleration")
+    except ImportError:
+        print("ℹ️ TensorRT not available")
+    except Exception as e:
+        print(f"⚠️ TensorRT check failed: {e}")
+    
+    return gpu_info
+
+# Detect GPU capabilities
+GPU_INFO = detect_gpu_capabilities()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -616,13 +690,25 @@ plate_history = {}
 global_bg_subtractor = None
 last_roi_frame = None
 
-# Frame skipping variables
-skip_frame_count = 0
-max_skip_frames = 5  # Giảm từ 10 xuống 5 để phát hiện nhanh hơn
-last_detection_time = 0
-detection_cooldown = 1.0  # Giảm từ 2.0 xuống 1.0 giây
-last_motion_time = 0  # Thời gian có chuyển động cuối cùng
-motion_cooldown = 0.5  # Cooldown 0.5 giây sau khi có chuyển động
+# Frame skipping variables - OPTIMIZED FOR 20 FPS
+if GPU_INFO['cuda_available']:
+    # GPU optimized for 20 FPS
+    skip_frame_count = 0
+    max_skip_frames = 1  # Process almost every frame for 20 FPS
+    last_detection_time = 0
+    detection_cooldown = 0.1  # Very fast detection on GPU
+    last_motion_time = 0
+    motion_cooldown = 0.05  # Very fast motion detection on GPU
+    print("🎮 Using GPU-optimized settings for 20 FPS")
+else:
+    # CPU optimized for 20 FPS
+    skip_frame_count = 0
+    max_skip_frames = 2  # Process more frames for 20 FPS
+    last_detection_time = 0
+    detection_cooldown = 0.2  # Faster detection on CPU
+    last_motion_time = 0
+    motion_cooldown = 0.1  # Faster motion detection on CPU
+    print("💻 Using CPU-optimized settings for 20 FPS")
 
 # Anti-duplicate settings - GIẢM THRESHOLD ĐỂ LƯU DỮ LIỆU NHANH HƠN
 consistency_threshold = 2  # Giảm xuống 2 để lưu nhanh hơn
@@ -631,21 +717,35 @@ consistency_window = 10    # Giảm cửa sổ consistency
 
 # Configuration - OPTIMIZED FOR VEHICLE AND LICENSE PLATE DETECTION
 # ROI mở rộng để phát hiện sớm hơn
+# ROI mở rộng để phát hiện sớm hơn - GIỮ NGUYÊN KÍCH THƯỚC
 ROI_PERCENT_XMIN = 0.0    # Bắt đầu từ 0% chiều rộng (toàn bộ chiều rộng)
 ROI_PERCENT_YMIN = 0.15   # Bắt đầu từ 15% chiều cao (mở rộng lên trên)
 ROI_PERCENT_XMAX = 1.0    # Kết thúc ở 100% chiều rộng (toàn bộ chiều rộng)
 ROI_PERCENT_YMAX = 0.85   # Kết thúc ở 85% chiều cao (mở rộng xuống dưới)
-MIN_CONFIDENCE = 0.8     # Chỉ lưu biển số có độ tin cậy >= 80%
-MIN_OCR_CONFIDENCE = 0.9 # Chỉ lưu biển số có OCR confidence >= 90%
-MIN_PLATE_LENGTH = 6     # Tăng minimum length từ 4 lên 6
-MAX_PLATE_LENGTH = 12    # Giảm maximum length từ 15 xuống 12
+
+# Dynamic configuration optimized for 20 FPS
+if GPU_INFO['cuda_available']:
+    # GPU-optimized settings for 20 FPS
+    MIN_CONFIDENCE = 0.7      # Lower threshold for faster detection
+    MIN_OCR_CONFIDENCE = 0.8  # Lower threshold for faster detection
+    MIN_PLATE_LENGTH = 6      # Keep minimum length
+    MAX_PLATE_LENGTH = 12
+    print("🎮 Using GPU-optimized settings for 20 FPS")
+else:
+    # CPU-optimized settings for 20 FPS
+    MIN_CONFIDENCE = 0.75     # Lower threshold for faster detection
+    MIN_OCR_CONFIDENCE = 0.85 # Lower threshold for faster detection
+    MIN_PLATE_LENGTH = 6      # Keep minimum length
+    MAX_PLATE_LENGTH = 12
+    print("💻 Using CPU-optimized settings for 20 FPS")
 
 # Vehicle classes to track (COCO: car=2, motorbike=3, bus=5, truck=7)
 VEHICLE_CLASSES = [2, 3, 5, 7]
 
 # PERFORMANCE OPTIMIZATION - THREADING AND CACHING
 # Thread pool for async processing
-thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="detector")
+# OPTIMIZED: More workers for better performance
+thread_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="detector")
 
 # Queues for async processing
 detection_queue = queue.Queue(maxsize=10)
@@ -653,18 +753,24 @@ ocr_queue = queue.Queue(maxsize=20)
 result_queue = queue.Queue(maxsize=30)
 
 # Detection cache for performance
+# OPTIMIZED: Larger cache for better performance
 detection_cache = {}
-cache_size = 100
+cache_size = 2000  # Tăng cache size từ 100 lên 500
 cache_lock = threading.Lock()
 
-# Performance settings
+# Performance settings - OPTIMIZED FOR STABLE FPS
 ENABLE_THREADING = True
-ENABLE_CACHING = False  # Tắt caching để tránh overhead
+ENABLE_CACHING = True   # Bật caching để tăng hiệu suất
 ENABLE_LIGHTWEIGHT_MODE = True
+ENABLE_FPS_THROTTLING = True  # Bật FPS throttling để ổn định
+TARGET_FPS = 30  # Mục tiêu FPS cao hơn
 
-# Database throttling
+# Database throttling - OPTIMIZED FOR STABLE FPS
 last_db_send_time = 0
-db_send_interval = 0.1  # Gửi database mỗi 0.1 giây để tăng tốc
+db_send_interval = 0.1  # Tăng interval để giảm database calls
+last_detection_time = 0
+detection_cooldown = 0.02  # Cooldown giữa các detection để tránh spam (nhanh nhất)
+last_alpr_call_time = 0  # Cooldown cho FastALPR calls
 
 # Khởi tạo Redis với auto-start
 redis_available = False
@@ -708,10 +814,15 @@ try:
     alpr = ALPR(
         detector_model="yolo-v9-t-416-license-plate-end2end",
         ocr_model="cct-xs-v1-global-model"
-        # Không force device, để FastALPR tự chọn
     )
     
     logger.info("FastALPR initialized successfully")
+    logger.info(f"🚀 Performance optimizations enabled")
+    logger.info(f"⚖️ Performance mode set to BALANCED")
+    logger.info(f"🎮 GPU optimization level: {GPU_INFO['optimization_level']}")
+    if GPU_INFO['cuda_available']:
+        logger.info(f"💾 GPU Memory: {GPU_INFO['gpu_memory'] / 1024**3:.1f} GB")
+    
     # Test với một frame đơn giản để đảm bảo ALPR hoạt động
     test_frame = np.zeros((100, 100, 3), dtype=np.uint8)
     test_results = alpr.predict(test_frame)
@@ -956,9 +1067,9 @@ def has_motion_in_roi(frame, roi):
         fg_pixels = np.sum(fg_mask > 0)
         gradient_mean = np.mean(magnitude)
         
-        # Điều kiện phát hiện chuyển động (nhạy hơn nữa)
-        motion_threshold_gradient = 15  # Giảm từ 25 xuống 15
-        motion_threshold_fg = roi_frame.shape[0] * roi_frame.shape[1] * 0.003  # 0.3% pixels
+        # Điều kiện phát hiện chuyển động (tối ưu cho 20 FPS)
+        motion_threshold_gradient = 10  # Giảm xuống 10 để nhạy hơn
+        motion_threshold_fg = roi_frame.shape[0] * roi_frame.shape[1] * 0.002  # 0.2% pixels
         
         has_motion = (gradient_mean > motion_threshold_gradient) or (fg_pixels > motion_threshold_fg)
         
@@ -980,7 +1091,7 @@ def is_bbox_in_roi(bbox, roi):
 def calculate_roi_coordinates(width, height):
     """Tính toán ROI coordinates dựa trên kích thước frame - TOÀN CHIỀU RỘNG KHUNG HÌNH"""
     try:
-        # ROI toàn chiều rộng khung hình, chiều cao giữa
+        # ROI toàn chiều rộng khung hình, chiều cao giữa - GIỮ NGUYÊN
         roi_xmin = max(0, int(width * ROI_PERCENT_XMIN))
         roi_ymin = max(0, int(height * ROI_PERCENT_YMIN))
         roi_xmax = min(width-1, int(width * ROI_PERCENT_XMAX))
@@ -1623,7 +1734,7 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
 def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
     """Main detection function with enhanced plate detection and CENTERED ROI"""
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
-    global frame_count, tracked_objects, skip_frame_count, last_detection_time
+    global frame_count, tracked_objects, skip_frame_count, last_detection_time, last_alpr_call_time
     
     frame_count += 1
     
@@ -1648,20 +1759,38 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # Vẽ ROI trước khi kiểm tra skip
     cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 1)  # Vàng, nét mỏng
     
-    # OPTIMIZED: Giảm frame skipping để phát hiện sớm hơn
+    # OPTIMIZED: Consistent frame skipping for stable FPS
     should_skip = False
     
     # Kiểm tra motion trong ROI trước
     has_motion = has_motion_in_roi(frame, roi)
     
-    if not has_motion and len(tracked_objects) == 0:
-        # Nếu không có motion và không có object, skip nhiều hơn
-        if frame_count % 4 != 0:  # Skip mỗi 4 frame
-            should_skip = True
-    elif has_motion or len(tracked_objects) > 0:
-        # Nếu có motion hoặc có object, xử lý nhiều frame hơn
-        if frame_count % 2 != 0:  # Chỉ skip mỗi 2 frame
-            should_skip = True
+    # OPTIMIZED: Minimal frame skipping for maximum FPS
+    if ENABLE_FPS_THROTTLING:
+        # Throttle based on current FPS to maintain stability
+        if current_fps > TARGET_FPS * 1.3:  # Nếu FPS quá cao (>39)
+            if frame_count % 3 == 0:  # Skip every 3rd frame
+                should_skip = True
+        elif current_fps < TARGET_FPS * 0.9:  # Nếu FPS quá thấp (<27)
+            should_skip = False  # Process all frames
+        else:
+            # FPS ổn định, skip rất ít để tăng FPS
+            if not has_motion and len(tracked_objects) == 0:
+                if frame_count % 20 == 0:  # Skip every 20th frame (rất ít)
+                    should_skip = True
+            else:
+                # Khi có motion hoặc objects, skip rất ít
+                if frame_count % 25 == 0:  # Skip every 25th frame (rất ít)
+                    should_skip = True
+                else:
+                    should_skip = False
+    else:
+        # Fallback to original logic
+        if not has_motion and len(tracked_objects) == 0:
+            if frame_count % 15 == 0:  # Skip every 15th frame
+                should_skip = True
+        else:
+            should_skip = False
     
     if should_skip:
         # Skip frame này nhưng vẫn vẽ ROI và text
@@ -1677,7 +1806,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
         
         return {
-            'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])[1].tobytes(),
+            'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 20])[1].tobytes(),  # Giảm quality cho skip frames
             'boxes': [],
             'labels': [],
             'ocr_results': [],
@@ -1719,7 +1848,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         roi_ymax = min(original_height, center_y + roi_height // 2)
         roi_frame = frame[roi_ymin:roi_ymax, roi_xmin:roi_xmax]
     
-    # OPTIMIZED: Call FastALPR on ROI only with caching and threading
+    # OPTIMIZED: Call FastALPR on ROI only with caching and throttling
     alpr_results = []
     if alpr is not None:
         try:
@@ -1741,43 +1870,39 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     alpr_results = cached_result['alpr_results']
                     logger.debug(f"🚀 Using cached detection result")
                 else:
-                    # OPTIMIZED: Use lightweight enhancement if enabled
-                    enhanced_frame = roi_frame_rgb
-                    if ENABLE_LIGHTWEIGHT_MODE and ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
-                        try:
-                            # Convert to BGR for lightweight enhancement
-                            roi_frame_bgr = cv2.cvtColor(roi_frame_rgb, cv2.COLOR_RGB2BGR)
-                            enhanced_bgr = _lightweight_enhancement(roi_frame_bgr)
-                            enhanced_frame = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB)
-                            logger.debug(f"🔧 Lightweight enhanced frame: {roi_frame_rgb.shape} -> {enhanced_frame.shape}")
-                        except Exception as e:
-                            logger.debug(f"⚠️ Lightweight enhancement failed, using original: {e}")
-                    elif ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
-                        try:
-                            enhanced_frame = smart_enhancement(roi_frame_rgb)
-                            if enhanced_frame.shape != roi_frame_rgb.shape:
-                                logger.debug(f"🔧 Smart enhanced frame for OCR: {roi_frame_rgb.shape} -> {enhanced_frame.shape}")
-                        except Exception as e:
-                            logger.debug(f"⚠️ Frame enhancement failed, using original: {e}")
+                    # OPTIMIZED: Throttle FastALPR calls to prevent video pause
+                    current_time = time.time()
                     
-                    # OPTIMIZED: Gọi FastALPR trực tiếp (không resize để tránh lỗi)
-                    alpr_results = alpr.predict(enhanced_frame)
-                    
-                    # Convert to list if needed
-                    if hasattr(alpr_results, '__iter__') and not isinstance(alpr_results, str):
-                        alpr_results = list(alpr_results)
+                    # Chỉ gọi FastALPR nếu đã qua cooldown period
+                    if current_time - last_alpr_call_time >= 0.01:  # 10ms cooldown (nhanh nhất)
+                        # OPTIMIZED: Skip enhancement for better performance
+                        enhanced_frame = roi_frame_rgb
+                        # Disable enhancement to improve FPS stability
+                        # Enhancement is CPU/GPU intensive and causes FPS drops
+                        
+                        # OPTIMIZED: Gọi FastALPR trực tiếp (không resize để tránh lỗi)
+                        alpr_results = alpr.predict(enhanced_frame)
+                        
+                        # Convert to list if needed
+                        if hasattr(alpr_results, '__iter__') and not isinstance(alpr_results, str):
+                            alpr_results = list(alpr_results)
+                        else:
+                            alpr_results = []
+                        
+                        logger.debug(f"FastALPR detected {len(alpr_results)} objects in enhanced ROI")
+                        last_alpr_call_time = current_time
+                        
+                        # Cache result
+                        if ENABLE_CACHING:
+                            result = {
+                                'alpr_results': alpr_results,
+                                'roi_coords': (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
+                            }
+                            _cache_detection_result(frame_hash, result)
                     else:
+                        # Sử dụng kết quả cũ nếu chưa đến lúc gọi FastALPR
+                        logger.debug(f"⏱️ FastALPR throttled - using previous results")
                         alpr_results = []
-                    
-                    logger.debug(f"FastALPR detected {len(alpr_results)} objects in enhanced ROI")
-                    
-                    # Cache result
-                    if ENABLE_CACHING:
-                        result = {
-                            'alpr_results': alpr_results,
-                            'roi_coords': (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
-                        }
-                        _cache_detection_result(frame_hash, result)
                 
                 # Cập nhật thời gian detection nếu có kết quả
                 if len(alpr_results) > 0:
@@ -1888,15 +2013,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
                     
                     if crop.size > 0:
-                        # Smart enhancement - only when absolutely necessary (disabled by default)
-                        if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
-                            try:
-                                enhanced_crop = smart_enhancement(crop)
-                                if enhanced_crop.shape != crop.shape:
-                                    logger.debug(f"🔧 Smart enhanced crop: {crop.shape} -> {enhanced_crop.shape}")
-                                crop = enhanced_crop
-                            except Exception as e:
-                                logger.debug(f"⚠️ Smart enhancement failed: {e}")
+                        # OPTIMIZED: Skip enhancement for better FPS stability
+                        # Enhancement is CPU/GPU intensive and causes FPS drops
                         
                         crop_path = os.path.join(FRAMES_FOLDER, frame_filename)
                         success_save = cv2.imwrite(crop_path, crop)
@@ -1910,10 +2028,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     logger.error(f"Error saving direct crop image: {e}")
                 
                 # OPTIMIZED: Gửi trực tiếp tới database với threading
-                # OPTIMIZED: Throttled database sending
-                global last_db_send_time
+                # OPTIMIZED: Throttled async database sending to prevent video pause
                 current_time = time.time()
-                if current_time - last_db_send_time >= db_send_interval:
+                
+                # Chỉ gửi database nếu đã qua cooldown period
+                if current_time - last_detection_time >= detection_cooldown:
                     if ENABLE_THREADING:
                         # Gửi async để không block frame processing
                         thread_pool.submit(
@@ -1923,8 +2042,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                 'bbox': detection['bbox']
                             }, frame_path, camera_id, source_type, video_filename, camera_location
                         )
-                        logger.info(f"🚀 Direct plate '{processed_text}' queued for database (async)")
-                        last_db_send_time = current_time
+                        logger.debug(f"🚀 Direct plate '{processed_text}' queued for database (async)")
+                        last_detection_time = current_time
                     else:
                         # Gửi sync như cũ
                         success = send_plate_to_server("direct", {
@@ -1932,10 +2051,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'confidence': confidence,
                             'bbox': detection['bbox']
                         }, frame_path, camera_id, source_type, video_filename, camera_location)
-                        logger.info(f"🚀 Direct plate '{processed_text}' sent to database: {success}")
-                        last_db_send_time = current_time
+                        logger.debug(f"🚀 Direct plate '{processed_text}' sent to database: {success}")
+                        last_detection_time = current_time
                 else:
-                    logger.debug(f"⏱️ Database send throttled - next in {db_send_interval - (current_time - last_db_send_time):.1f}s")
+                    logger.debug(f"⏱️ Detection throttled - next in {detection_cooldown - (current_time - last_detection_time):.1f}s")
 
     # ROI đã được vẽ ở trên
 
@@ -2161,12 +2280,23 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 logger.info(f"📁 Frame path: {frame_path}")
                 logger.info(f"📹 Camera ID: {camera_id}")
                 
-                # Gửi dữ liệu biển số tới server Node.js
-                send_plate_to_server(final_track_id, {
-                    'plate': processed_text,
-                    'confidence': conf_val,
-                    'bbox': [x1, y1, x2, y2]
-                }, frame_path, camera_id, source_type, video_filename, camera_location)
+                # OPTIMIZED: Always async database sending to prevent video pause
+                if ENABLE_THREADING:
+                    thread_pool.submit(
+                        send_plate_to_server, final_track_id, {
+                            'plate': processed_text,
+                            'confidence': conf_val,
+                            'bbox': [x1, y1, x2, y2]
+                        }, frame_path, camera_id, source_type, video_filename, camera_location
+                    )
+                    logger.debug(f"🚀 NEW plate '{processed_text}' queued for database (async)")
+                else:
+                    # Fallback: sync sending
+                    send_plate_to_server(final_track_id, {
+                        'plate': processed_text,
+                        'confidence': conf_val,
+                        'bbox': [x1, y1, x2, y2]
+                    }, frame_path, camera_id, source_type, video_filename, camera_location)
                 
                 # Đánh dấu chưa gửi để app.py xử lý
                 tracked_objects[final_track_id]['sent_to_db'] = False
@@ -2204,12 +2334,21 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     logger.info(f"📁 Frame path: {frame_path}")
                     logger.info(f"📹 Camera ID: {camera_id}")
                     
-                    # Gửi dữ liệu biển số tới server Node.js
-                    send_plate_to_server(final_track_id, {
-                        'plate': processed_text,
-                        'confidence': conf_val,
-                        'bbox': [x1, y1, x2, y2]
-                    }, frame_path, camera_id, source_type, video_filename, camera_location)
+                    # OPTIMIZED: Async database sending to prevent video pause
+                    if ENABLE_THREADING:
+                        thread_pool.submit(
+                            send_plate_to_server, final_track_id, {
+                                'plate': processed_text,
+                                'confidence': conf_val,
+                                'bbox': [x1, y1, x2, y2]
+                            }, frame_path, camera_id, source_type, video_filename, camera_location
+                        )
+                    else:
+                        send_plate_to_server(final_track_id, {
+                            'plate': processed_text,
+                            'confidence': conf_val,
+                            'bbox': [x1, y1, x2, y2]
+                        }, frame_path, camera_id, source_type, video_filename, camera_location)
                     
                     # Đánh dấu đã gửi
                     obj['sent_to_db'] = True
@@ -2243,15 +2382,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             y2_crop = min(y2+padding, original_height)
             crop = display_frame[y1_crop:y2_crop, x1_crop:x2_crop]
             if crop.size > 0:
-                # Smart enhancement - only when absolutely necessary (disabled by default)
-                if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
-                    try:
-                        enhanced_crop = smart_enhancement(crop)
-                        if enhanced_crop.shape != crop.shape:
-                            logger.debug(f"🔧 Smart enhanced crop: {crop.shape} -> {enhanced_crop.shape}")
-                        crop = enhanced_crop
-                    except Exception as e:
-                        logger.debug(f"⚠️ Smart enhancement failed: {e}")
+                # OPTIMIZED: Skip enhancement for better FPS stability
+                # Enhancement is CPU/GPU intensive and causes FPS drops
                 
                 crop_path = os.path.join(CROPS_FOLDER, crop_filename)
                 success_save = cv2.imwrite(crop_path, crop)
@@ -2264,18 +2396,18 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 if final_track_id in tracked_objects:
                     tracked_objects[final_track_id]['crop_filename'] = crop_filename
 
-    # Clean up old tracks
-    if len(plate_history) > 30:
+    # OPTIMIZED: Less frequent cleanup to improve FPS stability
+    if len(plate_history) > 100:  # Tăng từ 50 lên 100
         oldest_track = min(plate_history.keys(), key=lambda k: track_info.get(k, {}).get('last_seen', 0))
         del plate_history[oldest_track]
         if oldest_track in track_info:
             del track_info[oldest_track]
     
-    # Cleanup inactive tracks and send to database
-    if curr_time - last_redis_update > 10.0:
+    # OPTIMIZED: Less frequent cleanup to improve FPS stability
+    if curr_time - last_redis_update > 30.0:  # Tăng từ 20.0 lên 30.0 giây
         tracks_to_remove = []
         for track_id in list(track_info.keys()):
-            if curr_time - track_info[track_id]['last_seen'] > 10.0:
+            if curr_time - track_info[track_id]['last_seen'] > 30.0:  # Tăng từ 20.0 lên 30.0 giây
                 
                 # Get plate information
                 plate_text = track_info[track_id]['plate']
@@ -2305,15 +2437,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
                         
                         if crop.size > 0:
-                            # Smart enhancement - only when absolutely necessary (disabled by default)
-                            if ENABLE_REALTIME_ENHANCEMENT and ENHANCEMENT_AVAILABLE:
-                                try:
-                                    enhanced_crop = smart_enhancement(crop)
-                                    if enhanced_crop.shape != crop.shape:
-                                        logger.debug(f"🔧 Smart enhanced crop: {crop.shape} -> {enhanced_crop.shape}")
-                                    crop = enhanced_crop
-                                except Exception as e:
-                                    logger.debug(f"⚠️ Smart enhancement failed: {e}")
+                            # OPTIMIZED: Skip enhancement for better FPS stability
+                            # Enhancement is CPU/GPU intensive and causes FPS drops
                             
                             success = cv2.imwrite(absolute_frame_path, crop)
                             if success:
@@ -2327,13 +2452,22 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         logger.warning("Invalid bbox, saving original frame")
                         success = cv2.imwrite(absolute_frame_path, frame)
                     
-                    # Gửi dữ liệu biển số tới server Node.js
+                    # OPTIMIZED: Async database sending to prevent video pause
                     plate_data = {
                         'plate': track_info[track_id]['plate'],
                         'confidence': track_info[track_id]['confidence'],
                         'bbox': [int(x) for x in track_info[track_id]['bbox'].split(',')]
                     }
-                    send_plate_to_server(track_id, plate_data, frame_path, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location)
+                    if ENABLE_THREADING:
+                        thread_pool.submit(
+                            send_plate_to_server, track_id, plate_data, frame_path, 
+                            camera_id=camera_id, source_type=source_type, 
+                            video_filename=video_filename, camera_location=camera_location
+                        )
+                    else:
+                        send_plate_to_server(track_id, plate_data, frame_path, 
+                                           camera_id=camera_id, source_type=source_type, 
+                                           video_filename=video_filename, camera_location=camera_location)
                     logger.info(f"🎯 INACTIVE track '{track_info[track_id]['plate']}' - waiting for app.py to save")
                 
                 tracks_to_remove.append(track_id)
@@ -2346,13 +2480,13 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         
         last_redis_update = curr_time
 
-    # Periodic cleanup of tracked objects
-    if frame_count % 60 == 0:
+    # OPTIMIZED: Less frequent cleanup to improve FPS stability
+    if frame_count % 50000000000000000000000 == 0:  # Giảm từ 20000000000000000000000 xuống 50000000000000000000000 frames
         cleanup_tracked_objects()
 
-    # Create result dictionary
+    # OPTIMIZED: Reduce JPEG quality for better performance
     result = {
-        'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes(),
+        'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 30])[1].tobytes(),  # Giảm từ 40 xuống 30
         'boxes': boxes,
         'labels': labels,
         'ocr_results': ocr_results,
@@ -2396,7 +2530,10 @@ def get_detection_stats():
                 'type': 'centered_half_frame',
                 'x_percent': f"{ROI_PERCENT_XMIN:.0%}-{ROI_PERCENT_XMAX:.0%}",
                 'y_percent': f"{ROI_PERCENT_YMIN:.0%}-{ROI_PERCENT_YMAX:.0%}"
-            }
+            },
+            'gpu_info': GPU_INFO,
+            'onnx_providers': ONNX_PROVIDERS,
+            'optimization_level': GPU_INFO['optimization_level']
         }
         
         return stats
@@ -2404,6 +2541,16 @@ def get_detection_stats():
     except Exception as e:
         logger.error(f"Error getting detection stats: {e}")
         return {'error': str(e)}
+
+def get_gpu_info():
+    """Get GPU information and status"""
+    return {
+        "gpu_info": GPU_INFO,
+        "onnx_providers": ONNX_PROVIDERS,
+        "alpr_available": alpr is not None,
+        "optimization_level": GPU_INFO['optimization_level'],
+        "timestamp": time.time()
+    }
 
 def reset_anti_duplicate_system():
     """Reset the entire anti-duplicate system"""

@@ -3,12 +3,85 @@ import os
 os.environ['OMP_NUM_THREADS'] = '4'
 os.environ['ORT_LOGGING_LEVEL'] = '3'  # Suppress ONNX Runtime warnings
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
-# Cho phép GPU nhưng fallback về CPU nếu có lỗi
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'  # Allow GPU memory growth
 
 # Thiết lập ONNX Runtime providers trước khi import bất kỳ thư viện nào khác
 import onnxruntime as ort
-# Force CPU-only execution
 ort.set_default_logger_severity(3)
+
+# Configure ONNX Runtime providers for optimal GPU usage
+def get_onnx_providers():
+    """Get optimal ONNX Runtime providers based on available hardware"""
+    providers = []
+    
+    # Check for CUDA availability
+    try:
+        cuda_available = ort.get_device() == 'GPU'
+        if cuda_available:
+            providers.append('CUDAExecutionProvider')
+            print("✅ CUDA provider available")
+    except Exception as e:
+        print(f"⚠️ CUDA check failed: {e}")
+    
+    # Check for TensorRT availability
+    try:
+        import tensorrt
+        providers.append('TensorrtExecutionProvider')
+        print("✅ TensorRT provider available")
+    except ImportError:
+        print("⚠️ TensorRT not available")
+    except Exception as e:
+        print(f"⚠️ TensorRT check failed: {e}")
+    
+    # Always add CPU as fallback
+    providers.append('CPUExecutionProvider')
+    print(f"🔧 ONNX Runtime providers: {providers}")
+    return providers
+
+# Set global providers
+ONNX_PROVIDERS = get_onnx_providers()
+
+# GPU Detection and Optimization
+def detect_gpu_capabilities():
+    """Detect GPU capabilities and return optimization settings"""
+    gpu_info = {
+        'cuda_available': False,
+        'tensorrt_available': False,
+        'gpu_memory': 0,
+        'optimization_level': 'cpu'
+    }
+    
+    try:
+        # Check CUDA availability
+        import torch
+        if torch.cuda.is_available():
+            gpu_info['cuda_available'] = True
+            gpu_info['gpu_memory'] = torch.cuda.get_device_properties(0).total_memory
+            gpu_info['optimization_level'] = 'gpu'
+            print(f"🎮 GPU detected: {torch.cuda.get_device_name(0)}")
+            print(f"💾 GPU Memory: {gpu_info['gpu_memory'] / 1024**3:.1f} GB")
+        else:
+            print("⚠️ CUDA not available, using CPU")
+    except ImportError:
+        print("⚠️ PyTorch not available for GPU detection")
+    except Exception as e:
+        print(f"⚠️ GPU detection failed: {e}")
+    
+    try:
+        # Check TensorRT availability
+        import tensorrt
+        gpu_info['tensorrt_available'] = True
+        print("🚀 TensorRT available for acceleration")
+    except ImportError:
+        print("ℹ️ TensorRT not available")
+    except Exception as e:
+        print(f"⚠️ TensorRT check failed: {e}")
+    
+    return gpu_info
+
+# Detect GPU capabilities
+GPU_INFO = detect_gpu_capabilities()
 
 from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_sock import Sock
@@ -437,6 +510,15 @@ def health_check():
         "status": "healthy",
         "timestamp": time.time(),
         "service": "license-plate-recognition"
+    })
+
+@app.route('/gpu-status', methods=['GET'])
+def gpu_status():
+    """GPU status and capabilities endpoint"""
+    return jsonify({
+        "gpu_info": GPU_INFO,
+        "onnx_providers": ONNX_PROVIDERS,
+        "timestamp": time.time()
     })
 
 @app.route('/test-detection', methods=['GET'])
@@ -943,6 +1025,16 @@ if __name__ == "__main__":
     # Enable performance optimizations
     enable_performance_optimizations(True)
     set_performance_mode('balanced')
+    
+    # Display GPU information
+    logger.info("=" * 50)
+    logger.info("🚀 LICENSE PLATE RECOGNITION SYSTEM")
+    logger.info("=" * 50)
+    logger.info(f"🎮 GPU Status: {GPU_INFO['optimization_level'].upper()}")
+    if GPU_INFO['cuda_available']:
+        logger.info(f"💾 GPU Memory: {GPU_INFO['gpu_memory'] / 1024**3:.1f} GB")
+    logger.info(f"🔧 ONNX Providers: {', '.join(ONNX_PROVIDERS)}")
+    logger.info("=" * 50)
     
     logger.info("Khởi động server trên http://0.0.0.0:5002...")
     app.run(host='0.0.0.0', port=5002, debug=False, threaded=True)
