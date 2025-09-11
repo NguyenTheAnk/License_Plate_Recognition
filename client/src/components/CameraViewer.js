@@ -233,10 +233,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         forcePlayVideo();
       }
       
-      // Retry after a short delay
-      if (isRecognizing) {
-        sendFrameTimeoutRef.current = setTimeout(sendFrames, 200); // Tăng delay
-      }
+      // Don't retry here - let the main timeout handle it
       return;
     }
     
@@ -282,8 +279,8 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
     }
 
     if (isRecognizing) {
-      // Tăng interval giữa các frame để giảm tải
-      sendFrameTimeoutRef.current = setTimeout(sendFrames, 33); // Tăng lên 30 FPS (1000/30 = 33ms)
+      // Tối ưu FPS - đặt chính xác 20 FPS
+      sendFrameTimeoutRef.current = setTimeout(sendFrames, 15); // 200 FPS (1000/15 = 66ms)
     }
   }, [isRecognizing, forcePlayVideo]);
 
@@ -314,9 +311,16 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
     }
   };
 
-  // Fetch database results khi component mount (một lần)
+  // Fetch database results khi component mount và định kỳ
   useEffect(() => {
     fetchDatabaseResults();
+    
+    // Fetch database results mỗi 2 giây để cập nhật realtime
+    const interval = setInterval(() => {
+      fetchDatabaseResults();
+    }, 2000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   // WebSocket connection effect
