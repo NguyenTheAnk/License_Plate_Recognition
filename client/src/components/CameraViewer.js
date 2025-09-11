@@ -5,7 +5,7 @@ import "./hideVideoControls.css";
 import { fetchDataFromAPI } from "../utils/auth";
 
 
-const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRecognizing }) => {
+const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRecognizing, recordingTimer }) => {
   console.log('CameraViewer props:', { camera, externalIsRecognizing });
   const videoRef = useRef(null);
   // const imgRef = useRef(null); // overlay removed
@@ -23,9 +23,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   const wsRef = useRef(null);
   const wsRetryCount = useRef(0);
   const maxWsRetries = 5; // Tăng số lần retry
-  const [fps, setFps] = useState(0);
-  const frameCountRef = useRef(0);
-  const lastTimeRef = useRef(0);
   const [isProcessing, setIsProcessing] = useState(false);
   // const [isUploadedVideo, setIsUploadedVideo] = useState(false);
   const sendFrameTimeoutRef = useRef(null);
@@ -483,14 +480,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         img.src = imageUrl;
       }
       
-      // Update FPS counter
-      const currentTime = performance.now();
-      frameCountRef.current += 1;
-      if (currentTime - lastTimeRef.current >= 1000) {
-        setFps(frameCountRef.current);
-        frameCountRef.current = 0;
-        lastTimeRef.current = currentTime;
-      }
+      // FPS counter removed - no longer needed
       
     } catch (error) {
       console.error('Error processing frame blob:', error);
@@ -842,6 +832,30 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
   console.log('CameraViewer render - frameData:', frameData, 'loading:', loading, 'isRecognizing:', isRecognizing, 'videoReady:', videoReady);
   
+  // Ẩn số 0 có thể xuất hiện
+  useEffect(() => {
+    const hideZeroElements = () => {
+      // Tìm và ẩn mọi element chứa số 0 ở góc dưới trái
+      const allElements = document.querySelectorAll('*');
+      allElements.forEach(element => {
+        if (element.textContent === '0' && 
+            element.style.position === 'absolute' && 
+            element.style.bottom === '0px' && 
+            element.style.left === '0px') {
+          element.style.display = 'none';
+        }
+      });
+    };
+    
+    // Chạy ngay lập tức
+    hideZeroElements();
+    
+    // Chạy lại sau mỗi 100ms để đảm bảo
+    const interval = setInterval(hideZeroElements, 100);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
   return (
     <div
       style={{
@@ -853,8 +867,50 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         minHeight: "300px",
       }}
     >
+      <style jsx>{`
+        /* Ẩn mọi text overlay trên video - chỉ trong video container */
+        .video-container video::-webkit-media-controls {
+          display: none !important;
+        }
+        .video-container video::-webkit-media-controls-enclosure {
+          display: none !important;
+        }
+        .video-container video::-webkit-media-controls-panel {
+          display: none !important;
+        }
+        .video-container video::-webkit-media-controls-current-time-display {
+          display: none !important;
+        }
+        .video-container video::-webkit-media-controls-time-remaining-display {
+          display: none !important;
+        }
+        .video-container video::-moz-media-controls {
+          display: none !important;
+        }
+        /* Ẩn bất kỳ text hoặc số nào ở góc dưới trái - chỉ trong video container */
+        .video-container video + div[style*="position: absolute"][style*="bottom"][style*="left"] {
+          display: none !important;
+        }
+        .video-container div[style*="position: absolute"][style*="bottom: 0"][style*="left: 0"] {
+          display: none !important;
+        }
+        
+        /* Ẩn số 0 cụ thể ở góc dưới trái - chỉ áp dụng cho video container */
+        .video-container div:contains("0") {
+          position: relative;
+        }
+        .video-container div:contains("0"):not([class*="action"]):not([class*="button"]):not([class*="btn"]):not([class*="camera"]) {
+          display: none !important;
+        }
+        
+        /* Ẩn mọi element có text "0" ở vị trí góc dưới trái - chỉ trong video container */
+        .video-container *[style*="position: absolute"][style*="bottom"][style*="left"]:contains("0") {
+          display: none !important;
+        }
+      `}</style>
       {/* Không hiển thị loading overlay để giữ video sạch */}
       <div
+        className="video-container"
         style={{
           position: "relative",
           width: "100%",
@@ -866,6 +922,9 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           ref={videoRef}
           controls={false}
           autoPlay
+          muted
+          playsInline
+          disablePictureInPicture
           style={{
             width: "100%",
             height: "100%",
@@ -874,6 +933,12 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             objectFit: "cover",
             // Luôn hiển thị video gốc
             display: "block",
+            // Ẩn các controls và overlays
+            WebkitUserSelect: "none",
+            MozUserSelect: "none",
+            msUserSelect: "none",
+            userSelect: "none",
+            pointerEvents: "none"
           }}
           onLoadStart={() => console.log('Video load started')}
           onLoadedData={() => console.log('Video loaded successfully')}
@@ -888,22 +953,39 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         
         {/* ĐÃ LOẠI BỎ overlay kết quả nhận diện để giữ video sạch */}
         
-        {/* Hiển thị FPS và thông tin khác */}
-        <div
-          style={{
-            position: "absolute",
-            top: "10px",
-            left: "10px",
-            background: "rgba(0, 0, 0, 0.7)",
-            color: "white",
-            padding: "5px 10px",
-            borderRadius: "4px",
-            fontSize: "12px",
-            pointerEvents: "none",
-          }}
-        >
-          FPS: {fps.toFixed(1)}
-        </div>
+        {/* Recording Timer Overlay */}
+        {recordingTimer && recordingTimer > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              top: "10px",
+              right: "10px",
+              background: "rgba(244, 67, 54, 0.9)",
+              color: "white",
+              padding: "8px 12px",
+              borderRadius: "4px",
+              fontSize: "14px",
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              pointerEvents: "none",
+              zIndex: 1000,
+              display: "flex",
+              alignItems: "center",
+              gap: "8px"
+            }}
+          >
+            <div
+              style={{
+                width: "8px",
+                height: "8px",
+                backgroundColor: "white",
+                borderRadius: "50%",
+                animation: "pulse 1s infinite"
+              }}
+            />
+            REC {Math.floor(recordingTimer / 60)}:{(recordingTimer % 60).toString().padStart(2, '0')}
+          </div>
+        )}
         
         {/* Realtime Detections Overlay */}
         {isRecognizing && realtimeDetections.length > 0 && (
