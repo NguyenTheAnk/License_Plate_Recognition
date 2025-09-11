@@ -950,7 +950,7 @@ const ResetPasswordDialog = ({ open, handleClose, user, onResetSuccess }) => {
           </Typography>
         </Box>
       </DialogTitle>
-      <DialogContent sx={{ p: 3 }}>
+      <DialogContent sx={{ p: 3, pt: 4 }}>
         <TextField
           fullWidth
           label="Mật khẩu mới"
@@ -1921,7 +1921,7 @@ const UsersManagement = () => {
             </Typography>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ p: 3, pt: 4 }}>
           <Typography variant="body1" sx={{ mb: 2, color: '#222' }}>
             Bạn có chắc chắn muốn xóa người dùng <strong>"{deleteDialog.name}"</strong>?
           </Typography>

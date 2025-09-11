@@ -462,6 +462,14 @@ function getPaginationItems(current, total) {
                 onChange={e => handleFilterChange('location_id', e.target.value)}
                 startAdornment={<LocationOn color="info" sx={{ mr: 1, fontSize: 22 }} />}
                 sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 16, fontWeight: 600, '& .MuiSelect-icon': { fontSize: 22 } }}
+                MenuProps={{
+                  PaperProps: {
+                    style: {
+                      maxHeight: '200px',
+                      overflowY: 'auto'
+                    }
+                  }
+                }}
               >
                 <MenuItem value="">Tất cả</MenuItem>
                 {locations.map(loc => (
@@ -590,6 +598,14 @@ function getPaginationItems(current, total) {
                   label="Camera"
                   onChange={e => handleFilterChange('camera_id', e.target.value)}
                   sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: '200px',
+                        overflowY: 'auto'
+                      }
+                    }
+                  }}
                 >
                   <MenuItem value="">Tất cả</MenuItem>
                   {cameras.map(cam => (
@@ -1231,6 +1247,14 @@ useEffect(() => {
                     onChange={e => handleFilterChange('location_id', e.target.value)}
                     startAdornment={<LocationOn color="info" sx={{ mr: 1, fontSize: 22 }} />}
                     sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 16, fontWeight: 600, '& .MuiSelect-icon': { fontSize: 22 } }}
+                    MenuProps={{
+                      PaperProps: {
+                        style: {
+                          maxHeight: '200px',
+                          overflowY: 'auto'
+                        }
+                      }
+                    }}
                   >
                     <MenuItem value="">Tất cả</MenuItem>
                     {locations.map(loc => (
@@ -1359,6 +1383,14 @@ useEffect(() => {
                       label="Camera"
                       onChange={e => handleFilterChange('camera_id', e.target.value)}
                       sx={{ borderRadius: 4, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                      MenuProps={{
+                        PaperProps: {
+                          style: {
+                            maxHeight: '200px',
+                            overflowY: 'auto'
+                          }
+                        }
+                      }}
                     >
                       <MenuItem value="">Tất cả</MenuItem>
                       {cameras.map(cam => (

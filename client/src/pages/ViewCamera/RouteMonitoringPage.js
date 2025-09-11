@@ -349,6 +349,14 @@ function RouteMonitoringPage() {
                   value={filters.camera_id || ''} 
                   label="Camera" 
                   onChange={e => handleFilterChange('camera_id', e.target.value)}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: '200px',
+                        overflowY: 'auto'
+                      }
+                    }
+                  }}
                 >
                   <MenuItem value="">Tất cả</MenuItem>
                   {cameras.map(camera => (
@@ -365,6 +373,14 @@ function RouteMonitoringPage() {
                   value={filters.location_id || ''} 
                   label="Vị trí" 
                   onChange={e => handleFilterChange('location_id', e.target.value)}
+                  MenuProps={{
+                    PaperProps: {
+                      style: {
+                        maxHeight: '200px',
+                        overflowY: 'auto'
+                      }
+                    }
+                  }}
                 >
                   <MenuItem value="">Tất cả</MenuItem>
                   {locations.map(location => (
@@ -786,7 +802,7 @@ function RouteMonitoringPage() {
             <CloseIcon />
           </IconButton>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ p: 3, pt: 4 }}>
           {selectedDetection && (
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>

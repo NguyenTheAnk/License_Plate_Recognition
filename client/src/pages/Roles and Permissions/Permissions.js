@@ -229,7 +229,7 @@ const CreatePermissionDialog = ({ open, handleClose, onPermissionCreated, setAle
       </DialogTitle>
       
       <DialogContent sx={{ pt: 6, px: 3, pb: 2, background: 'white' }}>
-        <Grid container spacing={3}>
+        <Grid container spacing={3} sx={{ mt: 2 }}>
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
@@ -474,7 +474,7 @@ const UpdatePermissionDialog = ({ open, handleClose, permission, onPermissionUpd
       </DialogTitle>
       
       <DialogContent sx={{ pt: 6 }}>
-        <Grid container spacing={3}>
+        <Grid container spacing={3} sx={{ mt: 2 }}>
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
@@ -1407,7 +1407,7 @@ const Permissions = () => {
             </Typography>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ p: 3, pt: 4 }}>
           <Typography variant="body1" sx={{ mb: 2, color: '#222' }}>
             Bạn có chắc chắn muốn xóa quyền <strong>"{deleteDialog.name}"</strong>?
           </Typography>

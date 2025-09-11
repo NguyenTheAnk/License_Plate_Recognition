@@ -133,7 +133,7 @@ const CameraActionBar = ({
   };
 
   return (
-    <div className="camera-action-bar">
+    <div className="camera-action-bar"> 
       <button 
         className="action-btn close-btn" 
         onClick={() => {

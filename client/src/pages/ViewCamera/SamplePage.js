@@ -953,12 +953,12 @@ useEffect(() => {
   const handleCameraClick = async (cameraId) => {
     if (showConfig || isLoadingStream.current) return;
 
-    const camera = camerasRef.current.find((c) => c.id === Number(cameraId));
+    const camera = camerasRef.current.find((c) => c.id == cameraId);
 
     if (!camera) {
       await fetchCameras();
       const refreshedCamera = camerasRef.current.find(
-        (c) => c.id === Number(cameraId)
+        (c) => c.id == cameraId
       );
       if (!refreshedCamera) {
         alert(`Không tìm thấy camera ${cameraId}`);
@@ -1794,12 +1794,20 @@ useEffect(() => {
 
             const isUploadedVideo = streamId.startsWith("upload-");
             const cameraId = streamInfo.cameraId || streamId.split("-")[1];
-            const camera = cameras.find((c) => c.id === cameraId) || {
+            const camera = cameras.find((c) => c.id == cameraId) || {
               id: cameraId,
               name: uploadedVideos[streamId]
                 ? uploadedVideos[streamId].name
                 : `Camera ${cameraId}`,
             };
+            
+            // Debug log để kiểm tra camera
+            console.log('Camera debug:', {
+              streamId,
+              cameraId,
+              camera,
+              cameras: cameras.map(c => ({ id: c.id, name: c.name }))
+            });
                 const size = cameraSizes[streamId] || { width: 400, height: 250 };
 
             return (
@@ -1835,7 +1843,7 @@ useEffect(() => {
                       onForcePlay,
                     }) => (
                       <CameraActionBar
-                        cameraName={camera.name}
+                        cameraName={camera.name || `Camera ${cameraId}`}
                         cameraId={cameraId}
                         onFullscreen={() => {
                           const video = document.getElementById(`video-${streamId}`);
