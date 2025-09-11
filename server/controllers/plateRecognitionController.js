@@ -571,12 +571,12 @@ const getLicensePlateRecognitionStats = async (req, res) => {
         if (!stats) {
             const statsQuery = `
                 SELECT 
-                    COUNT(*) as total_detections,
+                    COUNT(*) as total_detect
                     COUNT(DISTINCT plate_number) as unique_plates,
                     COUNT(CASE WHEN is_whitelist_match = 1 THEN 1 END) as whitelist_matches,
                     COUNT(CASE WHEN is_blacklist_match = 1 THEN 1 END) as blacklist_matches,
                     COUNT(CASE WHEN is_verified = 1 THEN 1 END) as verified_detections,
-                    AVG(confidence_score) as avg_confidence,
+                    AVG((detection_confidence + ocr_confidence) / 2) as avg_confidence,
                     AVG(ocr_confidence) as avg_ocr_confidence,
                     AVG(detection_confidence) as avg_detection_confidence
                 FROM license_plate_detections 
@@ -1220,11 +1220,78 @@ const createLicensePlateRecognition = async (req, res) => {
     }
 };
 
+// Lấy detections realtime (mới nhất)
+const getRealtimeDetections = async (req, res) => {
+    try {
+        const { limit = 10, camera_id } = req.query;
+        
+        let whereConditions = [];
+        let queryParams = [];
+        
+        if (camera_id) {
+            whereConditions.push('lpd.camera_id = ?');
+            queryParams.push(camera_id);
+        }
+        
+        // Add confidence filters to where conditions
+        whereConditions.push('lpd.detection_confidence >= 0.8');
+        whereConditions.push('lpd.ocr_confidence >= 0.9');
+        
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        
+        const query = `
+            SELECT 
+                lpd.id, lpd.detection_uuid, lpd.plate_number, lpd.raw_plate_text, 
+                lpd.camera_id, lpd.location_id, lpd.detected_at, lpd.confidence_score,
+                lpd.ocr_confidence, lpd.detection_confidence,
+                lpd.is_whitelist_match, lpd.is_blacklist_match, lpd.alert_triggered,
+                lpd.source_type, lpd.cropped_plate_image_path, lpd.bbox_x1, lpd.bbox_y1, lpd.bbox_x2, lpd.bbox_y2,
+                c.name as camera_name,
+                loc.name as location_name
+            FROM license_plate_detections lpd
+            LEFT JOIN cameras c ON lpd.camera_id = c.id
+            LEFT JOIN locations loc ON lpd.location_id = loc.id
+            ${whereClause}
+            ORDER BY lpd.detected_at DESC
+            LIMIT ?
+        `;
+        
+        queryParams.push(parseInt(limit));
+        
+        const detections = await new Promise((resolve, reject) => {
+            db.query(query, queryParams, (error, results) => {
+                if (error) {
+                    console.error('Realtime detections query error:', error);
+                    reject(error);
+                } else {
+                    resolve(results || []);
+                }
+            });
+        });
+        
+        res.status(200).json({
+            success: true,
+            data: detections,
+            count: detections.length,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Error getting realtime detections:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy danh sách detections realtime',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     getLicensePlateRecognitions,
     getLicensePlateRecognitionById,
     getLicensePlateRecognitionStats,
     deleteLicensePlateRecognition,
     updateRecognitionVerification,
-    createLicensePlateRecognition
+    createLicensePlateRecognition,
+    getRealtimeDetections
 };

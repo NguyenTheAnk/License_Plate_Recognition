@@ -28,9 +28,8 @@ const searchCameras = async (req, res) => {
             SELECT COUNT(*) as total 
             FROM cameras c 
             JOIN locations l ON c.location_id = l.id 
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.is_active = 1 
-            AND (c.name LIKE ? OR c.code LIKE ? OR l.name LIKE ? OR ml.name LIKE ?)
+            AND (c.name LIKE ? OR c.code LIKE ? OR l.name LIKE ?)
         `, [searchKeyword, searchKeyword, searchKeyword, searchKeyword]);
 
         const total = countResult[0].total;
@@ -55,9 +54,8 @@ const searchCameras = async (req, res) => {
                  WHERE lpd.camera_id = c.id AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) as detections_24h
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.is_active = 1 
-            AND (c.name LIKE ? OR c.code LIKE ? OR l.name LIKE ? OR ml.name LIKE ?)
+            AND (c.name LIKE ? OR c.code LIKE ? OR l.name LIKE ?)
             ORDER BY c.${sortField} ${sortOrder}
             LIMIT ? OFFSET ?
         `, [searchKeyword, searchKeyword, searchKeyword, searchKeyword, parseInt(limit), offset]);
@@ -113,7 +111,6 @@ const searchCamerasByCriteria = async (req, res) => {
             code,
             status,
             location_id,
-            monitoring_location_id,
             camera_type,
             camera_role,
             direction,
@@ -153,10 +150,6 @@ const searchCamerasByCriteria = async (req, res) => {
             queryParams.push(location_id);
         }
 
-        if (monitoring_location_id) {
-            whereConditions.push('c.monitoring_location_id = ?');
-            queryParams.push(monitoring_location_id);
-        }
 
         if (camera_type) {
             whereConditions.push('c.camera_type = ?');
@@ -205,7 +198,6 @@ const searchCamerasByCriteria = async (req, res) => {
             SELECT COUNT(*) as total 
             FROM cameras c 
             JOIN locations l ON c.location_id = l.id 
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE ${whereClause}
         `, queryParams);
 
@@ -231,7 +223,6 @@ const searchCamerasByCriteria = async (req, res) => {
                  WHERE lpd.camera_id = c.id AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)) as detections_24h
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE ${whereClause}
             ORDER BY c.${sortField} ${sortOrder}
             LIMIT ? OFFSET ?
@@ -245,7 +236,7 @@ const searchCamerasByCriteria = async (req, res) => {
                 req.user.userId,
                 req.user.username,
                 JSON.stringify({
-                    name, code, status, location_id, monitoring_location_id,
+                    name, code, status, location_id,
                     camera_type, camera_role, direction, installation_date_from, installation_date_to,
                     last_heartbeat_from, last_heartbeat_to, page, limit, sort, order
                 }),
@@ -259,7 +250,7 @@ const searchCamerasByCriteria = async (req, res) => {
             data: {
                 cameras: cameras,
                 search_criteria: {
-                    name, code, status, location_id, monitoring_location_id,
+                    name, code, status, location_id,
                     camera_type, camera_role, direction, installation_date_from, installation_date_to,
                     last_heartbeat_from, last_heartbeat_to
                 },
@@ -320,17 +311,15 @@ const searchCamerasByKeyword = async (req, res) => {
                 END as relevance_score
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE (
                 c.name LIKE ? OR 
                 c.code LIKE ? OR 
                 l.name LIKE ? OR 
-                ml.name LIKE ? OR
                 c.maintenance_schedule LIKE ?
             ) ${activeCondition}
             ORDER BY relevance_score DESC, c.name
             LIMIT 50
-        `, [keyword, keyword, keyword, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm]);
+        `, [keyword, keyword, keyword, searchTerm, searchTerm, searchTerm]);
 
         res.status(200).json({
             success: true,
@@ -394,7 +383,6 @@ const getCamerasByStatus = async (req, res) => {
                 END as connection_status
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.status = ? AND c.is_active = 1
             ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?
@@ -471,7 +459,6 @@ const getCamerasByType = async (req, res) => {
                 END as connection_status
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.camera_type = ? AND c.is_active = 1
             ORDER BY c.name
             LIMIT ? OFFSET ?
@@ -550,7 +537,6 @@ const getCamerasByRole = async (req, res) => {
                  WHERE lpd.camera_id = c.id AND lpd.detection_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)) as detections_7d
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.camera_role = ? AND c.is_active = 1
             ORDER BY c.name
             LIMIT ? OFFSET ?
@@ -613,7 +599,6 @@ const getOfflineCameras = async (req, res) => {
                 TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.is_active = 1 
             AND (c.last_heartbeat IS NULL OR TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) >= ?)
             ORDER BY c.last_heartbeat ASC
@@ -676,7 +661,6 @@ const getMaintenanceCameras = async (req, res) => {
                 ) as days_until_maintenance
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.is_active = 1 
             AND (
                 c.status = 'maintenance' OR 
@@ -754,7 +738,6 @@ const getRecentlyAddedCameras = async (req, res) => {
                  WHERE lpd.camera_id = c.id) as total_detections
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.is_active = 1 
             AND c.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
             ORDER BY c.created_at DESC
@@ -809,7 +792,6 @@ const getInactiveCameras = async (req, res) => {
                 DATEDIFF(NOW(), c.updated_at) as days_since_deactivated
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.is_active = 0
             ORDER BY c.updated_at DESC
             LIMIT ? OFFSET ?

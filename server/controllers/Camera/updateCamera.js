@@ -13,7 +13,6 @@ const updateCamera = async (req, res) => {
       direction,
       camera_type,
       camera_role,
-      monitoring_location_id,
       details,
       width,
       height,
@@ -112,23 +111,6 @@ const updateCamera = async (req, res) => {
       });
     }
 
-    // Validate monitoring_location_id
-    if (monitoring_location_id !== undefined && monitoring_location_id !== oldValues.monitoring_location_id) {
-      if (monitoring_location_id) {
-        const [monitoringLocation] = await connection.execute(
-          "SELECT id FROM locations WHERE id = ?",
-          [monitoring_location_id]
-        );
-        if (monitoringLocation.length === 0) {
-          return res.status(404).json({
-            success: false,
-            message: "Không tìm thấy vị trí giám sát",
-          });
-        }
-      } else {
-        monitoring_location_id = null;
-      }
-    }
 
     // Validate enum values
     const validDirections = [
@@ -189,8 +171,6 @@ const updateCamera = async (req, res) => {
       direction: direction !== undefined ? direction : oldValues.direction,
       camera_type: camera_type !== undefined ? camera_type : oldValues.camera_type,
       camera_role: camera_role !== undefined ? camera_role : oldValues.camera_role,
-      monitoring_location_id:
-        monitoring_location_id !== undefined ? monitoring_location_id : oldValues.monitoring_location_id,
       width: width !== undefined ? width : oldValues.width,
       height: height !== undefined ? height : oldValues.height,
       fps: fps !== undefined ? fps : oldValues.fps,
@@ -242,10 +222,8 @@ const updateCamera = async (req, res) => {
                 c.*,
                 l.name as location_name,
                 l.address as location_address,
-                ml.name as monitoring_location_name
             FROM cameras c
             LEFT JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.id = ?
         `,
       [cameraId]

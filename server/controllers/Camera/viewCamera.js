@@ -28,7 +28,6 @@ const getCameraDetailedView = async (req, res) => {
                 CONCAT(c.protocol, '://', c.host, ':', c.port, c.path) as rtsp_url
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.id = ? AND c.is_active = 1
         `, [cameraId]);
 

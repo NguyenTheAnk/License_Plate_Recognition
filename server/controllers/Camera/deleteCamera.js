@@ -219,10 +219,8 @@ const restoreCamera = async (req, res) => {
                 c.*,
                 l.name as location_name,
                 l.address as location_address,
-                ml.name as monitoring_location_name
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.id = ?
         `, [cameraId]);
 

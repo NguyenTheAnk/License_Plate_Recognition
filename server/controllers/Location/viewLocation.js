@@ -43,8 +43,7 @@ const getLocationStatistics = async (req, res) => {
                     l.id,
                     COUNT(c.id) as camera_count
                 FROM locations l
-                LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.monitoring_location_id
-                WHERE l.is_active = 1
+                LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.                WHERE l.is_active = 1
                 GROUP BY l.id
             ) location_camera_counts
         `);
@@ -108,7 +107,7 @@ const getLocationDetailedView = async (req, res) => {
                 c.id, c.name, c.url, c.direction, c.camera_type, c.camera_role,
                 c.resolution, c.fps, c.status, c.last_heartbeat, c.installation_date
             FROM cameras c
-            WHERE (c.location_id = ? OR c.monitoring_location_id = ?) AND c.is_active = 1
+            WHERE (c.location_id = ? OR c. = ?) AND c.is_active = 1
             ORDER BY c.camera_role, c.name
         `, [locationId, locationId]);
 
@@ -146,7 +145,7 @@ const getLocationDetailedView = async (req, res) => {
                     COUNT(CASE WHEN is_overstay = 1 THEN 1 END) as overstay_count,
                     AVG(duration_minutes) as avg_duration_minutes
                 FROM vehicle_entry_exit_logs
-                WHERE monitoring_location_id = ?
+                WHERE  = ?
                 AND entry_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             `, [locationId]);
             entryExitStats = stats[0];
@@ -196,7 +195,7 @@ const getLocationHierarchy = async (req, res) => {
             FROM locations l
             LEFT JOIN locations pl ON l.parent_location_id = pl.id
             LEFT JOIN locations cl ON cl.parent_location_id = l.id AND cl.is_active = 1
-            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.monitoring_location_id AND c.is_active = 1
+            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c. AND c.is_active = 1
             WHERE l.is_active = 1
             GROUP BY l.id
             ORDER BY l.parent_location_id, l.name

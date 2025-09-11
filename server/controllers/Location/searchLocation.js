@@ -38,9 +38,9 @@ const searchLocations = async (req, res) => {
 
         if (has_cameras !== undefined) {
             if (has_cameras === 'true') {
-                whereClause += ' AND EXISTS (SELECT 1 FROM cameras c WHERE (c.location_id = l.id OR c.monitoring_location_id = l.id) AND c.is_active = 1)';
+                whereClause += ' AND EXISTS (SELECT 1 FROM cameras c WHERE (c.location_id = l.id OR c. = l.id) AND c.is_active = 1)';
             } else {
-                whereClause += ' AND NOT EXISTS (SELECT 1 FROM cameras c WHERE (c.location_id = l.id OR c.monitoring_location_id = l.id) AND c.is_active = 1)';
+                whereClause += ' AND NOT EXISTS (SELECT 1 FROM cameras c WHERE (c.location_id = l.id OR c. = l.id) AND c.is_active = 1)';
             }
         }
 
@@ -60,8 +60,7 @@ const searchLocations = async (req, res) => {
                 COUNT(CASE WHEN c.status = 'online' THEN 1 END) as online_camera_count
             FROM locations l
             LEFT JOIN locations pl ON l.parent_location_id = pl.id
-            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.monitoring_location_id
-            ${whereClause}
+            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.            ${whereClause}
             GROUP BY l.id
             ORDER BY l.name ASC
             LIMIT ? OFFSET ?
@@ -188,8 +187,7 @@ const searchLocationsByCriteria = async (req, res) => {
                 COUNT(CASE WHEN c.status = 'online' THEN 1 END) as online_camera_count
             FROM locations l
             LEFT JOIN locations pl ON l.parent_location_id = pl.id
-            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.monitoring_location_id
-            ${whereClause}
+            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.            ${whereClause}
             GROUP BY l.id
             ORDER BY l.${sort_by} ${sort_order}
             LIMIT ? OFFSET ?
@@ -251,8 +249,7 @@ const getLocationsByZoneType = async (req, res) => {
                 COUNT(CASE WHEN c.status = 'online' THEN 1 END) as online_camera_count
             FROM locations l
             LEFT JOIN locations pl ON l.parent_location_id = pl.id
-            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.monitoring_location_id
-            WHERE l.zone_type = ? AND l.is_active = 1
+            LEFT JOIN cameras c ON l.id = c.location_id OR l.id = c.            WHERE l.zone_type = ? AND l.is_active = 1
             GROUP BY l.id
             ORDER BY l.name ASC
             LIMIT ? OFFSET ?

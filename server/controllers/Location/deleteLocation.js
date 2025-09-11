@@ -34,7 +34,7 @@ const deleteLocation = async (req, res) => {
 
         // Check if location has cameras
         const [cameras] = await connection.execute(
-            'SELECT COUNT(*) as count FROM cameras WHERE (location_id = ? OR monitoring_location_id = ?) AND is_active = 1',
+            'SELECT COUNT(*) as count FROM cameras WHERE (location_id = ? OR  = ?) AND is_active = 1',
             [locationId, locationId]
         );
 
@@ -130,9 +130,9 @@ const hardDeleteLocation = async (req, res) => {
         // Check for any references that would prevent deletion
         const [references] = await connection.execute(`
             SELECT 
-                (SELECT COUNT(*) FROM cameras WHERE location_id = ? OR monitoring_location_id = ?) as camera_count,
+                (SELECT COUNT(*) FROM cameras WHERE location_id = ? OR  = ?) as camera_count,
                 (SELECT COUNT(*) FROM license_plate_detections WHERE location_id = ?) as detection_count,
-                (SELECT COUNT(*) FROM vehicle_entry_exit_logs WHERE monitoring_location_id = ? OR entry_location_id = ? OR exit_location_id = ?) as log_count,
+                (SELECT COUNT(*) FROM vehicle_entry_exit_logs WHERE  = ? OR entry_location_id = ? OR exit_location_id = ?) as log_count,
                 (SELECT COUNT(*) FROM locations WHERE parent_location_id = ?) as child_count
         `, [locationId, locationId, locationId, locationId, locationId, locationId, locationId]);
 

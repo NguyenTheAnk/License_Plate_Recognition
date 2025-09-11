@@ -35,7 +35,6 @@ const getCameraById = async (req, res) => {
                 c.direction,
                 c.camera_type,
                 c.camera_role,
-                c.monitoring_location_id,
                 c.status,
                 c.last_heartbeat,
                 c.is_active,
@@ -47,8 +46,6 @@ const getCameraById = async (req, res) => {
                 l.name as location_name,
                 l.address as location_address,
                 l.zone_type as location_zone_type,
-                ml.name as monitoring_location_name,
-                ml.zone_type as monitoring_zone_type,
                 TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat,
                 CASE 
                     WHEN c.last_heartbeat IS NULL THEN 'never'
@@ -58,7 +55,6 @@ const getCameraById = async (req, res) => {
                 END as connection_status
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             WHERE c.id = ? AND c.is_active = 1
         `, [cameraId]);
 
@@ -135,8 +131,8 @@ const getAllCameras = async (req, res) => {
         }
 
         if (location_id && location_id.trim()) {
-            whereConditions.push('(c.location_id = ? OR c.monitoring_location_id = ?)');
-            queryParams.push(location_id.trim(), location_id.trim());
+            whereConditions.push('c.location_id = ?');
+            queryParams.push(location_id.trim());
         }
 
         if (camera_type && camera_type.trim()) {
@@ -189,7 +185,6 @@ const getAllCameras = async (req, res) => {
                 c.direction,
                 c.camera_type,
                 c.camera_role,
-                c.monitoring_location_id,
                 c.status,
                 c.last_heartbeat,
                 c.is_active,
@@ -201,8 +196,6 @@ const getAllCameras = async (req, res) => {
                 l.name as location_name,
                 l.address as location_address,
                 l.zone_type as location_zone_type,
-                ml.name as monitoring_location_name,
-                ml.zone_type as monitoring_zone_type,
                 TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat,
                 CASE 
                     WHEN c.last_heartbeat IS NULL THEN 'never'
@@ -212,7 +205,6 @@ const getAllCameras = async (req, res) => {
                 END as connection_status
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
-            LEFT JOIN locations ml ON c.monitoring_location_id = ml.id
             ${whereClause}
             ORDER BY c.${sortField} ${sortOrder}
             LIMIT ? OFFSET ?
@@ -335,7 +327,6 @@ const getCamerasByLocation = async (req, res) => {
                 c.direction,
                 c.camera_type,
                 c.camera_role,
-                c.monitoring_location_id,
                 c.status,
                 c.last_heartbeat,
                 c.is_active,

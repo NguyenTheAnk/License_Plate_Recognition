@@ -278,7 +278,7 @@ const updateLocationStatus = async (req, res) => {
         // Check if location has active cameras before deactivating
         if (!is_active) {
             const [activeCameras] = await connection.execute(
-                'SELECT COUNT(*) as count FROM cameras WHERE (location_id = ? OR monitoring_location_id = ?) AND is_active = 1',
+                'SELECT COUNT(*) as count FROM cameras WHERE (location_id = ? OR  = ?) AND is_active = 1',
                 [locationId, locationId]
             );
 
