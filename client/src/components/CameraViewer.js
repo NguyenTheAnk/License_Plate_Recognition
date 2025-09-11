@@ -258,7 +258,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           blob.arrayBuffer().then((buffer) => {
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               // Kiểm tra kích thước buffer trước khi gửi
-              if (buffer.byteLength > 100000) { // Giới hạn 100KB
+              if (buffer.byteLength > 200000) { // Tăng giới hạn lên 200KB
                 console.warn(`Frame too large: ${buffer.byteLength} bytes, skipping`);
                 return;
               }
@@ -274,7 +274,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         } else {
           console.log("Blob or WebSocket not ready for sending");
         }
-      }, "image/jpeg", 0.6); // Giảm quality để giảm kích thước
+      }, "image/jpeg", 0.8); // Tăng quality để giảm compression overhead
 
       console.log(`Total frame send time: ${performance.now() - frameStartTime}ms`);
     } catch (error) {
@@ -283,7 +283,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
     if (isRecognizing) {
       // Tăng interval giữa các frame để giảm tải
-      sendFrameTimeoutRef.current = setTimeout(sendFrames, 200); // Giảm từ 10 FPS xuống 5 FPS
+      sendFrameTimeoutRef.current = setTimeout(sendFrames, 33); // Tăng lên 30 FPS (1000/30 = 33ms)
     }
   }, [isRecognizing, forcePlayVideo]);
 
