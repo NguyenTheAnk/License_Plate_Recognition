@@ -623,6 +623,7 @@ logger = logging.getLogger(__name__)
 # ĐỊNH NGHĨA VÙNG ROI - NỬA KHUNG HÌNH Ở GIỮA
 # Sử dụng tỷ lệ phần trăm: nửa chiều rộng và nửa chiều cao, centered
 DEFAULT_ROI_XMIN, DEFAULT_ROI_YMIN, DEFAULT_ROI_XMAX, DEFAULT_ROI_YMAX = 0.25, 0.25, 0.75, 0.75
+# Save crops to shared directory accessible by Node.js server
 CROPS_FOLDER = 'static/crops'
 os.makedirs(CROPS_FOLDER, exist_ok=True)
 
@@ -1967,9 +1968,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             if processed_text:
                 logger.info(f"🎯 DIRECT PLATE DETECTION: '{processed_text}' (conf: {confidence:.3f})")
                 
-                # Tạo frame path
+                # Tạo frame path với timestamp cố định
+                curr_time = int(time.time())
                 clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
-                frame_filename = f"plate_direct_{clean_plate_text}_{int(time.time())}.jpg"
+                frame_filename = f"plate_direct_{clean_plate_text}_{curr_time}.jpg"
                 frame_path = f"static/crops/{frame_filename}"
                 
                 # Lưu crop image - CHỈ CROP BIỂN SỐ, KHÔNG CÓ PADDING
@@ -2242,8 +2244,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         if success_save:
                             logger.info(f"✅ Direct crop image saved: {crop_path}")
                             
-                            # Send to database directly
-                            frame_path = f"static/crops/{crop_filename}"
+                            # Send to database directly với cùng timestamp
+                            frame_path = f"static/crops/{frame_filename}"
                             logger.info(f"🔗 Sending frame_path to database: {frame_path}")
                             if ENABLE_THREADING:
                                 thread_pool.submit(
@@ -2422,9 +2424,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     # Gửi dữ liệu mỗi khi có detection mới (bỏ qua điều kiện sent_to_db)
                     logger.info(f"🎯 UPDATED PLATE DETECTED: '{processed_text}' (conf: {conf_val:.3f})")
                     
-                    # Tạo frame path
+                    # Tạo frame path với timestamp cố định
                     clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
-                    frame_filename = f"plate_{final_track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
+                    frame_filename = f"plate_{final_track_id}_{clean_plate_text}_{curr_time}.jpg"
                     frame_path = f"static/crops/{frame_filename}"  # Sửa đường dẫn
                     
                     # Tạo crop image trước khi gửi database - CHỈ CROP BIỂN SỐ
@@ -2543,8 +2545,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 if plate_text and plate_text != "Đang nhận diện...":
                     clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
                     
-                    # Create frame filename: plate_trackID_plate_number_timestamp.jpg
-                    frame_filename = f"plate_{track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
+                    # Create frame filename: plate_trackID_plate_number_timestamp.jpg với timestamp cố định
+                    frame_filename = f"plate_{track_id}_{clean_plate_text}_{curr_time}.jpg"
                     frame_path = f"static/crops/{frame_filename}"
                     
                     # Save crop image
