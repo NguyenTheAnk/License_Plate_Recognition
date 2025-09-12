@@ -973,25 +973,64 @@ const createLicensePlateRecognition = async (req, res) => {
             camera_id = parsedCameraId;
         }
 
+        // Get location_id and location name from camera
+        let actualLocationId = location_id || 1; // Default fallback
+        let locationName = 'Unknown Location';
+        try {
+            const cameraQuery = `
+                SELECT c.location_id, l.name as location_name 
+                FROM cameras c 
+                LEFT JOIN locations l ON c.location_id = l.id 
+                WHERE c.id = ?
+            `;
+            const cameraResult = await new Promise((resolve, reject) => {
+                db.query(cameraQuery, [camera_id], (error, results) => {
+                    if (error) {
+                        reject(error);
+                    } else {
+                        resolve(results);
+                    }
+                });
+            });
+            
+            if (cameraResult.length > 0) {
+                actualLocationId = cameraResult[0].location_id;
+                locationName = cameraResult[0].location_name || 'Unknown Location';
+                console.log(`📷 Using location_id ${actualLocationId} and location_name "${locationName}" from camera ${camera_id}`);
+            } else {
+                console.log(`⚠️ Camera ${camera_id} not found, using default location_id: ${actualLocationId}`);
+            }
+        } catch (error) {
+            console.error('Error getting location info from camera:', error);
+            console.log(`⚠️ Using default location_id: ${actualLocationId}`);
+        }
+
         // Process video_filename and camera_name based on source_type
         let video_filename = req.body.video_filename || null;
         
+        // Chỉ ghi đè camera_name nếu không được cung cấp từ frontend
         if (!camera_name) {
             if (source_type === 'video_upload') {
                 // For video upload, use video filename
                 video_filename = video_filename || 'Unknown Video';
                 camera_name = `Video Upload: ${video_filename}`;
                 console.log(`📹 Video upload detected: ${camera_name}`);
+            } else if (source_type === 'camera_with_video') {
+                // For camera with video source, use camera name from frontend
+                camera_name = camera_name || `Camera with Video: ${video_filename || 'Unknown'}`;
+                console.log(`📹📷 Camera with video detected: ${camera_name}`);
             } else if (source_type === 'camera' || !source_type) {
-                // For camera live, use camera location or default
-                const camera_location = req.body.camera_location || 'Unknown Location';
-                camera_name = `Camera Live: ${camera_location}`;
+                // For camera live, use camera name from frontend or default
+                camera_name = camera_name || `Camera ${camera_id}`;
                 console.log(`📷 Camera live detected: ${camera_name}`);
             } else {
                 // Default fallback
                 camera_name = `Source: ${source_type || 'Unknown'}`;
                 console.log(`🔍 Other source detected: ${camera_name}`);
             }
+        } else {
+            // Camera name được cung cấp từ frontend, sử dụng nó
+            console.log(`📷 Using camera name from frontend: ${camera_name}`);
         }
 
         // Validate plate format
@@ -1119,8 +1158,8 @@ const createLicensePlateRecognition = async (req, res) => {
             plate_number: plateValidation.normalized,
             raw_plate_text: raw_plate_text || plate_number,
             camera_id: camera_id,
-            location_id: parseInt(location_id) || 1,
-            detected_at: detected_at ? new Date(detected_at * 1000) : new Date(),
+            location_id: actualLocationId,
+            detected_at: detected_at && !isNaN(parseInt(detected_at)) ? new Date(parseInt(detected_at)) : new Date(),
             confidence_score: parseFloat(confidence_score) || 0.0,
             ocr_confidence: parseFloat(ocr_confidence) || 0.0,
             detection_confidence: parseFloat(detection_confidence) || 0.0,
@@ -1175,6 +1214,11 @@ const createLicensePlateRecognition = async (req, res) => {
             insertData.alert_triggered
         ];
 
+        // Log chi tiết trước khi insert
+        console.log('🔍 Insert data:', JSON.stringify(insertData, null, 2));
+        console.log('🔍 Insert params:', insertParams);
+        
+        try {
         const result = await new Promise((resolve, reject) => {
             db.query(insertQuery, insertParams, (error, results) => {
                 if (error) {
@@ -1183,10 +1227,14 @@ const createLicensePlateRecognition = async (req, res) => {
                         console.log(`⚠️ Duplicate entry detected for ${insertData.detection_uuid}, skipping...`);
                         resolve({ duplicate: true });
                     } else {
-                        console.error('Insert query error:', error);
+                        console.error('❌ Insert query error:', error);
+                        console.error('❌ Error code:', error.code);
+                        console.error('❌ Error sql:', error.sql);
+                        console.error('❌ Error message:', error.message);
                         reject(error);
                     }
                 } else {
+                    console.log('✅ Insert successful, ID:', results.insertId);
                     resolve(results);
                 }
             });
@@ -1196,6 +1244,10 @@ const createLicensePlateRecognition = async (req, res) => {
             console.log(`⏭️ Skipped duplicate plate detection: ${insertData.plate_number} (BL:${insertData.is_blacklist_match}, WL:${insertData.is_whitelist_match})`);
         } else {
             console.log(`✅ Saved plate detection: ${insertData.plate_number} (BL:${insertData.is_blacklist_match}, WL:${insertData.is_whitelist_match})`);
+        }
+        } catch (dbError) {
+            console.error('❌ Database operation failed:', dbError);
+            throw dbError;
         }
 
         res.status(201).json({
