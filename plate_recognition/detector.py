@@ -676,14 +676,14 @@ ROI_PERCENT_YMAX = 0.85   # Kết thúc ở 85% chiều cao (mở rộng xuống
 # Dynamic configuration optimized for 20 FPS - LOWERED THRESHOLDS FOR FASTER DISPLAY
 if GPU_INFO['cuda_available']:
     # GPU-optimized settings for 20 FPS - LOWERED for faster display
-    MIN_CONFIDENCE = 0.5      # Much lower threshold for immediate display
+    MIN_CONFIDENCE = 0.3      # Much lower threshold for immediate display
     MIN_OCR_CONFIDENCE = 0.6  # Much lower threshold for immediate display
     MIN_PLATE_LENGTH = 5      # Reduced minimum length
     MAX_PLATE_LENGTH = 12
     print("🎮 Using GPU-optimized settings for 20 FPS - FAST DISPLAY MODE")
 else:
     # CPU-optimized settings for 20 FPS - LOWERED for faster display
-    MIN_CONFIDENCE = 0.55     # Much lower threshold for immediate display
+    MIN_CONFIDENCE = 0.3      # Much lower threshold for immediate display
     MIN_OCR_CONFIDENCE = 0.65 # Much lower threshold for immediate display
     MIN_PLATE_LENGTH = 5      # Reduced minimum length
     MAX_PLATE_LENGTH = 12
@@ -822,7 +822,52 @@ os.makedirs(FRAMES_FOLDER, exist_ok=True)
 # REMOVED: Vietnamese plate validation function - using original logic
 
 # Gửi dữ liệu biển số tới server Node.js - ORIGINAL VERSION
-def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
+def send_plate_immediate(plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
+    """Gửi dữ liệu biển số ngay lập tức mà không cần validation phức tạp"""
+    try:
+        # Tạo payload đơn giản
+        bbox = plate_data.get('bbox', [])
+        payload = {
+            'plate_number': plate_data.get('plate', ''),  # Sửa từ 'plate' thành 'plate_number'
+            'raw_plate_text': plate_data.get('plate', ''),  # Thêm raw_plate_text
+            'confidence_score': plate_data.get('confidence', 0.0),  # Sửa từ 'confidence' thành 'confidence_score'
+            'bbox_x1': int(bbox[0]) if len(bbox) > 0 else 0,
+            'bbox_y1': int(bbox[1]) if len(bbox) > 1 else 0,
+            'bbox_x2': int(bbox[2]) if len(bbox) > 2 else 0,
+            'bbox_y2': int(bbox[3]) if len(bbox) > 3 else 0,
+            'detected_at': int(time.time() * 1000),  # Chuyển thành milliseconds cho JavaScript Date
+            'camera_id': camera_id or 1,  # Sử dụng camera_id mặc định là 1 thay vì "immediate"
+            'source_type': 'camera' if source_type == 'camera_with_video' else source_type,  # Map camera_with_video to camera
+            'video_filename': video_filename,
+            'camera_location': camera_location,
+            'camera_name': camera_name,
+            'frame_path': frame_path,
+            'detection_uuid': f"immediate_{int(time.time())}_{random.randint(1000, 9999)}",  # Thêm detection_uuid
+            'location_id': None,  # Sẽ được set từ camera info
+            'detected_vehicle_type': 'other',  # Thêm detected_vehicle_type
+            'is_whitelist_match': False,  # Thêm is_whitelist_match
+            'is_blacklist_match': False  # Thêm is_blacklist_match
+        }
+        
+        # Gửi tới Node.js API
+        response = requests.post(
+            'http://localhost:5000/api/plate-recognitions/detected-plates',
+            json=payload,
+            timeout=2
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"✅ IMMEDIATE plate sent successfully: {plate_data.get('plate', '')}")
+            return True
+        else:
+            logger.warning(f"⚠️ IMMEDIATE plate send failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ IMMEDIATE plate send error: {e}")
+        return False
+
+def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
     try:
         current_time = time.time()
         plate_text = plate_data['plate']
@@ -877,8 +922,8 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             "plate_number": plate_data['plate'],
             "raw_plate_text": plate_data['plate'],
             "camera_id": camera_id or 1,
-            "location_id": 1,
-            "detected_at": current_time,  # Send as Unix timestamp in seconds
+            "location_id": None,  # Sẽ được set từ camera info
+            "detected_at": int(current_time * 1000),  # Send as Unix timestamp in milliseconds
             "confidence_score": overall_confidence,
             "ocr_confidence": ocr_confidence,
             "detection_confidence": detection_confidence,
@@ -886,10 +931,10 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             "frame_path": frame_path or "",
             "crop_image_path": frame_path or "",  # Add crop image path
             "detected_vehicle_type": "other",
-            "source_type": source_type,
+            "source_type": 'camera' if source_type == 'camera_with_video' else source_type,  # Map camera_with_video to camera
             "video_filename": video_filename,
             "camera_location": camera_location,
-            "camera_name": f"Camera_{camera_id}" if camera_id else "Camera_1",
+            "camera_name": camera_name or f"Camera_{camera_id}" if camera_id else "Camera_1",
             "is_whitelist_match": is_whitelist_match,
             "is_blacklist_match": is_blacklist_match,
             "alert_triggered": is_blacklist_match  # Trigger alert for blacklist matches
@@ -1132,6 +1177,27 @@ def fix_vietnamese_ocr_errors(text):
     text = re.sub(r'^\.+|\.+$', '', text)
     
     return text.strip()
+
+def process_plate_text_immediate(text):
+    """Xử lý text biển số ngay lập tức với validation tối thiểu"""
+    if not text or not isinstance(text, str):
+        return None
+    
+    # Basic cleaning
+    clean_text = text.upper().strip()
+    clean_text = re.sub(r'[^A-Z0-9\-\.]', '', clean_text)
+    
+    # Chỉ cần có ít nhất 3 ký tự và chứa cả chữ và số
+    if len(clean_text) < 3:
+        return None
+    
+    has_letters = any(c.isalpha() for c in clean_text)
+    has_numbers = any(c.isdigit() for c in clean_text)
+    
+    if not has_letters or not has_numbers:
+        return None
+    
+    return clean_text
 
 def process_plate_text(text):
     """Process Vietnamese plate text with ENHANCED dot recognition and STRICT validation"""
@@ -1599,7 +1665,7 @@ def cleanup_tracked_objects():
                 continue
             
             # Keep plates with reasonable confidence
-            if plate_num and confidence > 0.5:  # Lower threshold
+            if plate_num and confidence > 0.3:  # Lower threshold
                 if plate_num not in plate_groups:
                     plate_groups[plate_num] = []
                 plate_groups[plate_num].append((track_id, obj))
@@ -1642,13 +1708,61 @@ def cleanup_tracked_objects():
     except Exception as e:
         logger.error(f"Error in enhanced cleanup: {e}")
 
+def cleanup_duplicate_track_ids():
+    """Clean up duplicate track IDs to ensure unique ID per object"""
+    global tracked_objects, plate_to_track_id, track_info, plate_history
+    
+    try:
+        logger.info(f"🧹 Cleaning up duplicate track IDs...")
+        
+        # Find plates with multiple track IDs
+        duplicates_found = 0
+        for plate_text, track_ids in list(plate_to_track_id.items()):
+            if len(track_ids) > 1:
+                # Keep only the first (oldest) track ID
+                keep_track_id = track_ids[0]
+                remove_track_ids = track_ids[1:]
+                
+                # Remove duplicate track IDs from tracked_objects
+                for track_id in remove_track_ids:
+                    if track_id in tracked_objects:
+                        del tracked_objects[track_id]
+                    if track_id in track_info:
+                        del track_info[track_id]
+                    if track_id in plate_history:
+                        del plate_history[track_id]
+                    duplicates_found += 1
+                
+                # Update plate_to_track_id to only keep the first ID
+                plate_to_track_id[plate_text] = [keep_track_id]
+                
+                logger.info(f"🧹 Removed {len(remove_track_ids)} duplicate track IDs for plate '{plate_text}': {remove_track_ids}")
+        
+        if duplicates_found > 0:
+            logger.info(f"🧹 Cleaned up {duplicates_found} duplicate track IDs")
+        else:
+            logger.debug("🧹 No duplicate track IDs found")
+            
+    except Exception as e:
+        logger.error(f"Error in cleanup_duplicate_track_ids: {e}")
+
 def find_existing_track_id(plate_text, threshold=3):
-    """Tìm track_id hiện có cho biển số tương tự"""
-    # Tìm trong plate_to_track_id trước
+    """Tìm track_id hiện có cho biển số tương tự - STRICT UNIQUE ID"""
+    best_track_id = None
+    best_distance = float('inf')
+    
+    # Tìm trong plate_to_track_id trước - chọn track_id tốt nhất
     for existing_plate, track_ids in plate_to_track_id.items():
-        if levenshtein_distance(plate_text, existing_plate) <= threshold:
-            # Trả về track_id đầu tiên (cũ nhất)
-            return track_ids[0]
+        distance = levenshtein_distance(plate_text, existing_plate)
+        if distance <= threshold and distance < best_distance:
+            # Chọn track_id đầu tiên (cũ nhất) từ danh sách
+            best_track_id = track_ids[0]
+            best_distance = distance
+    
+    # Nếu tìm thấy trong plate_to_track_id, trả về ngay
+    if best_track_id:
+        logger.info(f"🔍 Found existing track {best_track_id} for plate '{plate_text}' (distance: {best_distance})")
+        return best_track_id
     
     # Nếu không tìm thấy, tìm trong Redis
     if not redis_available:
@@ -1658,12 +1772,17 @@ def find_existing_track_id(plate_text, threshold=3):
         for key in r.keys("track:*"):
             track_data = r.hgetall(key)
             existing_plate = track_data.get('plate', '')
-            if levenshtein_distance(plate_text, existing_plate) <= threshold:
-                return key.split(":")[1]  # Trả về track_id
+            distance = levenshtein_distance(plate_text, existing_plate)
+            if distance <= threshold and distance < best_distance:
+                best_track_id = key.split(":")[1]
+                best_distance = distance
     except redis.RedisError as e:
         logger.error(f"Redis error in find_existing_track_id: {str(e)}")
     
-    return None
+    if best_track_id:
+        logger.info(f"🔍 Found existing track {best_track_id} in Redis for plate '{plate_text}' (distance: {best_distance})")
+    
+    return best_track_id
 
 def update_redis_plate(track_id, plate_text, confidence, bbox):
     """Cập nhật biển số vào Redis"""
@@ -1693,7 +1812,7 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
     except redis.RedisError as e:
         logger.error(f"Redis error: {str(e)}")
 
-def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
+def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
     """Main detection function with enhanced plate detection and CENTERED ROI - OPTIMIZED FOR 20 FPS"""
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
     global frame_count, tracked_objects, skip_frame_count, last_detection_time, last_alpr_call_time
@@ -1743,7 +1862,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     roi = (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
     
     # Vẽ ROI trước khi kiểm tra skip
-    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 1)  # Vàng, nét mỏng
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 2)  # Vàng, nét dày hơn
+    logger.info(f"🔍 ROI coordinates: ({roi_xmin}, {roi_ymin}) to ({roi_xmax}, {roi_ymax}) - Frame size: {original_width}x{original_height}")
     
     # OPTIMIZED: Consistent frame skipping for stable FPS
     should_skip = False
@@ -1953,7 +2073,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     
     logger.info(f"🔍 Tracker update completed: {len(tracks)} tracks")
 
-    # SIMPLIFIED: Gửi dữ liệu trực tiếp khi có detection (không cần tracker)
+    # IMMEDIATE OCR: Xử lý ngay lập tức khi có detection (không cần tracker)
+    # Tạo một danh sách để lưu các detection đã được xử lý để tránh duplicate
+    processed_detections = set()
+    
     for detection in plate_detections:
         plate_text = detection['plate_text']
         confidence = detection['confidence']
@@ -1962,16 +2085,26 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         detection_conf = detection.get('detection_conf', confidence)
         ocr_conf = detection.get('ocr_conf', confidence)
         
-        if plate_text and confidence > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
-            # Process plate text
-            processed_text = process_plate_text(plate_text)
+        # LOWERED THRESHOLDS for immediate processing
+        if plate_text and confidence > 0.3 and ocr_conf > 0.3:  # Much lower thresholds
+            # Tạo key để tránh duplicate processing
+            detection_key = f"{detection['bbox'][0]}_{detection['bbox'][1]}_{detection['bbox'][2]}_{detection['bbox'][3]}"
+            
+            # Skip nếu đã xử lý detection này
+            if detection_key in processed_detections:
+                continue
+                
+            processed_detections.add(detection_key)
+            
+            # Process plate text with immediate validation
+            processed_text = process_plate_text_immediate(plate_text)
             if processed_text:
-                logger.info(f"🎯 DIRECT PLATE DETECTION: '{processed_text}' (conf: {confidence:.3f})")
+                logger.info(f"🎯 IMMEDIATE PLATE DETECTION: '{processed_text}' (conf: {confidence:.3f})")
                 
                 # Tạo frame path với timestamp cố định
                 curr_time = int(time.time())
                 clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
-                frame_filename = f"plate_direct_{clean_plate_text}_{curr_time}.jpg"
+                frame_filename = f"plate_immediate_{clean_plate_text}_{curr_time}.jpg"
                 frame_path = f"static/crops/{frame_filename}"
                 
                 # Lưu crop image - CHỈ CROP BIỂN SỐ, KHÔNG CÓ PADDING
@@ -1983,42 +2116,37 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         crop_path = os.path.join(FRAMES_FOLDER, frame_filename)
                         success_save = cv2.imwrite(crop_path, crop)
                         if success_save:
-                            logger.info(f"✅ Direct crop image saved: {crop_path}")
+                            logger.info(f"✅ Immediate crop image saved: {crop_path}")
                         else:
-                            logger.warning(f"❌ Failed to save direct crop image: {crop_path}")
+                            logger.warning(f"❌ Failed to save immediate crop image: {crop_path}")
                     else:
-                        logger.warning("Direct crop area is empty")
+                        logger.warning("Immediate crop area is empty")
                 except Exception as e:
-                    logger.error(f"Error saving direct crop image: {e}")
+                    logger.error(f"Error saving immediate crop image: {e}")
                 
                 # OPTIMIZED: Gửi trực tiếp tới database với threading
                 # OPTIMIZED: Throttled async database sending to prevent video pause
                 current_time = time.time()
                 
-                # Chỉ gửi database nếu đã qua cooldown period
-                if current_time - last_detection_time >= detection_cooldown:
-                    if ENABLE_THREADING:
-                        # Gửi async để không block frame processing
-                        thread_pool.submit(
-                            send_plate_to_server, "direct", {
-                                'plate': processed_text,
-                                'confidence': confidence,
-                                'bbox': detection['bbox']
-                            }, frame_path, camera_id, source_type, video_filename, camera_location
-                        )
-                        logger.debug(f"🚀 Direct plate '{processed_text}' queued for database (async)")
-                        last_detection_time = current_time
-                    else:
-                        # Gửi sync như cũ
-                        success = send_plate_to_server("direct", {
+                # IMMEDIATE: Gửi ngay lập tức tới database (không cần cooldown)
+                if ENABLE_THREADING:
+                    # Gửi async để không block frame processing
+                    thread_pool.submit(
+                        send_plate_immediate, {
                             'plate': processed_text,
                             'confidence': confidence,
                             'bbox': detection['bbox']
-                        }, frame_path, camera_id, source_type, video_filename, camera_location)
-                        logger.debug(f"🚀 Direct plate '{processed_text}' sent to database: {success}")
-                        last_detection_time = current_time
+                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
+                    )
+                    logger.info(f"🚀 IMMEDIATE plate '{processed_text}' queued for database (async)")
                 else:
-                    logger.debug(f"⏱️ Detection throttled - next in {detection_cooldown - (current_time - last_detection_time):.1f}s")
+                    # Gửi sync như cũ
+                    success = send_plate_immediate({
+                        'plate': processed_text,
+                        'confidence': confidence,
+                        'bbox': detection['bbox']
+                    }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
+                    logger.info(f"🚀 IMMEDIATE plate '{processed_text}' sent to database: {success}")
 
     # ROI đã được vẽ ở trên
 
@@ -2031,14 +2159,12 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     cv2.putText(display_frame, detections_text, (10, 35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
-    # Draw all plate detections with bounding boxes - SIMPLIFIED DISPLAY
+    # Draw all plate detections with bounding boxes - IMMEDIATE DISPLAY
     boxes = []
     labels = []
     ocr_results = []
     
-    # REMOVED: Duplicate display logic - using ByteTracker display only
-    
-    # Hiển thị detections mới (nếu có)
+    # IMMEDIATE: Hiển thị ngay lập tức khi có detection
     for detection in plate_detections:
         x1, y1, x2, y2 = detection['bbox']
         plate_text = detection['plate_text']
@@ -2056,36 +2182,50 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         detection_conf = detection.get('detection_conf', confidence)
         ocr_conf = detection.get('ocr_conf', confidence)
         
-        if processed_text and confidence > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
-            # Don't draw here - will be drawn in tracking section
+        # IMMEDIATE DISPLAY: Hiển thị ngay lập tức với threshold thấp
+        if processed_text and confidence > 0.2 and ocr_conf > 0.2:
+            # Vẽ bounding box ngay lập tức (GREEN cho immediate detection)
+            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
             
-            
-            # Draw smaller plate bounding box (WHITE for processed plates)
-            plate_padding = 5
-            plate_x1 = max(x1 + plate_padding, 0)
-            plate_y1 = max(y1 + plate_padding, 0)
-            plate_x2 = min(x2 - plate_padding, original_width)
-            plate_y2 = min(y2 - plate_padding, original_height)
-            
-            # Don't draw here - will be drawn in tracking section
+            # Vẽ text ngay lập tức - UNIFIED FORMAT: ID: [track_id] + biển số
+            # Sử dụng track_id duy nhất cho immediate detection
+            track_id = "immediate"  # Định nghĩa track_id cho immediate detection
+            display_text = f"ID: {track_id} {processed_text}"
+            text_y = max(y1 - 10, 20)
+            cv2.putText(display_frame, display_text, (x1, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             # Add to response arrays
             boxes.append([x1, y1, x2, y2])
             labels.append(f"Plate: {processed_text}")
             ocr_results.append([processed_text, confidence])
             
-            logger.info(f"✅ Processed plate: '{processed_text}' at ({x1},{y1})-({x2},{y2})")
+            logger.info(f"✅ IMMEDIATE plate displayed: '{processed_text}' at ({x1},{y1})-({x2},{y2})")
         else:
-            # OPTIMIZED: Don't display invalid detections to reduce visual clutter
-            # Only show valid plate detections
-            logger.debug(f"⏭️ Skipping invalid detection: '{raw_text}' (conf: {confidence:.3f})")
+            # Hiển thị detection với confidence thấp (YELLOW) - UNIFIED FORMAT
+            if plate_text and confidence > 0.1:
+                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                # Find existing track_id for this plate to avoid duplicates
+                existing_track_id = find_existing_track_id(plate_text) if plate_text else None
+                track_id = existing_track_id if existing_track_id else "1"
+                display_text = f"ID: {track_id} {raw_text}"  # Sử dụng track_id duy nhất
+                text_y = max(y1 - 10, 20)
+                cv2.putText(display_frame, display_text, (x1, text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                logger.debug(f"⚠️ Low confidence detection: '{raw_text}' (conf: {confidence:.3f})")
+            else:
+                logger.debug(f"⏭️ Skipping invalid detection: '{raw_text}' (conf: {confidence:.3f})")
 
     # Gọi FastALPR trên toàn bộ frame nếu chưa có kết quả
     if not alpr_results:
         try:
             roi_frame_rgb = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2RGB)
+            logger.info(f"🔍 Calling FastALPR on ROI frame: {roi_frame_rgb.shape}")
             alpr_results = alpr.predict(roi_frame_rgb)
             logger.info(f"🔍 FastALPR detected {len(alpr_results)} objects in ROI")
+            if len(alpr_results) > 0:
+                for i, res in enumerate(alpr_results):
+                    logger.info(f"🔍 Detection {i}: conf={res.detection.confidence:.3f}, text='{res.ocr.text if res.ocr else 'No OCR'}'")
         except Exception as e:
             logger.error(f"FastALPR prediction failed: {e}")
             alpr_results = []
@@ -2193,8 +2333,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     conf_val = mean(ocr_conf) if isinstance(ocr_conf, list) else ocr_conf
                     break
             
-            # Check if this is the best detection so far - LOWERED THRESHOLD
-            if (plate_text and conf_val > 0.4 and len(plate_text) >= 4 and 
+            # Check if this is the best detection so far - MUCH LOWERED THRESHOLD
+            if (plate_text and conf_val > 0.2 and len(plate_text) >= 3 and 
                 conf_val > best_conf_val):
                 best_detection = detection
                 best_plate_text = plate_text
@@ -2204,7 +2344,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         # Process only the BEST detection
         if best_detection and best_plate_text:
             x1, y1, x2, y2, conf = best_detection
-            track_id = "1"  # Single ID for best detection
+            
+            # Find existing track_id for this plate to avoid duplicates
+            existing_track_id = find_existing_track_id(best_plate_text) if best_plate_text != "Đang nhận diện..." else None
+            if existing_track_id:
+                track_id = existing_track_id
+                logger.info(f"🔄 Using existing track {track_id} for immediate detection '{best_plate_text}'")
+            else:
+                track_id = "1"  # Single ID for best detection
             
             processed_text = process_plate_text(best_plate_text)
             if processed_text:
@@ -2254,11 +2401,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                         'confidence': best_conf_val,
                                         'bbox': [plate_x1, plate_y1, plate_x2, plate_y2],
                                         'crop_image_path': frame_path
-                                    }, frame_path, camera_id, source_type, video_filename, camera_location
+                                    }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
                                 )
                                 logger.info(f"🚀 Direct plate '{processed_text}' queued for database")
                 
-                # Display on frame - ONLY ONE TEXT
+                # Display on frame - UNIFIED FORMAT: ID: [track_id] + biển số
                 display_text = f"ID: {track_id} {processed_text}"
                 text_y = max(plate_y1 - 20, 20)
                 cv2.putText(display_frame, display_text, (plate_x1, text_y),
@@ -2286,7 +2433,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             res_x1 = int(bbox.x1) + roi_xmin
             res_y1 = int(bbox.y1) + roi_ymin
             
-            if (abs(res_x1 - x1) < 30 and abs(res_y1 - y1) < 30 and 
+            if (abs(res_x1 - x1) < 50 and abs(res_y1 - y1) < 50 and 
                 res.ocr and res.ocr.text):
                 plate_text = res.ocr.text
                 conf = res.ocr.confidence
@@ -2298,27 +2445,48 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     best_conf_val = conf_val
                     best_ocr_conf = conf_val
         
-        # Lọc biển số - đơn giản hóa
-        if best_conf_val < 0.5 or len(best_plate_text) < 4:
+        # Lọc biển số - đơn giản hóa (giảm threshold để nhận diện tốt hơn)
+        if best_conf_val < 0.3 or len(best_plate_text) < 4:
             best_plate_text = "Đang nhận diện..."
             best_conf_val = 0.0
 
-        # Find existing track_id for similar plates
+        # Find existing track_id for similar plates - STRICT UNIQUE ID
         existing_track_id = find_existing_track_id(best_plate_text) if best_plate_text != "Đang nhận diện..." else None
         
-        # Determine final track_id to use
+        # Determine final track_id to use - ENSURE UNIQUE ID PER OBJECT
         if existing_track_id and existing_track_id != current_track_id:
-            track_id_mapping[current_track_id] = existing_track_id
+            # Use existing track_id and remove current_track_id from all mappings
             final_track_id = existing_track_id
+            
+            # Clean up current_track_id from all mappings
+            for plate, track_ids in plate_to_track_id.items():
+                if current_track_id in track_ids:
+                    track_ids.remove(current_track_id)
+                    if not track_ids:  # Remove empty lists
+                        del plate_to_track_id[plate]
+            
+            # Remove from tracked_objects if exists
+            if current_track_id in tracked_objects:
+                del tracked_objects[current_track_id]
+            
+            logger.info(f"🔄 Merged track {current_track_id} -> {final_track_id} for plate '{best_plate_text}'")
         else:
             final_track_id = current_track_id
         
-        # Update plate to track_id mapping
+        # Update plate to track_id mapping - ENSURE SINGLE ID PER PLATE
         if best_plate_text != "Đang nhận diện...":
-            if best_plate_text not in plate_to_track_id:
-                plate_to_track_id[best_plate_text] = []
-            if final_track_id not in plate_to_track_id[best_plate_text]:
-                plate_to_track_id[best_plate_text].append(final_track_id)
+            # Remove any existing track_ids for this plate first
+            if best_plate_text in plate_to_track_id:
+                old_track_ids = plate_to_track_id[best_plate_text]
+                for old_track_id in old_track_ids:
+                    if old_track_id != final_track_id:
+                        # Remove old track_id from tracked_objects
+                        if old_track_id in tracked_objects:
+                            del tracked_objects[old_track_id]
+                        logger.info(f"🧹 Removed duplicate track {old_track_id} for plate '{best_plate_text}'")
+            
+            # Set only the final_track_id for this plate
+            plate_to_track_id[best_plate_text] = [final_track_id]
         
         # Update plate history - chỉ lưu kết quả tốt nhất
         if final_track_id not in plate_history:
@@ -2367,7 +2535,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             }
             
             # Gửi dữ liệu ngay lập tức cho object mới nếu có kết quả hợp lệ
-            if processed_text and conf_val > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
+            # LOWERED THRESHOLDS for immediate tracking
+            if processed_text and conf_val > 0.3 and ocr_conf > 0.3:
                 logger.info(f"🎯 NEW PLATE DETECTED: '{processed_text}' (conf: {conf_val:.3f})")
                 
                 # Tạo frame path
@@ -2385,7 +2554,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'plate': processed_text,
                             'confidence': conf_val,
                             'bbox': [x1, y1, x2, y2]
-                        }, frame_path, camera_id, source_type, video_filename, camera_location
+                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
                     )
                     logger.debug(f"🚀 NEW plate '{processed_text}' queued for database (async)")
                 else:
@@ -2394,7 +2563,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         'plate': processed_text,
                         'confidence': conf_val,
                         'bbox': [x1, y1, x2, y2]
-                    }, frame_path, camera_id, source_type, video_filename, camera_location)
+                    }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
                 
                 # Đánh dấu chưa gửi để app.py xử lý
                 tracked_objects[final_track_id]['sent_to_db'] = False
@@ -2410,7 +2579,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             obj['disappeared'] = 0
             
             # Update plate number if we have a new valid result
-            if plate_text != "Đang nhận diện..." and conf_val > MIN_CONFIDENCE and ocr_conf > MIN_OCR_CONFIDENCE:
+            # LOWERED THRESHOLDS for immediate processing
+            if plate_text != "Đang nhận diện..." and conf_val > 0.3 and ocr_conf > 0.3:
                 # Process plate text first
                 processed_text = process_plate_text(plate_text)
                 if processed_text:
@@ -2452,7 +2622,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                 'plate': processed_text,
                                 'confidence': conf_val,
                                 'bbox': [x1, y1, x2, y2]
-                            }, frame_path, camera_id, source_type, video_filename, camera_location
+                            }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
                         )
                         logger.debug(f"🚀 NEW plate '{processed_text}' queued for database (async)")
                     else:
@@ -2461,7 +2631,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'plate': processed_text,
                             'confidence': conf_val,
                             'bbox': [x1, y1, x2, y2]
-                        }, frame_path, camera_id, source_type, video_filename, camera_location)
+                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name, camera_name)
                     
                     # Đánh dấu đã gửi
                     obj['sent_to_db'] = True
@@ -2469,9 +2639,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         
         current_track_ids.add(final_track_id)
 
-        # OPTIMIZED: Show tracking ID and plate text ABOVE the bounding box
+        # OPTIMIZED: Show tracking ID and plate text ABOVE the bounding box - UNIFIED FORMAT
         if best_plate_text and best_plate_text != "Đang nhận diện...":
             # Draw tracking ID and plate text ABOVE the bounding box (GREEN for valid plates)
+            # UNIFIED FORMAT: ID: [track_id] + biển số
             display_text = f"ID: {final_track_id} {best_plate_text}"
             text_y = max(y1 - 20, 20)  # Ensure text is above the bounding box
             cv2.putText(display_frame, display_text, (x1, text_y),
@@ -2485,7 +2656,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             labels.append(best_plate_text)
             ocr_results.append(best_plate_text)
         else:
-            # Show only tracking ID for objects without valid plates
+            # Show only tracking ID for objects without valid plates - UNIFIED FORMAT
             display_text = f"ID: {final_track_id}"
             text_y = max(y1 - 20, 20)  # Ensure text is above the bounding box
             cv2.putText(display_frame, display_text, (x1, text_y),
@@ -2496,7 +2667,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
 
         # Save crop ONLY if this is the BEST result for this track - CROP ONLY THE PLATE
         should_save = (best_plate_text and best_plate_text != "Đang nhận diện..." and 
-                      best_conf_val > MIN_CONFIDENCE and best_ocr_conf > MIN_OCR_CONFIDENCE)
+                      best_conf_val > 0.3 and best_ocr_conf > 0.3)
         
         # Only save if this is better than previous result for this track
         if should_save and final_track_id in tracked_objects:
@@ -2581,14 +2752,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     }
                     if ENABLE_THREADING:
                         thread_pool.submit(
-                            send_plate_to_server, track_id, plate_data, frame_path, 
-                            camera_id=camera_id, source_type=source_type, 
-                            video_filename=video_filename, camera_location=camera_location
+                        send_plate_to_server, track_id, plate_data, frame_path, 
+                        camera_id=camera_id, source_type=source_type, 
+                        video_filename=video_filename, camera_location=camera_location, camera_name=camera_name
                         )
                     else:
                         send_plate_to_server(track_id, plate_data, frame_path, 
                                            camera_id=camera_id, source_type=source_type, 
-                                           video_filename=video_filename, camera_location=camera_location)
+                                           video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                     logger.info(f"🎯 INACTIVE track '{track_info[track_id]['plate']}' - waiting for app.py to save")
                 
                 tracks_to_remove.append(track_id)
@@ -2604,6 +2775,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # OPTIMIZED: Less frequent cleanup to improve FPS stability
     if frame_count % 50000000000000000000000 == 0:  # Giảm từ 20000000000000000000000 xuống 50000000000000000000000 frames
         cleanup_tracked_objects()
+    
+    # ADDITIONAL: Clean up duplicate track IDs every 1000 frames
+    if frame_count % 1000 == 0:
+        cleanup_duplicate_track_ids()
 
     # OPTIMIZED: Balanced JPEG quality for stable FPS
     result = {

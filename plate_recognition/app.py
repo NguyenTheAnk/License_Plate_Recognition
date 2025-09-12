@@ -119,6 +119,7 @@ def recognize_ws(ws):
     source_type = "camera"  # Khởi tạo source_type mặc định
     video_filename = None
     camera_location = None
+    camera_name = None
 
     try:
         while True:
@@ -137,7 +138,7 @@ def recognize_ws(ws):
                     if frame is not None:
                         logger.info(f"Received frame from frontend: {frame.shape}")
                         # Xử lý frame với detect_and_ocr_stable
-                        result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location)
+                        result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                         
                         if isinstance(result, dict):
                             processed_frame_bytes = result.get('frame', b'')
@@ -179,7 +180,12 @@ def recognize_ws(ws):
                     if data.get('type') == 'source_info':
                         logger.info(f"Received source info: {data}")
                         # Lưu thông tin camera để sử dụng sau
-                        camera_id = data.get('camera_id') or "default"
+                        # Extract numeric part from camera_id (e.g., "11-1757684051439" -> 11)
+                        raw_camera_id = data.get('camera_id') or "default"
+                        if isinstance(raw_camera_id, str) and '-' in raw_camera_id:
+                            camera_id = int(raw_camera_id.split('-')[0])  # Convert to integer
+                        else:
+                            camera_id = int(raw_camera_id) if str(raw_camera_id).isdigit() else 1
                         camera_name = data.get('camera_name')
                         source_type = data.get('source_type') or "camera"
                         video_filename = data.get('video_filename')
@@ -217,7 +223,7 @@ def recognize_ws(ws):
                                 break
                             
                             # Xử lý frame với detect_and_ocr_stable
-                            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location)
+                            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                             
                             if isinstance(result, dict):
                                 processed_frame_bytes = result.get('frame', b'')
@@ -331,7 +337,7 @@ def video_stream(video_id):
 
                 # Xử lý frame với detection/OCR
                 try:
-                    result = detect_and_ocr_stable(frame, source_type="video_upload", video_filename=video_id)
+                    result = detect_and_ocr_stable(frame, source_type="video_upload", video_filename=video_id, camera_name=f"Video_{video_id}")
 
                     # Handle both dict and direct frame results
                     if isinstance(result, dict):
@@ -498,7 +504,7 @@ def recognize():
         return jsonify({"error": "Cần cung cấp ảnh hoặc RTSP URL"}), 400
 
     detect_start = time.time()
-    result = detect_and_ocr_stable(img, source_type="http_request")
+    result = detect_and_ocr_stable(img, source_type="http_request", camera_name="HTTP_Request")
     
     # Handle both dict and direct frame results
     if isinstance(result, dict):
@@ -575,7 +581,7 @@ def processed_video_ws(ws, video_id):
                 break
 
             # Xử lý frame với detection/OCR
-            result = detect_and_ocr_stable(frame, camera_id="1", source_type="video_upload", video_filename=video_id)
+            result = detect_and_ocr_stable(frame, camera_id="1", source_type="video_upload", video_filename=video_id, camera_name=f"Video_{video_id}")
 
             # Handle both dict and direct frame results
             if isinstance(result, dict):
