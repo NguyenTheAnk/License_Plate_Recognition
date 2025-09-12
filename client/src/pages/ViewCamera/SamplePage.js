@@ -2027,6 +2027,14 @@ useEffect(() => {
                         '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
                         '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
                       }}
+                      MenuProps={{
+                        PaperProps: {
+                          style: {
+                            maxHeight: '200px',
+                            overflowY: 'auto'
+                          }
+                        }
+                      }}
                     >
                       <MenuItem value="">Tất cả khu vực</MenuItem>
                       {locations.map(loc => (
@@ -2051,6 +2059,14 @@ useEffect(() => {
                         fontWeight: 600,
                         '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
                         '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
+                      }}
+                      MenuProps={{
+                        PaperProps: {
+                          style: {
+                            maxHeight: '200px',
+                            overflowY: 'auto'
+                          }
+                        }
                       }}
                     >
                       <MenuItem value="">Tất cả camera</MenuItem>
@@ -2386,18 +2402,15 @@ useEffect(() => {
                               component="img"
                               src={(() => {
                                 let imagePath = result.cropped_plate_image_path;
-                                // Loại bỏ duplicate /static/crops/ nếu có
-                                if (imagePath.includes('/static/crops//static/crops/')) {
-                                  imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                                
+                                // Normalize path - remove any existing static/crops prefix
+                                if (imagePath.includes('static/crops/')) {
+                                  // Extract just the filename
+                                  imagePath = imagePath.split('static/crops/').pop();
                                 }
-                                // Xử lý đường dẫn ảnh
-                                if (imagePath.startsWith('/static/crops/')) {
-                                  return `http://localhost:5002${imagePath}`;
-                                } else if (imagePath.startsWith('static/crops/')) {
-                                  return `http://localhost:5002/${imagePath}`;
-                                } else {
-                                  return `http://localhost:5002/static/crops/${imagePath}`;
-                                }
+                                
+                                // Ensure we have just the filename, then construct proper URL
+                                return `http://localhost:5000/static/crops/${imagePath}`;
                               })()}
                               alt="Ảnh biển số"
                               sx={{
@@ -2418,12 +2431,12 @@ useEffect(() => {
                                 // Xử lý đường dẫn ảnh - simplified logic
                                 let imagePath = result.cropped_plate_image_path;
                                 
-                                // Ensure path starts with /static/crops/
-                                if (!imagePath.startsWith('/static/crops/')) {
-                                  imagePath = `/static/crops/${imagePath}`;
+                                // Normalize path - remove any existing static/crops prefix
+                                if (imagePath.includes('static/crops/')) {
+                                  imagePath = imagePath.split('static/crops/').pop();
                                 }
                                 
-                                const cropImageUrl = `http://localhost:5002${imagePath}`;
+                                const cropImageUrl = `http://localhost:5000/static/crops/${imagePath}`;
                                 console.log('Opening image URL:', cropImageUrl);
                                 window.open(cropImageUrl, '_blank');
                               }}
@@ -2432,10 +2445,10 @@ useEffect(() => {
                                 
                                 // Simplified error handling
                                 let imagePath = result.cropped_plate_image_path;
-                                if (!imagePath.startsWith('/static/crops/')) {
-                                  imagePath = `/static/crops/${imagePath}`;
+                                if (imagePath.includes('static/crops/')) {
+                                  imagePath = imagePath.split('static/crops/').pop();
                                 }
-                                const fullUrl = `http://localhost:5002${imagePath}`;
+                                const fullUrl = `http://localhost:5000/static/crops/${imagePath}`;
                                 console.error('Full URL:', fullUrl);
                                 
                                 e.target.style.display = 'none';
@@ -3542,17 +3555,13 @@ useEffect(() => {
                       <img
                         src={(() => {
                           let imagePath = selectedResult.cropped_plate_image_path;
-                          if (imagePath.includes('/static/crops//static/crops/')) {
-                            imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                          
+                          // Normalize path - remove any existing static/crops prefix
+                          if (imagePath.includes('static/crops/')) {
+                            imagePath = imagePath.split('static/crops/').pop();
                           }
-                                // Xử lý đường dẫn ảnh
-                                if (imagePath.startsWith('/static/crops/')) {
-                                  return `http://localhost:5002${imagePath}`;
-                                } else if (imagePath.startsWith('static/crops/')) {
-                                  return `http://localhost:5002/${imagePath}`;
-                                } else {
-                                  return `http://localhost:5002/static/crops/${imagePath}`;
-                                }
+                          
+                          return `http://localhost:5000/static/crops/${imagePath}`;
                         })()}
                         alt="Biển số xe"
                         style={{
@@ -3604,12 +3613,13 @@ useEffect(() => {
                     onClick={() => {
                       if (selectedResult.cropped_plate_image_path) {
                         let imagePath = selectedResult.cropped_plate_image_path;
-                        if (imagePath.includes('/static/crops//static/crops/')) {
-                          imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                        
+                        // Normalize path - remove any existing static/crops prefix
+                        if (imagePath.includes('static/crops/')) {
+                          imagePath = imagePath.split('static/crops/').pop();
                         }
-                        const imageUrl = imagePath.startsWith('/static/crops/') 
-                          ? `http://localhost:5002${imagePath}`
-                          : `http://localhost:5002/static/crops/${imagePath}`;
+                        
+                        const imageUrl = `http://localhost:5000/static/crops/${imagePath}`;
                         window.open(imageUrl, '_blank');
                       }
                     }}
@@ -3843,17 +3853,13 @@ useEffect(() => {
                       <img
                         src={(() => {
                           let imagePath = confirmationModal.result.cropped_plate_image_path;
-                          if (imagePath.includes('/static/crops//static/crops/')) {
-                            imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                          
+                          // Normalize path - remove any existing static/crops prefix
+                          if (imagePath.includes('static/crops/')) {
+                            imagePath = imagePath.split('static/crops/').pop();
                           }
-                                // Xử lý đường dẫn ảnh
-                                if (imagePath.startsWith('/static/crops/')) {
-                                  return `http://localhost:5002${imagePath}`;
-                                } else if (imagePath.startsWith('static/crops/')) {
-                                  return `http://localhost:5002/${imagePath}`;
-                                } else {
-                                  return `http://localhost:5002/static/crops/${imagePath}`;
-                                }
+                          
+                          return `http://localhost:5000/static/crops/${imagePath}`;
                         })()}
                         alt="Biển số xe"
                         style={{
