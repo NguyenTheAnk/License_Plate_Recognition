@@ -5,7 +5,7 @@ import {
   IconButton, Typography, Grid, FormControl, InputLabel, Select, MenuItem, 
   Chip, Alert, CircularProgress, Card, CardContent, Tooltip, Tabs, Tab, 
   Checkbox, Breadcrumbs,  FormHelperText, InputAdornment, Snackbar, 
-  Pagination, Divider, Paper, Stack, Avatar
+  Paper, Stack, Avatar, InputBase
 } from '@mui/material';
 import {
    CalendarToday as CalendarIcon, 
@@ -15,7 +15,8 @@ import {
    Image as ImageIcon, Warning as WarningIcon, 
   Block as BlockIcon, Visibility as VisibilityIcon, Edit as EditIcon, 
   Delete as DeleteIcon, PhotoCamera as PhotoCameraIcon, Close as CloseIcon,
-  Download as DownloadIcon
+  Download as DownloadIcon, FirstPage, LastPage, ChevronLeft, ChevronRight, MoreHoriz,
+  Cancel, AccessTime, Info, CheckCircle, WarningAmber as WarningAmberIcon
 } from '@mui/icons-material';
 import { FaTrash, FaPlus, FaExclamationTriangle, FaShieldAlt, FaClock, FaSave } from 'react-icons/fa';
 import { BiRefresh, BiSolidTrashAlt } from 'react-icons/bi';
@@ -54,14 +55,42 @@ const parseDateComponents = (dateString) => {
   
   return { year, month, day };
 };
+const validatePlateNumberSearch = (plateNumber) => {
+  if (!plateNumber || plateNumber.trim() === '') {
+    return { isValid: true, message: '' }; // Search cho phép empty
+  }
+
+  const cleaned = plateNumber.trim().toUpperCase();
+  
+  // Patterns linh hoạt cho Search - cho phép partial match
+  const flexiblePatterns = [
+    /^\d{1,2}$/,                         // Chỉ mã tỉnh: 30
+    /^\d{1,2}[A-Z]?$/,                   // Mã tỉnh + chữ: 30A
+    /^\d{1,2}[A-Z]\d?$/,                 // Partial xe máy: 30A1
+    /^\d{1,2}[A-Z]-?\d*\.?\d*$/,         // Partial ô tô: 30A-123
+    /^\d{1,2}[A-Z]\d-?\d*\.?\d*$/,       // Partial xe máy: 30A1-45
+    /^.+$/                               // Bất kỳ text nào (cho fuzzy search)
+  ];
+
+  // Search luôn cho phép, chỉ cảnh báo nếu format lạ
+  if (cleaned.length >= 6) {
+    const hasValidStructure = /^\d{2}[A-Z]/.test(cleaned);
+    if (!hasValidStructure) {
+      return { 
+        isValid: true, 
+        message: 'Tìm kiếm có thể không chính xác với format này' 
+      };
+    }
+  }
+
+  return { isValid: true, message: '' };
+};
 const formatDateForDisplay = (dateString) => {
   if (!dateString) return '';
   
-  console.log('[FRONTEND] formatDateForDisplay input:', dateString);
   
   // Nếu đã là dd/MM/yyyy thì return luôn
   if (dateString.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-    console.log('[FRONTEND] Already dd/MM/yyyy:', dateString);
     return dateString;
   }
   
@@ -78,35 +107,29 @@ const formatDateForDisplay = (dateString) => {
     // dd/MM/yyyy format - đã đúng format
     return dateString;
   } else {
-    console.error('[FRONTEND] Cannot parse date:', dateString);
     return '';
   }
   
   const result = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
-  console.log('[FRONTEND] formatDateForDisplay result:', result);
   return result;
 };
 
 const formatDateForInput = (dateString) => {
   if (!dateString) return '';
-  
-  console.log('[FRONTEND] formatDateForInput input:', dateString);
+
   
   // Nếu đã là YYYY-MM-DD thì return luôn
   if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    console.log('[FRONTEND] Already YYYY-MM-DD:', dateString);
     return dateString;
   }
   
   const components = parseDateComponents(dateString);
   if (!components) {
-    console.error('[FRONTEND] Cannot parse date for input:', dateString);
     return '';
   }
   
   const { year, month, day } = components;
   const result = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  console.log('[FRONTEND] formatDateForInput result:', result);
   return result;
 };
 
@@ -171,7 +194,7 @@ const ImagePreviewDialog = ({ open, onClose, src, title = "Xem ảnh" }) => (
         </IconButton>
       </Box>
     </DialogTitle>
-    <DialogContent sx={{ p: 2, textAlign: 'center' }}>
+    <DialogContent sx={{ p: 2, pt: 4, textAlign: 'center' }}>
       {src ? (
         <img 
           src={src} 
@@ -202,7 +225,7 @@ const PlateImageCell = ({ item, onImageClick }) => {
 
   const getImageUrl = (imagePath) => {
     if (!imagePath) return null;
-    const baseUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
+            const baseUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
     const cacheBuster = getCacheBuster();
     return `${baseUrl}?${cacheBuster}`;
   };
@@ -289,6 +312,102 @@ const PlateImageCell = ({ item, onImageClick }) => {
     </TableCell>
   );
 };
+// ✅ THÊM: Validation nghiêm ngặt cho Add/Update
+const validatePlateNumberStrict = (plateNumber) => {
+  if (!plateNumber || plateNumber.trim() === '') {
+    return { isValid: false, message: 'Vui lòng nhập biển số xe' };
+  }
+
+  const cleaned = plateNumber.trim().toUpperCase();
+  
+  // Patterns nghiêm ngặt cho Add/Update
+  const strictPatterns = [
+    /^\d{2}[A-Z]-\d{2,4}\.\d{2}$/,      // Ô tô: 30A-123.45, 30A-1234.56
+    /^\d{2}[A-Z]\d-\d{3,4}(\.\d{2})?$/, // Xe máy: 30A1-4567, 30A1-456.78
+    /^\d{2}[A-Z]{2}-\d{2,3}\.\d{2}$/,   // Ngoại giao: 30AB-123.45
+    /^\d{2}[A-Z]-\d{5,}$/                // Taxi: 30A-12345+
+  ];
+
+  const isValidFormat = strictPatterns.some(pattern => pattern.test(cleaned));
+  
+  if (!isValidFormat) {
+    return { 
+      isValid: false, 
+      message: 'Định dạng biển số không đúng. VD: 30A-123.45, 51B1-4567' 
+    };
+  }
+
+  return { isValid: true, message: '' };
+};
+
+// ✅ THÊM: Auto format biển số
+const autoFormatPlateNumber = (input) => {
+  if (!input) return '';
+  
+  // Loại bỏ các ký tự không hợp lệ, chỉ giữ chữ, số, dấu gạch ngang và chấm
+  let cleaned = input.toUpperCase().replace(/[^A-Z0-9\-\.]/g, '');
+  
+  // Xóa các từ không cần thiết
+  cleaned = cleaned.replace(/^(VN|VIETNAM|VIET|NAM)/, '');
+  
+  // Logic format tự động dựa trên độ dài và pattern
+  if (cleaned.length >= 6) {
+    // Kiểm tra pattern cơ bản: 2 số + 1 chữ + ...
+    if (/^\d{2}[A-Z]/.test(cleaned)) {
+      const numbers = cleaned.substring(0, 2);  // Mã tỉnh
+      const letter = cleaned.substring(2, 3);   // Chữ cái
+      const rest = cleaned.substring(3);        // Phần còn lại
+      
+      // Loại bỏ dấu - và . hiện có để format lại
+      const cleanRest = rest.replace(/[\-\.]/g, '');
+      
+      if (cleanRest.length >= 4) {
+        const fourthChar = cleanRest.charAt(0);
+        
+        if (/\d/.test(fourthChar)) {
+          // Xe máy: 30A1-XXXX
+          if (cleanRest.length === 5) {
+            // Xe máy cũ: 30A1-2345
+            return `${numbers}${letter}${cleanRest.charAt(0)}-${cleanRest.substring(1)}`;
+          } else if (cleanRest.length === 6) {
+            // Xe máy mới: 30A1-123.45
+            return `${numbers}${letter}${cleanRest.charAt(0)}-${cleanRest.substring(1, 4)}.${cleanRest.substring(4)}`;
+          }
+        } else {
+          // Ô tô: 30A-XXXX
+          if (cleanRest.length === 4) {
+            // Ô tô ngắn: 30A-12.34
+            return `${numbers}${letter}-${cleanRest.substring(0, 2)}.${cleanRest.substring(2)}`;
+          } else if (cleanRest.length === 5) {
+            // Ô tô thường: 30A-123.45
+            return `${numbers}${letter}-${cleanRest.substring(0, 3)}.${cleanRest.substring(3)}`;
+          } else if (cleanRest.length === 6) {
+            // Ô tô dài: 30A-1234.56
+            return `${numbers}${letter}-${cleanRest.substring(0, 4)}.${cleanRest.substring(4)}`;
+          } else if (cleanRest.length >= 7) {
+            // Taxi: 30A-12345+
+            return `${numbers}${letter}-${cleanRest}`;
+          }
+        }
+      }
+    }
+    
+    // Kiểm tra pattern ngoại giao: 2 số + 2 chữ
+    if (/^\d{2}[A-Z]{2}/.test(cleaned)) {
+      const numbers = cleaned.substring(0, 2);
+      const letters = cleaned.substring(2, 4);
+      const rest = cleaned.substring(4).replace(/[\-\.]/g, '');
+      
+      if (rest.length === 4) {
+        return `${numbers}${letters}-${rest.substring(0, 2)}.${rest.substring(2)}`;
+      } else if (rest.length === 5) {
+        return `${numbers}${letters}-${rest.substring(0, 3)}.${rest.substring(3)}`;
+      }
+    }
+  }
+  
+  return cleaned;
+};
 const BlackList = () => {
   // States
   const [blacklist, setBlacklist] = useState([]);
@@ -301,10 +420,28 @@ const BlackList = () => {
   const [statistics, setStatistics] = useState({});
   const [activeTab, setActiveTab] = useState(0);
   const [selectedItems, setSelectedItems] = useState([]);
-  const [showDateInput, setShowDateInput] = useState({ valid_from: false, valid_to: false });
   const validFromDateRef = useRef(null);
   const validToDateRef = useRef(null);
-
+  const [hasCreateBlackList, setHasCreateBlackList] = useState(false);
+  const [hasUpdateBlackList, setHasUpdateBlackList] = useState(false);
+  const [hasViewBlackList, setHasViewBlackList] = useState(false);
+  const [hasDeleteBlackList, setHasDeleteBlackList] = useState(false);
+  useEffect(() => {
+            const storedUser = localStorage.getItem('user');
+            if (storedUser ) {
+                try {
+                    const user = JSON.parse(storedUser); // Parse dữ liệu user
+                    const permissions = user.permissions || [];
+                    setHasCreateBlackList(permissions.some(permission => permission.code === 'blacklist.create'));
+                    setHasUpdateBlackList(permissions.some(permission => permission.code === 'blacklist.update'));
+                    setHasViewBlackList(permissions.some(permission => permission.code === 'blacklist.view'));
+                    setHasDeleteBlackList(permissions.some(permission => permission.code === 'blacklist.delete'));
+  
+                } catch (error) {
+                    console.error('Error parsing permissions:', error);
+                }
+            }
+        }, []);
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -313,12 +450,12 @@ const BlackList = () => {
 
   // Filters
   const [filters, setFilters] = useState({
-    location_id: '', plate_number: '', violation_type: '', severity: '', is_active: '', valid_status: ''
+    plate_number: '', violation_type: '', severity: '', is_active: '', valid_status: ''
   });
 
   // Form data
   const [formData, setFormData] = useState({
-    location_id: '', plate_number: '', vehicle_id: '', violation_type: 'unauthorized', 
+    plate_number: '', vehicle_id: '', violation_type: 'unauthorized', 
     reason: '', severity: 'medium', owner_name: '', owner_phone: '', 
     valid_from: '', valid_to: '', description: ''
   });
@@ -357,7 +494,6 @@ const BlackList = () => {
   useEffect(() => {
     const loadData = async () => {
       await loadBlacklist();
-      await loadLocations();
       await loadStatistics();
     };
     loadData();
@@ -366,26 +502,17 @@ const BlackList = () => {
 const validateForm = () => {
   const errors = {};
   
-  if (!formData.location_id) {
-    errors.location_id = 'Vui lòng chọn khu vực';
-  }
-  
-  // SỬA: Validation cho create vs update
-  if (!selectedItem) {
-    // Create mode - cần ảnh
-    if (!imageFile && !ocrResult) {
-      errors.image = 'Vui lòng upload ảnh biển số xe';
-    }
-    if (!formData.plate_number && !ocrResult) {
-      errors.plate_number = 'Vui lòng upload ảnh biển số để nhận diện tự động hoặc nhập biển số';
-    }
+  // ✅ SỬA: Validation nghiêm ngặt cho Add/Update - chỉ yêu cầu biển số, không bắt buộc ảnh
+  if (!formData.plate_number || formData.plate_number.trim() === '') {
+    errors.plate_number = 'Vui lòng nhập biển số xe';
   } else {
-    // Update mode - không bắt buộc ảnh
-    if (!formData.plate_number) {
-      errors.plate_number = 'Biển số xe là bắt buộc';
+    // Validate format biển số khi user đã nhập
+    const plateValidation = validatePlateNumberStrict(formData.plate_number);
+    if (!plateValidation.isValid) {
+      errors.plate_number = plateValidation.message;
     }
   }
-  
+
   // Validate reason với độ dài tối thiểu
   if (!formData.reason || formData.reason.trim() === '') {
     errors.reason = 'Vui lòng nhập lý do cấm';
@@ -408,14 +535,6 @@ const validateForm = () => {
     const vehicleIdNum = parseInt(formData.vehicle_id);
     if (isNaN(vehicleIdNum) || vehicleIdNum <= 0) {
       errors.vehicle_id = 'ID phương tiện phải là số nguyên dương';
-    }
-  }
-  
-  // Validate phone
-  if (formData.owner_phone && formData.owner_phone.trim() !== '') {
-    const phoneRegex = /^(\+84|84|0)(3|5|7|8|9)[0-9]{8}$/;
-    if (!phoneRegex.test(formData.owner_phone.replace(/\s+/g, ''))) {
-      errors.owner_phone = 'Định dạng số điện thoại không hợp lệ';
     }
   }
   
@@ -488,7 +607,7 @@ const loadBlacklist = async (forceRefresh = false) => {
       headers['If-Modified-Since'] = new Date(0).toUTCString();
     }
 
-    const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/blacklist?${params.toString()}`, {
+            const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/blacklist?${params.toString()}`, {
       method: 'GET',
       headers
     });
@@ -554,26 +673,6 @@ const loadBlacklist = async (forceRefresh = false) => {
     }
   };
 
-  const loadLocations = async () => {
-    setLocationsLoading(true);
-    try {
-      const token = getToken();
-      // SỬA: Gọi đúng endpoint lấy khu vực active
-      const response = await fetchDataFromAPI('/api/location/active', token);
-      if (response.success) {
-        setLocations(response.data.locations || response.data || []);
-      } else {
-        console.error('Failed to load locations:', response.message);
-        showSnackbar('Không thể tải danh sách khu vực: ' + response.message, 'error');
-      }
-    } catch (error) {
-      console.error('Error loading locations:', error);
-      const errorMessage = handleErrorResponse(error);
-      showSnackbar('Không thể tải danh sách khu vực: ' + errorMessage, 'error');
-    } finally {
-      setLocationsLoading(false);
-    }
-  };
 
   const loadStatistics = async () => {
     try {
@@ -624,16 +723,25 @@ const loadBlacklist = async (forceRefresh = false) => {
       const data = await uploadImage('/api/blacklist/ocr-preview', formDataToSend, token);
       
       if (data.success && data.ocr_text) {
-        setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
+        // ✅ SỬA: Chỉ cập nhật nếu chưa có biển số hoặc user chấp nhận
+        if (!formData.plate_number || formData.plate_number.trim() === '') {
+          setFormData(prev => ({ ...prev, plate_number: data.ocr_text }));
+        }
         setOcrResult(data.ocr_text);
-        showSnackbar(`Nhận diện thành công biển số: ${data.ocr_text}`, 'success');
+        
+        const message = formData.plate_number && formData.plate_number !== data.ocr_text
+          ? `Nhận diện được: ${data.ocr_text}. Biển số hiện tại: ${formData.plate_number}`
+          : `Nhận diện thành công biển số: ${data.ocr_text}`;
+          
+        showSnackbar(message, 'success');
         
         if (data.detected_plate_image) {
           setDetectedPlateImage(data.detected_plate_image);
         } else {
           setDetectedPlateImage(null);
         }
-      } else {
+      }
+      else {
         setOcrResult('');
         setDetectedPlateImage(null);
         showSnackbar('Nhận diện ký tự thất bại: ' + (data.message || 'Không xác định'), 'error');
@@ -658,55 +766,49 @@ const loadBlacklist = async (forceRefresh = false) => {
     setImagePreviewDialog({ open: true, src, title });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-  
+const handleSubmit = async (e) => {
+  e.preventDefault();
+
   if (!validateForm()) {
     showSnackbar('Vui lòng kiểm tra lại thông tin nhập vào', 'error');
     return;
   }
 
-    setLoading(true);
-  
-    try {
-      const token = getToken();
-      let response;
-    
-    const processedFormData = {
-  // QUAN TRỌNG: Luôn gửi tất cả các field, không skip field nào
-  location_id: formData.location_id || '',
-  plate_number: formData.plate_number || ocrResult || '',
-  vehicle_id: formData.vehicle_id && formData.vehicle_id !== '' ? 
-    parseInt(formData.vehicle_id) : null,
-  violation_type: formData.violation_type || 'unauthorized',
-  severity: formData.severity || 'medium',
-  reason: formData.reason || '',
-  owner_name: formData.owner_name || '',
-  owner_phone: formData.owner_phone || '',
-  description: formData.description || '',
-  
-  // Convert dates
-  valid_from: formData.valid_from ? 
-    (() => {
-      if (formData.valid_from.includes('/')) {
-        const [d, m, y] = formData.valid_from.split('/');
-        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-      }
-      return formData.valid_from;
-    })() : '',
-    
-  valid_to: formData.valid_to ? 
-    (() => {
-      if (formData.valid_to.includes('/')) {
-        const [d, m, y] = formData.valid_to.split('/');
-        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-      }
-      return formData.valid_to;
-    })() : ''
-};
+  setLoading(true);
 
-// Quan trọng: KHÔNG xóa các field null, để backend tự xử lý
-console.log('Sending update data:', processedFormData);
+  try {
+    const token = getToken();
+    let response;
+  
+    const processedFormData = {
+      // QUAN TRỌNG: Luôn gửi tất cả các field, không skip field nào
+      plate_number: formData.plate_number || ocrResult || '',
+      vehicle_id: formData.vehicle_id && formData.vehicle_id !== '' ? 
+        parseInt(formData.vehicle_id) : null,
+      violation_type: formData.violation_type || 'unauthorized',
+      severity: formData.severity || 'medium',
+      reason: formData.reason || '',
+      description: formData.description || '',
+      
+      // Convert dates
+      valid_from: formData.valid_from ? 
+        (() => {
+          if (formData.valid_from.includes('/')) {
+            const [d, m, y] = formData.valid_from.split('/');
+            return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+          }
+          return formData.valid_from;
+        })() : '',
+        
+      valid_to: formData.valid_to ? 
+        (() => {
+          if (formData.valid_to.includes('/')) {
+            const [d, m, y] = formData.valid_to.split('/');
+            return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+          }
+          return formData.valid_to;
+        })() : ''
+    };
 
     // Remove null vehicle_id
     if (processedFormData.vehicle_id === null) {
@@ -715,109 +817,78 @@ console.log('Sending update data:', processedFormData);
 
     console.log('Processed form data:', processedFormData);
 
-      if (selectedItem) {
-  // ===== UPDATE EXISTING ITEM =====
-  console.log('=== UPDATE EXISTING BLACKLIST ===');
-  
-  // SỬA: Tạo FormData mới và chỉ append mỗi field một lần
-  const formDataToSend = new FormData();
-  
-  // Helper function để append safely
-  const appendOnce = (formData, key, value) => {
-    // Chỉ append nếu value có ý nghĩa
-    if (value !== null && value !== undefined) {
-      formData.append(key, String(value));
-      console.log(`[APPEND] ${key}:`, value);
-    }
-  };
-  
-  // Append các field một cách có kiểm soát
-  appendOnce(formDataToSend, 'location_id', processedFormData.location_id);
-  appendOnce(formDataToSend, 'plate_number', processedFormData.plate_number);
-  appendOnce(formDataToSend, 'violation_type', processedFormData.violation_type);
-  appendOnce(formDataToSend, 'reason', processedFormData.reason);
-  appendOnce(formDataToSend, 'severity', processedFormData.severity);
-  
-  // Các field có thể empty
-  appendOnce(formDataToSend, 'owner_name', processedFormData.owner_name || '');
-  appendOnce(formDataToSend, 'owner_phone', processedFormData.owner_phone || '');
-  appendOnce(formDataToSend, 'description', processedFormData.description || '');
-  appendOnce(formDataToSend, 'valid_from', processedFormData.valid_from || '');
-  appendOnce(formDataToSend, 'valid_to', processedFormData.valid_to || '');
-  
-  // Vehicle ID nếu có
-  if (processedFormData.vehicle_id) {
-    appendOnce(formDataToSend, 'vehicle_id', processedFormData.vehicle_id);
-  }
-  
-  // Add image file if exists
-  if (imageFile) {
-    formDataToSend.append('plate_image', imageFile, imageFile.name);
-    formDataToSend.append('replace_images', 'true');
-    console.log('[APPEND] plate_image file:', imageFile.name);
-  }
-  
-  // Debug: Check FormData content (không duplicate)
-  console.log('UPDATE FormData entries:');
-  const entries = [];
-  for (let [key, value] of formDataToSend.entries()) {
-    entries.push({ key, value: typeof value === 'object' ? 'FILE' : value });
-  }
-  console.table(entries);
-  
-  // Send update request
-  response = await editData(`api/blacklist/${selectedItem.id}`, formDataToSend, token);
+    if (selectedItem) {
+      // ===== UPDATE EXISTING ITEM =====
+      console.log('=== UPDATE EXISTING BLACKLIST ===');
+      
+      const formDataToSend = new FormData();
+      
+      // Helper function để append safely
+      const appendOnce = (formData, key, value) => {
+        if (value !== null && value !== undefined) {
+          formData.append(key, String(value));
+          console.log(`[APPEND] ${key}:`, value);
+        }
+      };
+      
+      // Append các field một cách có kiểm soát
+      appendOnce(formDataToSend, 'plate_number', processedFormData.plate_number);
+      appendOnce(formDataToSend, 'violation_type', processedFormData.violation_type);
+      appendOnce(formDataToSend, 'reason', processedFormData.reason);
+      appendOnce(formDataToSend, 'severity', processedFormData.severity);
+      
+      appendOnce(formDataToSend, 'description', processedFormData.description || '');
+      appendOnce(formDataToSend, 'valid_from', processedFormData.valid_from || '');
+      appendOnce(formDataToSend, 'valid_to', processedFormData.valid_to || '');
+      
+      // Vehicle ID nếu có
+      if (processedFormData.vehicle_id) {
+        appendOnce(formDataToSend, 'vehicle_id', processedFormData.vehicle_id);
+      }
+      
+      // Add image file if exists
+      if (imageFile) {
+        formDataToSend.append('plate_image', imageFile, imageFile.name);
+        formDataToSend.append('replace_images', 'true');
+        console.log('[APPEND] plate_image file:', imageFile.name);
+      }
+      
+      // Send update request
+      response = await editData(`api/blacklist/${selectedItem.id}`, formDataToSend, token);
 
       if (response.success) {
-    console.log('[DEBUG FRONTEND] Update response:', response.data);
-    
-    // SỬA: Kiểm tra và log detected image info
-    if (response.data && response.data.detected_plate_image) {
-      console.log('[DEBUG FRONTEND] New detected image from response:', response.data.detected_plate_image);
-      console.log('[DEBUG FRONTEND] Old detected image:', selectedItem.detected_plate_image);
-      
-      // Update local detected image state
-      setDetectedPlateImage(response.data.detected_plate_image);
-    }
-    
-    showSnackbar(`Cập nhật blacklist ${processedFormData.plate_number} thành công!`, 'success');
-    
-    // Clear states
-        setOpenModal(false);
-    setImageFile(null);
-    setImagePreview(null);
-    setOcrResult('');
-        resetForm();
-    
-    // SỬA: Enhanced refresh với debug logging
-    setTimeout(async () => {
-      console.log('[DEBUG FRONTEND] Force refreshing blacklist...');
-      await loadBlacklist(true);
-      
-      // SỬA: Additional check - verify the updated item has new detected image
-      setTimeout(() => {
-        const updatedItem = blacklist.find(item => item.id === selectedItem.id);
-        if (updatedItem) {
-          console.log('[DEBUG FRONTEND] Updated item detected image:', updatedItem.detected_plate_image);
-          console.log('[DEBUG FRONTEND] Updated item plate number:', updatedItem.plate_number);
+        console.log('[DEBUG FRONTEND] Update response:', response.data);
+        
+        if (response.data && response.data.detected_plate_image) {
+          console.log('[DEBUG FRONTEND] New detected image from response:', response.data.detected_plate_image);
+          setDetectedPlateImage(response.data.detected_plate_image);
         }
-      }, 500);
-      
-    }, 200);
-    
-    // SỬA: Second refresh để đảm bảo
-    setTimeout(() => {
-      console.log('[DEBUG FRONTEND] Second refresh...');
-      loadBlacklist(true);
-    }, 1500);
-  }
-}
-    else {
+        
+        showSnackbar(`Cập nhật blacklist ${processedFormData.plate_number} thành công!`, 'success');
+        
+        setOpenModal(false);
+        setImageFile(null);
+        setImagePreview(null);
+        setOcrResult('');
+        resetForm();
+        
+        setTimeout(async () => {
+          console.log('[DEBUG FRONTEND] Force refreshing blacklist...');
+          await loadBlacklist(true);
+        }, 200);
+        
+        setTimeout(() => {
+          console.log('[DEBUG FRONTEND] Second refresh...');
+          loadBlacklist(true);
+        }, 1500);
+      }
+    } else {
       // ===== CREATE NEW ITEM =====
       console.log('=== CREATE NEW BLACKLIST ===');
       
-      if (!imageFile) {
-        showSnackbar('Vui lòng upload ảnh biển số để tạo blacklist mới', 'error');
+      // ✅ SỬA: Không yêu cầu bắt buộc phải có ảnh nếu đã nhập biển số tay
+      if (!processedFormData.plate_number || processedFormData.plate_number.trim() === '') {
+        showSnackbar('Vui lòng nhập biển số xe hoặc upload ảnh để nhận diện tự động', 'error');
         return;
       }
       
@@ -831,8 +902,13 @@ console.log('Sending update data:', processedFormData);
         }
       });
       
-      // QUAN TRỌNG: Sử dụng field name 'image' cho create
-      formDataToSend.append('image', imageFile, imageFile.name);
+      // ✅ SỬA: Chỉ append ảnh nếu có, không bắt buộc
+      if (imageFile) {
+        formDataToSend.append('image', imageFile, imageFile.name);
+        console.log('[CREATE] Added image file:', imageFile.name);
+      } else {
+        console.log('[CREATE] No image file, creating with manual plate number only');
+      }
       
       // Debug FormData contents
       console.log('Creating new blacklist with FormData:');
@@ -844,29 +920,28 @@ console.log('Sending update data:', processedFormData);
       response = await postData('api/blacklist/create', formDataToSend, token, true);
       
       if (response.success) {
-    showSnackbar(`Tạo blacklist ${processedFormData.plate_number || ocrResult} thành công!`, 'success');
-    setOpenModal(false);
-    
-    // Same enhanced refresh for create
-    setImageFile(null);
-    setImagePreview(null);
-    setOcrResult('');
-    setDetectedPlateImage(null);
-    resetForm();
-    
-    setTimeout(async () => {
-      await loadBlacklist(true);
-    }, 100);
-  }
+        showSnackbar(`Tạo blacklist ${processedFormData.plate_number} thành công!`, 'success');
+        setOpenModal(false);
+        
+        setImageFile(null);
+        setImagePreview(null);
+        setOcrResult('');
+        setDetectedPlateImage(null);
+        resetForm();
+        
+        setTimeout(async () => {
+          await loadBlacklist(true);
+        }, 100);
+      }
     }
     
-    } catch (error) {
-      console.error('Error submitting form:', error);
+  } catch (error) {
+    console.error('Error submitting form:', error);
     showSnackbar(handleErrorResponse(error), 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  } finally {
+    setLoading(false);
+  }
+};
 const handleDateChange = (field, value) => {
   console.log(`[DEBUG] handleDateChange - Field: ${field}, Value: ${value}`);
   
@@ -976,14 +1051,11 @@ const handleDateIconClick = (field) => {
   }
   
     setFormData({
-      location_id: item.location_id || '',
       plate_number: item.plate_number || '',
       vehicle_id: item.vehicle_id || '',
       violation_type: item.violation_type || 'unauthorized',
       reason: item.reason || '',
       severity: item.severity || 'medium',
-      owner_name: item.owner_name || '',
-      owner_phone: item.owner_phone || '',
     valid_from: formattedValidFrom,
     valid_to: formattedValidTo,
       description: item.description || ''
@@ -996,7 +1068,7 @@ const handleDateIconClick = (field) => {
   
   setImageFile(null);
   if (item.plate_image_path) {
-    setImagePreview(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`);
+            setImagePreview(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${item.plate_image_path}`);
   } else {
     setImagePreview(null);
   }
@@ -1027,8 +1099,8 @@ const handleDateIconClick = (field) => {
 
   const resetForm = () => {
     setFormData({
-      location_id: '', plate_number: '', vehicle_id: '', violation_type: 'unauthorized', 
-      reason: '', severity: 'medium', owner_name: '', owner_phone: '', 
+      plate_number: '', vehicle_id: '', violation_type: 'unauthorized', 
+      reason: '', severity: 'medium',
       valid_from: '', valid_to: '', description: ''
     });
     setSelectedItem(null);
@@ -1036,16 +1108,24 @@ const handleDateIconClick = (field) => {
   };
 
   const handleRefresh = () => {
-    setFilters({ location_id: '', plate_number: '', violation_type: '', severity: '', is_active: '', valid_status: '' });
+    setFilters({ plate_number: '', violation_type: '', severity: '', is_active: '', valid_status: '' });
     setCurrentPage(1);
     setSelectedItems([]);
     loadBlacklist(true);
   };
 
-  const handleFilterChange = (key, value) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
-    setCurrentPage(1);
-  };
+const handleFilterChange = (key, value) => {
+  // ✅ THÊM: Validation cho plate_number search giống WhiteList
+  if (key === 'plate_number') {
+    const searchValidation = validatePlateNumberSearch(value);
+    if (!searchValidation.isValid) {
+      showSnackbar(searchValidation.message, 'warning');
+    }
+  }
+  
+  setFilters(prev => ({ ...prev, [key]: value }));
+  setCurrentPage(1);
+};
 
   const handleSelectItem = (itemId) => {
     setSelectedItems(prev => prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]);
@@ -1062,36 +1142,37 @@ const handleDateIconClick = (field) => {
   // Status and chip components
   const getStatusChip = (status) => {
     const statusConfig = {
-      'active': { color: 'error', label: 'Đang chặn' },
-      'inactive': { color: 'default', label: 'Không hoạt động' },
-      'expired': { color: 'warning', label: 'Hết hạn' }
+      'active': { label: 'Đang chặn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'inactive': { label: 'Không hoạt động', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } },
+      'future': { label: 'Chưa có hiệu lực', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'expired': { label: 'Hết hạn', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
     };
-    const config = statusConfig[status] || { color: 'default', label: status };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = statusConfig[status] || { label: status, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   const getViolationTypeChip = (type) => {
     const typeConfig = {
-      'unauthorized': { color: 'warning', label: 'Không được phép' },
-      'security_threat': { color: 'error', label: 'Đe dọa an ninh' },
-      'unpaid_fine': { color: 'info', label: 'Chưa nộp phạt' },
-      'banned': { color: 'default', label: 'Bị cấm' },
-      'suspicious': { color: 'warning', label: 'Đáng ngờ' },
-      'other': { color: 'default', label: 'Khác' }
+      'unauthorized': { label: 'Không được phép', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'security_threat': { label: 'Nguy cơ an ninh', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'unpaid_fine': { label: 'Chưa nộp phạt', sx: { bgcolor: '#e3f2fd', color: '#1976d2', border: '1px solid #64b5f6' } },
+      'banned': { label: 'Bị cấm', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } },
+      'suspicious': { label: 'Đáng ngờ', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'other': { label: 'Khác', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
     };
-    const config = typeConfig[type] || { color: 'default', label: type };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = typeConfig[type] || { label: type, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   const getSeverityChip = (severity) => {
     const severityConfig = {
-      'low': { color: 'success', label: 'Thấp' },
-      'medium': { color: 'warning', label: 'Trung bình' },
-      'high': { color: 'error', label: 'Cao' },
-      'critical': { color: 'default', label: 'Nghiêm trọng' }
+      'low': { label: 'Thấp', sx: { bgcolor: '#e8f5e9', color: '#2e7d32', border: '1px solid #81c784' } },
+      'medium': { label: 'Trung bình', sx: { bgcolor: '#fffde7', color: '#f9a825', border: '1px solid #ffe082' } },
+      'high': { label: 'Cao', sx: { bgcolor: '#ffebee', color: '#d32f2f', border: '1px solid #e57373' } },
+      'critical': { label: 'Nghiêm trọng', sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } }
     };
-    const config = severityConfig[severity] || { color: 'default', label: severity };
-    return <Chip label={config.label} color={config.color} size="small" sx={{ fontWeight: 600, fontSize: '0.75rem' }} />;
+    const config = severityConfig[severity] || { label: severity, sx: { bgcolor: '#f5f5f5', color: '#666', border: '1px solid #e0e0e0' } };
+    return <Chip label={config.label} size="small" sx={{ fontWeight: 700, fontSize: '0.8rem', px: 1.5, ...config.sx }} />;
   };
 
   // Thêm hàm helper phân trang giống WhiteList
@@ -1135,6 +1216,18 @@ const handleDateIconClick = (field) => {
       setDetectedPlateImage(null);
     }
   }, [openModal]);
+
+  // Thêm vào đầu component BlackList:
+  const [gotoPage, setGotoPage] = useState('');
+  // ... existing code ...
+  // Reset gotoPage khi currentPage thay đổi
+  useEffect(() => { setGotoPage(''); }, [currentPage]);
+  // ... existing code ...
+
+  const handleItemsPerPageChange = (event) => {
+    setItemsPerPage(parseInt(event.target.value));
+    setCurrentPage(1);
+  };
 
   return (
     <Box sx={{ 
@@ -1183,8 +1276,8 @@ const handleDateIconClick = (field) => {
                     icon={<ExpandMoreIcon fontSize="small" />}
                   />
                 </Breadcrumbs>
-                
-                <Button
+                {hasCreateBlackList && (
+<Button
                   variant="contained"
                   startIcon={<FaPlus />}
                   onClick={() => {
@@ -1209,6 +1302,8 @@ const handleDateIconClick = (field) => {
                 >
                   Thêm mới
                 </Button>
+                )}
+                
               </Box>
             </Box>
           </Box>
@@ -1291,132 +1386,137 @@ const handleDateIconClick = (field) => {
       {activeTab === 0 && (
         <>
           {/* Enhanced Filters */}
-          <Box sx={{ px: 3, mb: 3 }}>
-            <Card sx={{ 
-              background: 'white',
-              borderRadius: 3,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              border: '1px solid #e0e0e0'
-            }}>
-              <CardContent>
-                <Grid container spacing={3} alignItems="center">
-                  <Grid item xs={12} sm={6} md={3}>
-                    <TextField
-                      fullWidth
-                      label="Biển số xe"
-                      placeholder="Nhập biển số..."
-                      value={filters.plate_number}
-                      onChange={(e) => handleFilterChange('plate_number', e.target.value)}
-                      size="small"
-                      sx={{
-                        '& .MuiOutlinedInput-root': {
-                          borderRadius: 2,
-                          '&:hover fieldset': { borderColor: '#d32f2f' },
-                          '&.Mui-focused fieldset': { borderColor: '#d32f2f' }
-                        }
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6} md={2}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>Khu vực</InputLabel>
-                      <Select
-                        value={filters.location_id}
-                        label="Khu vực"
-                        onChange={(e) => handleFilterChange('location_id', e.target.value)}
-                        sx={{ borderRadius: 2 }}
-                      >
-                        <MenuItem value="">Tất cả khu vực</MenuItem>
-                        {locationsLoading ? (
-                          <MenuItem value="" disabled>Đang tải...</MenuItem>
-                        ) : (
-                          locations.map(location => (
-                          <MenuItem key={location.id} value={location.id}>
-                            {location.name}
-                          </MenuItem>
-                          ))
-                        )}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={6} md={2}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>Loại vi phạm</InputLabel>
-                      <Select
-                        value={filters.violation_type}
-                        label="Loại vi phạm"
-                        onChange={(e) => handleFilterChange('violation_type', e.target.value)}
-                        sx={{ borderRadius: 2 }}
-                      >
-                        <MenuItem value="">Tất cả</MenuItem>
-                        <MenuItem value="unauthorized">Không được phép</MenuItem>
-                        <MenuItem value="security_threat">Đe dọa an ninh</MenuItem>
-                        <MenuItem value="unpaid_fine">Chưa nộp phạt</MenuItem>
-                        <MenuItem value="banned">Bị cấm</MenuItem>
-                        <MenuItem value="suspicious">Đáng ngờ</MenuItem>
-                        <MenuItem value="other">Khác</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={6} md={2}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>Mức độ</InputLabel>
-                      <Select
-                        value={filters.severity}
-                        label="Mức độ"
-                        onChange={(e) => handleFilterChange('severity', e.target.value)}
-                        sx={{ borderRadius: 2 }}
-                      >
-                        <MenuItem value="">Tất cả</MenuItem>
-                        <MenuItem value="low">Thấp</MenuItem>
-                        <MenuItem value="medium">Trung bình</MenuItem>
-                        <MenuItem value="high">Cao</MenuItem>
-                        <MenuItem value="critical">Nghiêm trọng</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={6} md={1.5}>
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      startIcon={<BiRefresh />}
-                      onClick={handleRefresh}
-                      disabled={loading}
-                      sx={{
-                        borderRadius: 2,
-                        py: 1.5,
-                        textTransform: 'none',
-                        fontWeight: 600,
-                        borderColor: '#d32f2f',
-                        color: '#d32f2f'
-                      }}
-                    >
-                      Làm mới
-                    </Button>
-                  </Grid>
-                  <Grid item xs={12} sm={6} md={1.5}>
-                    {selectedItems.length > 0 && (
-                      <Button
-                        fullWidth
-                        variant="outlined"
-                        color="error"
-                        startIcon={<BiSolidTrashAlt />}
-                        onClick={handleBulkDelete}
-                        sx={{
-                          borderRadius: 2,
-                          py: 1.5,
-                          textTransform: 'none',
-                          fontWeight: 600
-                        }}
-                      >
-                        Xóa ({selectedItems.length})
-                      </Button>
-                    )}
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
-          </Box>
+        <Box sx={{ px: 3, mb: 3 }}>
+  <Card sx={{ 
+    background: 'white',
+    borderRadius: 3,
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+    border: '1px solid #e0e0e0'
+  }}>
+    <CardContent>
+      {/* ✅ SỬA: Thêm alignItems="center" và điều chỉnh spacing giống WhiteList */}
+      <Grid container spacing={2} alignItems="center">
+        <Grid item xs={12} sm={6} md={3}>
+          {/* ✅ SỬA: Đây là TextField tìm kiếm, sử dụng filters.plate_number và validatePlateNumberSearch */}
+          <TextField
+            fullWidth
+            label="Biển số xe"
+            placeholder="Nhập biển số để tìm kiếm..."
+            value={filters.plate_number} // ← SỬA: sử dụng filters.plate_number thay vì formData.plate_number
+            onChange={(e) => handleFilterChange('plate_number', e.target.value)} // ← SỬA: sử dụng handleFilterChange
+            size="small"
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 2,
+                height: 40, // ← THÊM: Cố định chiều cao
+                '&:hover fieldset': { borderColor: '#d32f2f' },
+                '&.Mui-focused fieldset': { borderColor: '#d32f2f' }
+              },
+              '& .MuiInputLabel-root': {
+                fontSize: '0.875rem' // ← THÊM: Cố định font size
+              }
+            }}
+          />
+        </Grid>
+        
+        <Grid item xs={12} sm={6} md={2}>
+          <FormControl fullWidth size="small">
+            <InputLabel sx={{ fontSize: '0.875rem' }}>Loại vi phạm</InputLabel>
+            <Select
+              value={filters.violation_type}
+              label="Loại vi phạm"
+              onChange={(e) => handleFilterChange('violation_type', e.target.value)}
+              sx={{ 
+                borderRadius: 2,
+                height: 40, // ← THÊM: Cố định chiều cao
+                '& .MuiSelect-select': {
+                  padding: '8px 14px', // ← THÊM: Cố định padding
+                  fontSize: '0.875rem'
+                }
+              }}
+            >
+              <MenuItem value="">Tất cả</MenuItem>
+              <MenuItem value="unauthorized">Không được phép</MenuItem>
+              <MenuItem value="security_threat">Đe dọa an ninh</MenuItem>
+              <MenuItem value="unpaid_fine">Chưa nộp phạt</MenuItem>
+              <MenuItem value="banned">Bị cấm</MenuItem>
+              <MenuItem value="suspicious">Đáng ngờ</MenuItem>
+              <MenuItem value="other">Khác</MenuItem>
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <FormControl fullWidth size="small">
+            <InputLabel sx={{ fontSize: '0.875rem' }}>Mức độ</InputLabel>
+            <Select
+              value={filters.severity}
+              label="Mức độ"
+              onChange={(e) => handleFilterChange('severity', e.target.value)}
+              sx={{ 
+                borderRadius: 2,
+                height: 40, // ← THÊM: Cố định chiều cao
+                '& .MuiSelect-select': {
+                  padding: '8px 14px', // ← THÊM: Cố định padding
+                  fontSize: '0.875rem'
+                }
+              }}
+            >
+              <MenuItem value="">Tất cả</MenuItem>
+              <MenuItem value="low">Thấp</MenuItem>
+              <MenuItem value="medium">Trung bình</MenuItem>
+              <MenuItem value="high">Cao</MenuItem>
+              <MenuItem value="critical">Nghiêm trọng</MenuItem>
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<BiRefresh />}
+            onClick={handleRefresh}
+            disabled={loading}
+            sx={{
+              borderRadius: 2,
+              height: 40, // ← THÊM: Cố định chiều cao
+              textTransform: 'none',
+              fontWeight: 600,
+              borderColor: '#d32f2f',
+              color: '#d32f2f',
+              fontSize: '0.875rem', // ← THÊM: Cố định font size
+              '&:hover': {
+                borderColor: '#b71c1c',
+                backgroundColor: 'rgba(211, 47, 47, 0.04)'
+              }
+            }}
+          >
+            Làm mới
+          </Button>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          {selectedItems.length > 0 && (
+            <Button
+              fullWidth
+              variant="outlined"
+              color="error"
+              startIcon={<BiSolidTrashAlt />}
+              onClick={handleBulkDelete}
+              sx={{
+                borderRadius: 2,
+                height: 40, // ← THÊM: Cố định chiều cao
+                textTransform: 'none',
+                fontWeight: 600,
+                fontSize: '0.875rem' // ← THÊM: Cố định font size
+              }}
+            >
+              Xóa ({selectedItems.length})
+            </Button>
+          )}
+        </Grid>
+      </Grid>
+    </CardContent>
+  </Card>
+</Box>
 
           {/* Enhanced Table with Image Column */}
           <Box sx={{ px: 3 }}>
@@ -1452,9 +1552,9 @@ const handleDateIconClick = (field) => {
                           }}
                         />
                       </TableCell>
+                      <TableCell sx={{ width: 60 }}>STT</TableCell>
                       <TableCell>Biển số</TableCell>
                       <TableCell sx={{ width: 120 }}>Ảnh biển số</TableCell>
-                      <TableCell>Khu vực</TableCell>
                       <TableCell>Loại vi phạm</TableCell>
                       <TableCell>Mức độ</TableCell>
                       <TableCell>Thời gian hiệu lực</TableCell>
@@ -1489,7 +1589,7 @@ const handleDateIconClick = (field) => {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      blacklist.map((item) => (
+                      blacklist.map((item, idx) => (
                         <TableRow key={item.id} hover sx={{
                           '&:hover': {
                             backgroundColor: 'rgba(211, 47, 47, 0.04)',
@@ -1506,7 +1606,7 @@ const handleDateIconClick = (field) => {
                               sx={{ '&.Mui-checked': { color: '#d32f2f' } }}
                             />
                           </TableCell>
-                          
+                          <TableCell>{idx + 1}</TableCell>
                           <TableCell>
                             <Typography variant="subtitle2" fontWeight="bold">
                               {item.plate_number}
@@ -1523,12 +1623,7 @@ const handleDateIconClick = (field) => {
                             item={item} 
                             onImageClick={handleImagePreviewClick}
                           />
-                          <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              <LocationIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                              {item.location_name}
-                            </Box>
-                          </TableCell>
+                         
                           <TableCell>
                             {getViolationTypeChip(item.violation_type)}
                           </TableCell>
@@ -1558,7 +1653,8 @@ const handleDateIconClick = (field) => {
                           <TableCell align="center">
                             <Box display="flex" justifyContent="center" gap={1}>
                               <Tooltip title="Xem chi tiết">
-                              <IconButton
+                                {hasViewBlackList && (
+ <IconButton
                                 size="small"
                                 color="info"
                                 onClick={() => handleView(item.id)}
@@ -1571,9 +1667,12 @@ const handleDateIconClick = (field) => {
                               >
                                 <VisibilityIcon />
                               </IconButton>
+                                )}
+                             
                               </Tooltip>
                               <Tooltip title="Chỉnh sửa">
-                              <IconButton
+                                {hasUpdateBlackList && (
+                                  <IconButton
                                 size="small"
                                 color="warning"
                                 onClick={() => handleEdit(item)}
@@ -1586,9 +1685,12 @@ const handleDateIconClick = (field) => {
                               >
                                 <EditIcon />
                               </IconButton>
+                                )}
+                              
                               </Tooltip>
                               <Tooltip title="Xóa">
-                              <IconButton
+                                {hasDeleteBlackList && (
+<IconButton
                                 size="small"
                                 color="error"
                                   onClick={() => setDeleteDialog({ 
@@ -1605,6 +1707,8 @@ const handleDateIconClick = (field) => {
                               >
                                 <DeleteIcon />
                               </IconButton>
+                                )}
+                              
                               </Tooltip>
                             </Box>
                           </TableCell>
@@ -1615,93 +1719,36 @@ const handleDateIconClick = (field) => {
                 </Table>
               </TableContainer>
               {/* Enhanced Pagination - Đặt ở đây, ngay dưới bảng */}
-              <Box sx={{ 
-                borderTop: '1px solid rgba(0, 0, 0, 0.1)',
-                background: 'rgba(0, 0, 0, 0.02)'
-              }}>
-                <Typography variant="body2" color="textSecondary" sx={{ fontWeight: 500, px: 3, pt: 2 }}>
-                  Hiển thị {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} / {totalItems} bản ghi
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: 2, p: 2, borderTop: '1px solid #e0e0e0', backgroundColor: '#fafafa' }}>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                  Hiển thị <strong>{((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)}</strong> của <strong>{totalItems}</strong> bản ghi
                 </Typography>
-                <Box display="flex" justifyContent="space-between" alignItems="center" p={3}>
-                  <FormControl size="small" sx={{ minWidth: 120, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500, mr: 1 }}>
-                      Hiển thị
-                    </Typography>
-                    <Select
-                      value={itemsPerPage}
-                      onChange={e => {
-                        const value = Number(e.target.value);
-                        setItemsPerPage(value);
-                        setCurrentPage(1);
-                      }}
-                      sx={{ minWidth: 60, mx: 0.5 }}
-                      size="small"
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
+                    <Select value={itemsPerPage} onChange={handleItemsPerPageChange} size="small" sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}
+                      renderValue={v => `${v}/ trang`}
                     >
                       {[5, 10, 20, 50, 100].map(size => (
-                        <MenuItem key={size} value={size}>{size}</MenuItem>
+                        <MenuItem key={size} value={size}>{size}/ trang</MenuItem>
                       ))}
                     </Select>
-                    <Typography variant="body2" sx={{ fontWeight: 500, ml: 1 }}>
-                      hàng
-                    </Typography>
-                  </FormControl>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'<<'}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(prev => prev - 1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'<'}
-                    </Button>
-                    {getPaginationItems(currentPage, totalPages).map((item, idx) =>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><FirstPage fontSize="small" /></Button>
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronLeft fontSize="small" /></Button>
+                    {getPaginationItems(currentPage, totalPages).map((item, idx) => (
                       item === '...'
-                        ? <Box key={idx} sx={{ px: 1, color: '#888', fontWeight: 600 }}>...</Box>
-                        : <Button
-                            key={item}
-                            variant={item === currentPage ? 'contained' : 'outlined'}
-                            color={item === currentPage ? 'primary' : 'inherit'}
-                            size="small"
-                            sx={{ 
-                              minWidth: 36, 
-                              fontWeight: 600, 
-                              borderRadius: 2, 
-                              mx: 0.25,
-                              ...(item === currentPage && { boxShadow: '0 2px 8px rgba(25, 118, 210, 0.15)' })
-                            }}
-                            onClick={() => setCurrentPage(item)}
-                          >
-                            {item}
-                          </Button>
-                    )}
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      onClick={() => setCurrentPage(prev => prev + 1)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'>'}
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={currentPage === totalPages || totalPages === 0}
-                      onClick={() => setCurrentPage(totalPages)}
-                      sx={{ minWidth: 36, fontWeight: 600, borderRadius: 2, mx: 0.25 }}
-                    >
-                      {'>>'}
-                    </Button>
+                        ? <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
+                        : <Button key={item} variant={item === currentPage ? 'contained' : 'outlined'} size="small" onClick={() => setCurrentPage(item)} sx={{ minWidth: 32, width: 32, height: 32, borderRadius: 1, fontSize: '0.875rem', fontWeight: item === currentPage ? 600 : 400, ...(item === currentPage ? { backgroundColor: '#1976d2', color: 'white', border: 'none', '&:hover': { backgroundColor: '#1565c0' } } : { borderColor: '#e0e0e0', color: '#666', '&:hover': { backgroundColor: '#f5f5f5', borderColor: '#1976d2' } }) }}>{item}</Button>
+                    ))}
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages || totalPages === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><ChevronRight fontSize="small" /></Button>
+                    <Button size="small" variant="outlined" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages || totalPages === 0} sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}><LastPage fontSize="small" /></Button>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" color="text.secondary">Đến trang:</Typography>
+                    <InputBase value={gotoPage} onChange={e => setGotoPage(e.target.value.replace(/[^0-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter') { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page); setGotoPage(''); } } }} placeholder="1" sx={{ width: 60, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, px: 1, fontSize: '0.875rem', '& input': { textAlign: 'center' } }} />
+                    <Button size="small" variant="outlined" onClick={() => { const page = parseInt(gotoPage, 10); if (page && page >= 1 && page <= totalPages) { setCurrentPage(page); setGotoPage(''); } }} disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > totalPages} sx={{ minWidth: 'auto', px: 2, height: 32, textTransform: 'none', fontSize: '0.875rem' }}>Đi</Button>
                   </Box>
                 </Box>
               </Box>
@@ -1770,384 +1817,482 @@ const handleDateIconClick = (field) => {
         </Box>
       )}
 
-      {/* Create/Edit Modal */}
       <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="lg" fullWidth>
-        <DialogTitle sx={{ 
-          borderBottom: '1px solid #e0e0e0', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 2 
+  <DialogTitle sx={{ 
+    borderBottom: '1px solid #e0e0e0', 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: 2,
+    background: 'linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%)',
+    color: 'white'
+  }}>
+    <BlockIcon />
+    {selectedItem ? 'Chỉnh sửa Blacklist' : 'Thêm Blacklist mới'}
+  </DialogTitle>
+  <form onSubmit={handleSubmit}>
+    <DialogContent sx={{ p: 0 }}>
+      <Grid container>
+        {/* Left Panel - Image Upload */}
+        <Grid item xs={12} md={5} sx={{ 
+          borderRight: '1px solid #e0e0e0',
+          background: '#f8f9fc'
         }}>
-          <BlockIcon color="error" />
-          {selectedItem ? 'Chỉnh sửa Blacklist' : 'Thêm Blacklist mới'}
-        </DialogTitle>
-        <form onSubmit={handleSubmit}>
-          <DialogContent sx={{ p: 3 }}>
-            <Grid container spacing={3}>
-              {/* Image Upload Section */}
-              <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
-                  <PhotoCameraIcon sx={{ mr: 1 }} />
-                  Ảnh biển số xe
-                </Typography>
-                
-                <Button
-                  variant="outlined"
-                  component="label"
-                  startIcon={<ImageIcon />}
-                  fullWidth
-                  sx={{ 
-                    borderRadius: 2, 
-                    mb: 2, 
-                    py: 1.5,
-                    borderStyle: 'dashed',
-                    borderWidth: 2,
-                    '&:hover': { borderStyle: 'dashed' }
-                  }}
-                >
-                  {imageFile ? 'Đổi ảnh biển số' : 'Upload ảnh biển số'}
-                  <input type="file" accept="image/*" hidden onChange={handleImageChange} />
-                </Button>
-                
-                {formErrors.image && (
-                  <Alert severity="error" sx={{ mb: 2 }}>
-                    {formErrors.image}
-                  </Alert>
-                )}
-                
-                {/* Image Previews */}
-                <Stack spacing={2}>
-                  {/* Ảnh gốc preview */}
-                  {imagePreview && (
-                    <Box>
-                      <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block' }}>
-                        Ảnh gốc:
-                      </Typography>
-                      <Paper elevation={2} sx={{ p: 1, borderRadius: 2 }}>
-                        <img 
-                          src={imagePreview} 
-                          alt="preview" 
-                          style={{ 
-                            width: '100%', 
-                            maxHeight: 200, 
-                            objectFit: 'contain',
-                            borderRadius: 8 
-                          }} 
-                        />
-                      </Paper>
-                    </Box>
-                  )}
-                  
-                  {/* Ảnh biển số đã detect preview */}
-                  {(detectedPlateImage || (selectedItem && selectedItem.detected_plate_image)) && (
-                    <Box>
-                      <Typography variant="caption" sx={{ fontWeight: 600, mb: 1, display: 'block', color: 'success.main' }}>
-                        Biển số đã nhận diện:
-                      </Typography>
-                      <Paper elevation={2} sx={{ p: 1, borderRadius: 2, border: '2px solid #4caf50' }}>
-                        <img 
-                          src={
-                            detectedPlateImage
-                              ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`
-                              : selectedItem && selectedItem.detected_plate_image
-                                ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.detected_plate_image}`
-                                : ''
-                          }
-                          alt="detected" 
-                          style={{ 
-                            width: '100%', 
-                            maxHeight: 100, 
-                            objectFit: 'contain',
-                            borderRadius: 6 
-                          }} 
-                        />
-                      </Paper>
-                    </Box>
-                  )}
-                  
-                  {/* OCR Result */}
-                  {ocrResult && (
-                    <Alert severity="success" sx={{ fontWeight: 600 }}>
-                      <Typography variant="body2">
-                        Biển số nhận diện: <strong style={{ fontSize: '1.1em' }}>{ocrResult}</strong>
-                      </Typography>
-                    </Alert>
-                  )}
-                </Stack>
-              </Grid>
-
-              {/* Form Fields */}
-              <Grid item xs={12} md={6}>
-                <Typography variant="h6" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
-                  <DescriptionIcon sx={{ mr: 1 }} />
-                  Thông tin chi tiết
-                </Typography>
-                
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <FormControl fullWidth required error={!!formErrors.location_id}>
-                  <InputLabel>Khu vực</InputLabel>
-                  <Select
-                    value={formData.location_id}
-                    label="Khu vực"
-                    onChange={(e) => setFormData({...formData, location_id: e.target.value})}
-                        sx={{ borderRadius: 2 }}
-                  >
-                        {locationsLoading ? (
-                          <MenuItem value="" disabled>Đang tải...</MenuItem>
-                        ) : (
-                          locations.map(location => (
-                      <MenuItem key={location.id} value={location.id}>
-                              <LocationIcon sx={{ mr: 1, fontSize: 16 }} />
-                        {location.name}
-                      </MenuItem>
-                          ))
-                        )}
-                  </Select>
-                      {formErrors.location_id && (
-                        <FormHelperText error>{formErrors.location_id}</FormHelperText>
-                      )}
-                </FormControl>
-              </Grid>
-                  
-                  <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  required
-                  label="Biển số xe"
-                  value={formData.plate_number}
-                      disabled
-                      error={!!formErrors.plate_number}
-                      helperText={ocrResult ? "Đã nhận diện từ OCR" : "Trường này sẽ tự động điền từ ảnh biển số (OCR)"}
-                      sx={{
-                        '& .MuiOutlinedInput-root': { borderRadius: 2 }
+          <Box sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom sx={{ mb: 3, fontWeight: 600, color: '#d32f2f' }}>
+              <PhotoCameraIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+              Ảnh biển số xe
+            </Typography>
+            
+            {/* Upload Button */}
+            <Button
+  variant="outlined"
+  component="label"
+  startIcon={<ImageIcon />}
+  fullWidth
+  sx={{ 
+    borderRadius: 2, 
+    mb: 3, 
+    py: 2,
+    borderStyle: 'dashed',
+    borderWidth: 2,
+    borderColor: '#d32f2f',
+    color: '#d32f2f',
+    '&:hover': { 
+      borderStyle: 'dashed',
+      backgroundColor: 'rgba(211, 47, 47, 0.04)'
+    }
+  }}
+>
+  {/* ✅ SỬA: Cập nhật text để rõ ràng rằng ảnh không bắt buộc */}
+  {imageFile ? 'Đổi ảnh biển số' : (selectedItem ? 'Thay đổi ảnh (không bắt buộc)' : 'Upload ảnh biển số (không bắt buộc)')}
+  <input type="file" accept="image/*" hidden onChange={handleImageChange} />
+</Button>
+            
+            {/* Error Alert */}
+            {formErrors.image && (
+              <Alert severity="error" sx={{ mb: 3 }}>
+                {formErrors.image}
+              </Alert>
+            )}
+            
+            {/* Image Previews Section */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {/* SỬA: Ảnh gốc preview với logic đúng */}
+              {(imagePreview || (selectedItem && selectedItem.plate_image_path)) && (
+                <Card sx={{ 
+                  border: '1px solid #e0e0e0',
+                  borderRadius: 2,
+                  overflow: 'hidden'
+                }}>
+                  <Box sx={{ 
+                    backgroundColor: '#1976d2', 
+                    color: 'white', 
+                    px: 2, 
+                    py: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1
+                  }}>
+                    <ImageIcon sx={{ fontSize: 16 }} />
+                    <Typography variant="caption" fontWeight={600}>
+                      Ảnh gốc
+                    </Typography>
+                  </Box>
+                  <CardContent sx={{ p: 2 }}>
+                    <Box
+                      component="img"
+                      src={
+                        imagePreview || 
+                        (selectedItem && selectedItem.plate_image_path 
+                          ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.plate_image_path}?t=${Date.now()}`
+                          : '')
+                      }
+                      alt="Ảnh gốc" 
+                      sx={{ 
+                        width: '100%', 
+                        maxHeight: 200, 
+                        objectFit: 'contain',
+                        borderRadius: 1,
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s ease',
+                        '&:hover': {
+                          transform: 'scale(1.02)'
+                        }
                       }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <CarIcon />
-                          </InputAdornment>
-                        )
+                      onClick={() => {
+                        const src = imagePreview || 
+                          (selectedItem && selectedItem.plate_image_path 
+                            ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.plate_image_path}`
+                            : '');
+                        if (src) {
+                          setImagePreviewDialog({ open: true, src, title: 'Ảnh gốc' });
+                        }
                       }}
                     />
-                    {formErrors.plate_number && (
-                      <FormHelperText error>{formErrors.plate_number}</FormHelperText>
-                    )}
-              </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth required error={!!formErrors.violation_type}>
+                  </CardContent>
+                </Card>
+              )}
+              
+              {/* Ảnh biển số đã detect */}
+              {(detectedPlateImage || (selectedItem && selectedItem.detected_plate_image)) && (
+                <Card sx={{ 
+                  border: '2px solid #4caf50',
+                  borderRadius: 2,
+                  overflow: 'hidden'
+                }}>
+                  <Box sx={{ 
+                    backgroundColor: '#4caf50', 
+                    color: 'white', 
+                    px: 2, 
+                    py: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1
+                  }}>
+                    <CheckCircle sx={{ fontSize: 16 }} />
+                    <Typography variant="caption" fontWeight={600}>
+                      Biển số đã nhận diện
+                    </Typography>
+                  </Box>
+                  <CardContent sx={{ p: 2 }}>
+                    <Box
+                      component="img"
+                      src={
+                        detectedPlateImage
+                          ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}?t=${Date.now()}`
+                          : selectedItem && selectedItem.detected_plate_image
+                            ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.detected_plate_image}?t=${Date.now()}`
+                            : ''
+                      }
+                      alt="Biển số đã nhận diện" 
+                      sx={{ 
+                        width: '100%', 
+                        maxHeight: 120, 
+                        objectFit: 'contain',
+                        borderRadius: 1,
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s ease',
+                        '&:hover': {
+                          transform: 'scale(1.05)'
+                        }
+                      }}
+                      onClick={() => {
+                        const src = detectedPlateImage
+                          ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${detectedPlateImage}`
+                          : selectedItem && selectedItem.detected_plate_image
+                            ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${selectedItem.detected_plate_image}`
+                            : '';
+                        if (src) {
+                          setImagePreviewDialog({ open: true, src, title: 'Biển số đã nhận diện' });
+                        }
+                      }}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+              
+              {/* OCR Result Alert */}
+              {ocrResult && (
+                <Alert 
+                  severity="success" 
+                  sx={{ 
+                    fontWeight: 600,
+                    '& .MuiAlert-message': {
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1
+                    }
+                  }}
+                >
+                  <CarIcon sx={{ fontSize: 20 }} />
+                  <Box>
+                    <Typography variant="body2" fontWeight={600}>
+                      Biển số nhận diện:
+                    </Typography>
+                    <Typography variant="h6" sx={{ color: '#2e7d32', fontWeight: 700 }}>
+                      {ocrResult}
+                    </Typography>
+                  </Box>
+                </Alert>
+              )}
+            </Box>
+          </Box>
+        </Grid>
+
+        {/* Right Panel - Form Fields */}
+        <Grid item xs={12} md={7}>
+          <Box sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom sx={{ mb: 3, fontWeight: 600, color: '#d32f2f' }}>
+              <DescriptionIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+              Thông tin chi tiết
+            </Typography>
+            
+            <Grid container spacing={3}>
+              {/* Biển số xe - Full width */}
+             <Grid item xs={12}>
+  {/* ✅ SỬA: Đây là TextField trong form thêm/sửa, sử dụng formData.plate_number và validatePlateNumberStrict */}
+  <TextField
+    fullWidth
+    required
+    label="Biển số xe"
+    value={formData.plate_number} // ← ĐÚNG: sử dụng formData.plate_number
+    onChange={(e) => {
+      setFormData({...formData, plate_number: e.target.value});
+      // Clear error khi user nhập lại
+      if (formErrors.plate_number) {
+        setFormErrors(prev => ({...prev, plate_number: ''}));
+      }
+    }}
+    error={!!formErrors.plate_number}
+    helperText={
+      formErrors.plate_number || 
+      (ocrResult ? "✓ Có gợi ý từ OCR - có thể chỉnh sửa" : "Bắt buộc. Định dạng: 30A-123.45, 51B1-4567, 30A1-456.78")
+    }
+    placeholder="VD: 30A-123.45, 51B1-4567"
+    sx={{
+      '& .MuiOutlinedInput-root': { 
+        borderRadius: 2,
+        backgroundColor: ocrResult ? '#e8f5e9' : 'white'
+      },
+      '& .MuiFormHelperText-root': {
+        color: ocrResult ? '#2e7d32' : undefined,
+        fontWeight: ocrResult ? 600 : undefined
+      }
+    }}
+    InputProps={{
+      startAdornment: (
+        <InputAdornment position="start">
+          <CarIcon color={ocrResult ? 'success' : 'action'} />
+        </InputAdornment>
+      )
+    }}
+  />
+  {/* ✅ THÊM: Button áp dụng OCR result giống WhiteList */}
+  {ocrResult && formData.plate_number !== ocrResult && (
+    <Box sx={{ mt: 1 }}>
+      <Button
+        size="small"
+        variant="outlined"
+        color="success"
+        onClick={() => {
+          setFormData(prev => ({...prev, plate_number: ocrResult}));
+          showSnackbar('Đã áp dụng kết quả OCR', 'success');
+        }}
+        sx={{ textTransform: 'none' }}
+      >
+        Áp dụng kết quả OCR: {ocrResult}
+      </Button>
+    </Box>
+  )}
+</Grid>
+              
+              {/* Loại vi phạm và Mức độ */}
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth required error={!!formErrors.violation_type}>
                   <InputLabel>Loại vi phạm</InputLabel>
                   <Select
                     value={formData.violation_type}
                     label="Loại vi phạm"
-                    onChange={(e) => setFormData({...formData, violation_type: e.target.value})}
-                        sx={{ borderRadius: 2 }}
-                      >
-                        <MenuItem value="unauthorized">
-                          <WarningIcon sx={{ mr: 1, fontSize: 16 }} />
-                          Không được phép
-                        </MenuItem>
-                        <MenuItem value="security_threat">
-                          <FaShieldAlt style={{ marginRight: 8, fontSize: 14 }} />
-                          Đe dọa an ninh
-                        </MenuItem>
+                    onChange={(e) => {
+                      setFormData({...formData, violation_type: e.target.value});
+                      setFormErrors(prev => ({...prev, violation_type: undefined}));
+                    }}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    <MenuItem value="unauthorized">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <WarningIcon sx={{ fontSize: 16, color: '#ff9800' }} />
+                        Không được phép
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="security_threat">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <FaShieldAlt style={{ fontSize: 14, color: '#f44336' }} />
+                        Đe dọa an ninh
+                      </Box>
+                    </MenuItem>
                     <MenuItem value="unpaid_fine">Chưa nộp phạt</MenuItem>
                     <MenuItem value="banned">Bị cấm</MenuItem>
                     <MenuItem value="suspicious">Đáng ngờ</MenuItem>
                     <MenuItem value="other">Khác</MenuItem>
                   </Select>
-                      {formErrors.violation_type && (
-                        <FormHelperText error>{formErrors.violation_type}</FormHelperText>
-                      )}
+                  {formErrors.violation_type && (
+                    <FormHelperText>{formErrors.violation_type}</FormHelperText>
+                  )}
                 </FormControl>
               </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth required error={!!formErrors.severity}>
+              
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth required error={!!formErrors.severity}>
                   <InputLabel>Mức độ</InputLabel>
                   <Select
                     value={formData.severity}
                     label="Mức độ"
-                    onChange={(e) => setFormData({...formData, severity: e.target.value})}
-                        sx={{ borderRadius: 2 }}
+                    onChange={(e) => {
+                      setFormData({...formData, severity: e.target.value});
+                      setFormErrors(prev => ({...prev, severity: undefined}));
+                    }}
+                    sx={{ borderRadius: 2 }}
                   >
-                    <MenuItem value="low">Thấp</MenuItem>
-                    <MenuItem value="medium">Trung bình</MenuItem>
-                    <MenuItem value="high">Cao</MenuItem>
-                    <MenuItem value="critical">Nghiêm trọng</MenuItem>
+                    <MenuItem value="low">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#4caf50' }} />
+                        Thấp
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="medium">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#ff9800' }} />
+                        Trung bình
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="high">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#f44336' }} />
+                        Cao
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="critical">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#9c27b0' }} />
+                        Nghiêm trọng
+                      </Box>
+                    </MenuItem>
                   </Select>
-                      {formErrors.severity && (
-                        <FormHelperText error>{formErrors.severity}</FormHelperText>
-                      )}
+                  {formErrors.severity && (
+                    <FormHelperText>{formErrors.severity}</FormHelperText>
+                  )}
                 </FormControl>
               </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Tên chủ xe"
-                  placeholder="Nhập tên chủ xe"
-                  value={formData.owner_name}
-                  onChange={(e) => setFormData({...formData, owner_name: e.target.value})}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <PersonIcon />
-                          </InputAdornment>
-                        )
-                      }}
-                />
-              </Grid>
-                  
-                  <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Số điện thoại"
-                  placeholder="Nhập số điện thoại"
-                  value={formData.owner_phone}
-                  onChange={(e) => setFormData({...formData, owner_phone: e.target.value})}
-                      error={!!formErrors.owner_phone}
-                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <PhoneIcon />
-                          </InputAdornment>
-                        )
-                      }}
-                    />
-                    {formErrors.owner_phone && (
-                      <FormHelperText error>{formErrors.owner_phone}</FormHelperText>
-                    )}
-              </Grid>
-                  
 
-<Grid item xs={12} sm={6}>
-  <Box position="relative">
-                <TextField
-                  fullWidth
-                  label="Có hiệu lực từ"
-      placeholder="dd/MM/yyyy"
-      value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
-      onChange={(e) => {
-        const value = e.target.value;
-        if (value === '' || validateDateFormat(value)) {
-          setFormErrors(prev => ({ ...prev, valid_from: undefined }));
-          // SỬA: Không format lại, giữ nguyên giá trị user nhập
-          setFormData({ ...formData, valid_from: value });
-        } else {
-          setFormErrors(prev => ({ ...prev, valid_from: 'Định dạng ngày phải là dd/MM/yyyy' }));
-        }
-      }}
-      error={!!formErrors.valid_from}
-      helperText={formErrors.valid_from}
-      InputProps={{
-        endAdornment: (
-          <InputAdornment position="end">
-            <IconButton
-              onClick={() => handleDateIconClick('valid_from')}
-              sx={{ 
-                color: '#1976d2',
-                '&:hover': { 
-                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                  transform: 'scale(1.1)'
-                },
-                transition: 'all 0.2s ease'
-              }}
-              title="Chọn ngày"
-            >
-              <CalendarIcon />
-            </IconButton>
-          </InputAdornment>
-        ),
-      }}
-      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-    />
-    
-    {/* Date Input ẩn - SỬA: Không bind value trực tiếp */}
-    <input
-      ref={validFromDateRef}
-                  type="date"
-      onChange={(e) => handleDateChange('valid_from', e.target.value)}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        opacity: 0,
-        pointerEvents: 'none',
-        zIndex: -1
-      }}
-    />
-  </Box>
+              {/* Ngày hiệu lực */}
+              <Grid item xs={12} sm={6}>
+                <Box position="relative">
+                  <TextField
+                    fullWidth
+                    label="Có hiệu lực từ"
+                    placeholder="dd/MM/yyyy"
+                    value={formData.valid_from ? formatDateForDisplay(formData.valid_from) : ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || validateDateFormat(value)) {
+                        setFormErrors(prev => ({ ...prev, valid_from: undefined }));
+                        setFormData({ ...formData, valid_from: value });
+                      } else {
+                        setFormErrors(prev => ({ ...prev, valid_from: 'Định dạng ngày phải là dd/MM/yyyy' }));
+                      }
+                    }}
+                    error={!!formErrors.valid_from}
+                    helperText={formErrors.valid_from}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <CalendarIcon sx={{ color: '#1976d2' }} />
+                        </InputAdornment>
+                      ),
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            onClick={() => handleDateIconClick('valid_from')}
+                            sx={{ 
+                              color: '#1976d2',
+                              '&:hover': { 
+                                backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                transform: 'scale(1.1)'
+                              },
+                              transition: 'all 0.2s ease'
+                            }}
+                            title="Chọn ngày"
+                          >
+                            <CalendarIcon />
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <input
+                    ref={validFromDateRef}
+                    type="date"
+                    onChange={(e) => handleDateChange('valid_from', e.target.value)}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      opacity: 0,
+                      pointerEvents: 'none',
+                      zIndex: -1
+                    }}
+                  />
+                </Box>
               </Grid>
-<Grid item xs={12} sm={6}>
-  <Box position="relative">
-                <TextField
-                  fullWidth
-                  label="Có hiệu lực đến"
-      placeholder="dd/MM/yyyy"
-      value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
-      onChange={(e) => {
-        const value = e.target.value;
-        if (value === '' || validateDateFormat(value)) {
-          setFormErrors(prev => ({ ...prev, valid_to: undefined }));
-          // SỬA: Không format lại, giữ nguyên giá trị user nhập
-          setFormData({ ...formData, valid_to: value });
-        } else {
-          setFormErrors(prev => ({ ...prev, valid_to: 'Định dạng ngày phải là dd/MM/yyyy' }));
-        }
-      }}
-      error={!!formErrors.valid_to}
-      helperText={formErrors.valid_to}
-      InputProps={{
-        endAdornment: (
-          <InputAdornment position="end">
-            <IconButton
-              onClick={() => handleDateIconClick('valid_to')}
-              sx={{ 
-                color: '#1976d2',
-                '&:hover': { 
-                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                  transform: 'scale(1.1)'
-                },
-                transition: 'all 0.2s ease'
-              }}
-              title="Chọn ngày"
-            >
-              <CalendarIcon />
-            </IconButton>
-          </InputAdornment>
-        ),
-      }}
-      sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
-    />
-    
-    {/* Date Input ẩn - SỬA: Không bind value trực tiếp */}
-    <input
-      ref={validToDateRef}
-                  type="date"
-      onChange={(e) => handleDateChange('valid_to', e.target.value)}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        opacity: 0,
-        pointerEvents: 'none',
-        zIndex: -1
-      }}
-    />
-  </Box>
-              </Grid>
-                </Grid>
+
+              <Grid item xs={12} sm={6}>
+                <Box position="relative">
+                  <TextField
+                    fullWidth
+                    label="Có hiệu lực đến"
+                    placeholder="dd/MM/yyyy"
+                    value={formData.valid_to ? formatDateForDisplay(formData.valid_to) : ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '' || validateDateFormat(value)) {
+                        setFormErrors(prev => ({ ...prev, valid_to: undefined }));
+                        setFormData({ ...formData, valid_to: value });
+                      } else {
+                        setFormErrors(prev => ({ ...prev, valid_to: 'Định dạng ngày phải là dd/MM/yyyy' }));
+                      }
+                    }}
+                    error={!!formErrors.valid_to}
+                    helperText={formErrors.valid_to}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <CalendarIcon sx={{ color: '#1976d2' }} />
+                        </InputAdornment>
+                      ),
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            onClick={() => handleDateIconClick('valid_to')}
+                            sx={{ 
+                              color: '#1976d2',
+                              '&:hover': { 
+                                backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                transform: 'scale(1.1)'
+                              },
+                              transition: 'all 0.2s ease'
+                            }}
+                            title="Chọn ngày"
+                          >
+                            <CalendarIcon />
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <input
+                    ref={validToDateRef}
+                    type="date"
+                    onChange={(e) => handleDateChange('valid_to', e.target.value)}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      opacity: 0,
+                      pointerEvents: 'none',
+                      zIndex: -1
+                    }}
+                  />
+                </Box>
               </Grid>
               
-              {/* Full width fields */}
+              {/* Lý do cấm */}
               <Grid item xs={12}>
                 <TextField
                   fullWidth
@@ -2155,71 +2300,106 @@ const handleDateIconClick = (field) => {
                   label="Lý do cấm"
                   multiline
                   rows={3}
-                  placeholder="Nhập lý do cấm..."
+                  placeholder="Nhập lý do cấm chi tiết (tối thiểu 10 ký tự)..."
                   value={formData.reason}
-                  onChange={(e) => setFormData({...formData, reason: e.target.value})}
+                  onChange={(e) => {
+                    setFormData({...formData, reason: e.target.value});
+                    setFormErrors(prev => ({...prev, reason: undefined}));
+                  }}
                   error={!!formErrors.reason}
-                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  helperText={formErrors.reason || `${formData.reason.length}/500 ký tự`}
+                  sx={{ 
+                    '& .MuiOutlinedInput-root': { borderRadius: 2 },
+                    '& .MuiFormHelperText-root': {
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ alignSelf: 'flex-start', mt: 1 }}>
+                        <WarningAmberIcon color={formErrors.reason ? 'error' : 'action'} />
+                      </InputAdornment>
+                    )
+                  }}
                 />
-                {formErrors.reason && (
-                  <FormHelperText error>{formErrors.reason}</FormHelperText>
-                )}
               </Grid>
               
+              {/* Ghi chú chi tiết */}
               <Grid item xs={12}>
                 <TextField
                   fullWidth
                   label="Ghi chú chi tiết"
                   multiline
-                  rows={3}
-                  placeholder="Nhập ghi chú chi tiết..."
+                  rows={2}
+                  placeholder="Nhập ghi chú bổ sung (không bắt buộc)..."
                   value={formData.description}
                   onChange={(e) => setFormData({...formData, description: e.target.value})}
                   sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ alignSelf: 'flex-start', mt: 1 }}>
+                        <Info color="action" />
+                      </InputAdornment>
+                    )
+                  }}
                 />
               </Grid>
             </Grid>
-          </DialogContent>
-          <DialogActions sx={{ 
-            p: 3, 
-            borderTop: '1px solid #e0e0e0',
-            gap: 2 
-          }}>
-            <Button 
-              onClick={() => setOpenModal(false)}
-              sx={{ 
-                borderRadius: 2, 
-                px: 3, 
-                py: 1.5,
-                textTransform: 'none',
-                fontWeight: 600 
-              }}
-            >
-              Hủy
-            </Button>
-            <Button 
-              type="submit" 
-              variant="contained" 
-              color="error" 
-              disabled={loading}
-              startIcon={loading ? <CircularProgress size={20} /> : <FaSave />}
-              sx={{ 
-                borderRadius: 2, 
-                px: 3, 
-                py: 1.5,
-                textTransform: 'none',
-                fontWeight: 600,
-                boxShadow: '0 2px 8px rgba(211, 47, 47, 0.3)',
-                '&:hover': {
-                  boxShadow: '0 4px 12px rgba(211, 47, 47, 0.4)'
-                }
-              }}
-            >
-              {selectedItem ? 'Cập nhật' : 'Tạo mới'}
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
+          </Box>
+        </Grid>
+      </Grid>
+    </DialogContent>
+    <DialogActions sx={{ 
+      p: 3, 
+      borderTop: '1px solid #e0e0e0',
+      background: '#f8f9fc',
+      gap: 2 
+    }}>
+      <Button 
+        onClick={() => setOpenModal(false)}
+        variant="outlined"
+        sx={{ 
+          borderRadius: 2, 
+          px: 4, 
+          py: 1.5,
+          textTransform: 'none',
+          fontWeight: 600,
+          borderColor: '#d32f2f',
+          color: '#d32f2f',
+          '&:hover': {
+            backgroundColor: 'rgba(211, 47, 47, 0.04)',
+            borderColor: '#b71c1c'
+          }
+        }}
+      >
+        <Cancel sx={{ mr: 1 }} />
+        Hủy
+      </Button>
+      <Button 
+        type="submit" 
+        variant="contained" 
+        disabled={loading}
+        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <FaSave />}
+        sx={{ 
+          borderRadius: 2, 
+          px: 4, 
+          py: 1.5,
+          textTransform: 'none',
+          fontWeight: 600,
+          backgroundColor: '#d32f2f',
+          boxShadow: '0 2px 8px rgba(211, 47, 47, 0.3)',
+          '&:hover': {
+            backgroundColor: '#b71c1c',
+            boxShadow: '0 4px 12px rgba(211, 47, 47, 0.4)'
+          }
+        }}
+      >
+        {selectedItem ? 'Cập nhật' : 'Tạo mới'}
+      </Button>
+    </DialogActions>
+  </form>
+</Dialog>
 
       {/* Detail Modal */}
       <Dialog open={openDetailModal} onClose={() => setOpenDetailModal(false)} maxWidth="md" fullWidth
@@ -2288,61 +2468,8 @@ const handleDateIconClick = (field) => {
                   {/* Left Info */}
                   <Grid item xs={12} md={8}>
                     <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                        <Card sx={{ height: '100%', borderRadius: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', border: '1px solid #e0e0e0' }}>
-                          <CardContent sx={{ p: 2.5 }}>
-                            <Box display="flex" alignItems="center" gap={1} mb={2}>
-                              <LocationIcon sx={{ color: '#d32f2f', fontSize: '1.2rem' }} />
-                              <Typography variant="h6" sx={{ color: '#d32f2f', fontWeight: 600 }}>
-                                Thông tin khu vực
-                              </Typography>
-                            </Box>
-                            <Box sx={{ pl: 0.5 }}>
-                              <Box display="flex" alignItems="center" gap={1} mb={1}>
-                                <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#d32f2f' }} />
-                                <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
-                                  Tên:
-                                </Typography>
-                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                                  {selectedItem.location_name || 'Chưa cập nhật'}
-                                </Typography>
-                              </Box>
-                            </Box>
-                          </CardContent>
-                        </Card>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                        <Card sx={{ height: '100%', borderRadius: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', border: '1px solid #e0e0e0' }}>
-                          <CardContent sx={{ p: 2.5 }}>
-                            <Box display="flex" alignItems="center" gap={1} mb={2}>
-                              <PersonIcon sx={{ color: '#d32f2f', fontSize: '1.2rem' }} />
-                              <Typography variant="h6" sx={{ color: '#d32f2f', fontWeight: 600 }}>
-                                Thông tin chủ xe
-                              </Typography>
-                            </Box>
-                            <Box sx={{ pl: 0.5 }}>
-                              <Box display="flex" alignItems="center" gap={1} mb={1}>
-                                <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#d32f2f' }} />
-                                <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
-                                  Tên:
-                                </Typography>
-                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                                  {selectedItem.owner_name || 'Chưa cập nhật'}
-                                </Typography>
-                              </Box>
-                              <Box display="flex" alignItems="center" gap={1} mb={1}>
-                                <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#d32f2f' }} />
-                                <Typography variant="body2" color="text.secondary" sx={{ minWidth: 60 }}>
-                                  SĐT:
-                                </Typography>
-                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                                  {selectedItem.owner_phone || 'Chưa cập nhật'}
-                                </Typography>
-                              </Box>
-                            </Box>
-                          </CardContent>
-                        </Card>
-              </Grid>
+              
+              
                       <Grid item xs={12} md={12}>
                         <Card sx={{ height: '100%', borderRadius: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', border: '1px solid #e0e0e0' }}>
                           <CardContent sx={{ p: 2.5 }}>
@@ -2571,7 +2698,7 @@ const handleDateIconClick = (field) => {
             </Typography>
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
+        <DialogContent sx={{ p: 3, pt: 4 }}>
           <Typography variant="body1" sx={{ mb: 2, color: '#222' }}>
             Bạn có chắc chắn muốn xóa blacklist với biển số <strong>"{deleteDialog.plateName}"</strong>?
           </Typography>
