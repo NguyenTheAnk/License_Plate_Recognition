@@ -277,7 +277,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
     if (isRecognizing) {
       // Tối ưu FPS - đặt chính xác 20 FPS
-      sendFrameTimeoutRef.current = setTimeout(sendFrames, 15); // 200 FPS (1000/15 = 66ms)
+      sendFrameTimeoutRef.current = setTimeout(sendFrames, 20); // 50 FPS (1000/20 = 50ms)a
     }
   }, [isRecognizing, forcePlayVideo]);
 
@@ -400,12 +400,19 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           
           // Gửi thông tin nguồn ngay sau khi kết nối
           const isVideoUpload = camera.id && camera.id.startsWith('upload-');
+          const isVideoSource = camera.isVideoSource; // Kiểm tra nếu đây là video source cho camera
+          
           const sourceInfo = {
             type: 'source_info',
-            source_type: isVideoUpload ? 'video_upload' : 'camera',
-            video_filename: isVideoUpload ? camera.name : null,
+            source_type: isVideoUpload ? 'video_upload' : (isVideoSource ? 'camera_with_video' : 'camera'),
+            video_filename: isVideoUpload ? camera.name : (isVideoSource ? camera.videoName : null),
             camera_id: isVideoUpload ? null : camera.id,
-            camera_name: isVideoUpload ? null : camera.name
+            camera_name: isVideoUpload ? null : camera.name, // Luôn gửi tên camera, không phải tên video
+            // Thêm thông tin video nếu có
+            video_source: isVideoSource ? {
+              filename: camera.videoName,
+              url: camera.streamUrl
+            } : null
           };
           
           try {
@@ -907,6 +914,12 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         .video-container *[style*="position: absolute"][style*="bottom"][style*="left"]:contains("0") {
           display: none !important;
         }
+        
+        /* Animation cho spinner loading */
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
       `}</style>
       {/* Không hiển thị loading overlay để giữ video sạch */}
       <div
@@ -914,23 +927,24 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         style={{
           position: "relative",
           width: "100%",
-          height: "calc(100% - 50px)",
+          height: "100%", // Full height, không trừ action bar
+          minHeight: "300px", // Đảm bảo có chiều cao tối thiểu
         }}
       >
         <video
           id={`video-${camera.id}`}
           ref={videoRef}
           controls={false}
-          autoPlay
+          autoPlay={!isRecognizing} // Chỉ autoPlay khi không đang nhận diện
           muted
           playsInline
           disablePictureInPicture
           style={{
             width: "100%",
             height: "100%",
-            borderRadius: "8px 8px 0 0",
+            borderRadius: "0", // Bỏ border radius để video full màn hình
             backgroundColor: "#000",
-            objectFit: "cover",
+            objectFit: "contain", // Thay đổi từ "cover" thành "contain" để hiển thị full video
             // Luôn hiển thị video gốc
             display: "block",
             // Ẩn các controls và overlays
@@ -987,56 +1001,46 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           </div>
         )}
         
-        {/* Realtime Detections Overlay */}
-        {isRecognizing && realtimeDetections.length > 0 && (
+        {/* Đã xóa Realtime Detections Overlay theo yêu cầu */}
+        
+        {/* Hiển thị loading khi đang chờ ROI */}
+        {isRecognizing && !videoReady && (
           <div
             style={{
               position: "absolute",
-              top: "10px",
-              right: "10px",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
               background: "rgba(0, 0, 0, 0.8)",
               color: "white",
-              padding: "10px",
+              padding: "20px",
               borderRadius: "8px",
-              fontSize: "12px",
-              maxWidth: "300px",
-              maxHeight: "200px",
-              overflowY: "auto",
+              fontSize: "14px",
+              textAlign: "center",
               pointerEvents: "none",
+              zIndex: 1000,
             }}
           >
-            <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
-              🔍 Realtime Detections
+            <div style={{ marginBottom: "10px" }}>
+              <div style={{
+                width: "40px",
+                height: "40px",
+                border: "4px solid #f3f3f3",
+                borderTop: "4px solid #4caf50",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+                margin: "0 auto"
+              }}></div>
             </div>
-            {realtimeDetections.slice(0, 3).map((detection, index) => (
-              <div 
-                key={detection.id}
-                style={{
-                  marginBottom: "6px",
-                  padding: "4px 6px",
-                  borderRadius: "4px",
-                  backgroundColor: detection.is_whitelist_match ? "rgba(0, 255, 0, 0.2)" :
-                                 detection.is_blacklist_match ? "rgba(255, 0, 0, 0.2)" : "rgba(128, 128, 128, 0.2)",
-                  border: detection.is_whitelist_match ? "1px solid #00ff00" :
-                         detection.is_blacklist_match ? "1px solid #ff0000" : "1px solid #808080",
-                }}
-              >
-                <div style={{ fontWeight: "bold", fontSize: "14px" }}>
-                  {detection.plate_number}
-                </div>
-                <div style={{ fontSize: "10px", opacity: 0.8 }}>
-                  {Math.round(detection.confidence_score * 100)}% • {
-                    detection.is_whitelist_match ? '✅ Whitelist' : 
-                    detection.is_blacklist_match ? '🚨 Blacklist' : '❓ Unknown'
-                  } • {new Date(detection.detected_at).toLocaleTimeString()}
-                </div>
-              </div>
-            ))}
+            <div>Đang khởi tạo nhận diện...</div>
+            <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "5px" }}>
+              Vui lòng đợi hệ thống thiết lập vùng ROI
+            </div>
           </div>
         )}
         
         {/* Hiển thị trạng thái recognition */}
-        {isRecognizing && (
+        {isRecognizing && videoReady && (
           <div
             style={{
               position: "absolute",
@@ -1053,6 +1057,8 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             🔍 Recognition ON
           </div>
         )}
+        
+        {/* Đã xóa overlay hiển thị tên video theo yêu cầu */}
       </div>
 
       <div style={{ width: "100%" }}>
