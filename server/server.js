@@ -26,9 +26,9 @@ app.use('/api/videos', require('./routes/videoRoutes'));
 app.use('/api', require('./routes/upload'));
 app.use('/streams', express.static(path.join(__dirname, '../public/streams')));
 
-// Serve cropped plate images
-app.use('/static/crops', express.static(path.join(__dirname, '../static/crops')));
-app.use('/crops', express.static(path.join(__dirname, '../static/crops')));
+// Serve cropped plate images from plate_recognition/static/crops
+app.use('/static/crops', express.static(path.join(__dirname, '../plate_recognition/static/crops')));
+app.use('/crops', express.static(path.join(__dirname, '../plate_recognition/static/crops')));
 
 // WebSocket setup
 const server = http.createServer(app);
