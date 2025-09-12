@@ -178,10 +178,16 @@
 }
 
 .source-btn {
-  background: #607D8B;
+  background: #2196f3;
 }
 .source-btn:hover {
-  background: #455A64;
+  background: #1976d2;
+}
+.source-btn.has-source {
+  background: #4caf50;
+}
+.source-btn.has-source:hover {
+  background: #388e3c;
 }
 
 .upload-btn {
@@ -207,7 +213,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
+  max-width: 250px; /* Tăng từ 150px lên 250px để hiển thị đầy đủ tên camera */
   padding: 4px 8px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;

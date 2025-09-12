@@ -35,7 +35,6 @@ import {
 } from '@mui/material';
 import {
   Visibility as ViewIcon,
-  CloudUpload as UploadIcon,
   Clear as ClearIcon,
   FirstPage,
   LastPage,
@@ -52,11 +51,9 @@ import {
 } from '@mui/icons-material';
 
 const SamplePage = () => {
-  const [cameraPositions, setCameraPositions] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [showConfig, setShowConfig] = useState(false);
   const [selectedCameraId] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [recording, setRecording] = useState({}); // Thêm state cho ghi hình
   const [muted, setMuted] = useState({}); // State cho âm thanh
   const [playing, setPlaying] = useState({}); // State cho phát video
@@ -69,14 +66,11 @@ const SamplePage = () => {
   const camerasRef = useRef([]);
   const resizeRefs = useRef({});
   const [cameraSizes, setCameraSizes] = useState({});
-  const [uploadedVideos, setUploadedVideos] = useState({});
-  const [videos, setVideos] = useState([]);
 
   // States cho detection results
   const [detectionResults, setDetectionResults] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [lastNotificationTime, setLastNotificationTime] = useState(new Date());
   const [totalItems, setTotalItems] = useState(0);
   const [isPolling, setIsPolling] = useState(false);
   const lastNotificationTimeRef = useRef(new Date());
@@ -126,18 +120,9 @@ const SamplePage = () => {
   // States cho giao diện tìm kiếm
   const [locations, setLocations] = useState([]);
   const [searchCameras, setSearchCameras] = useState([]);
-  const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(null);
   
   
-  // Options cho các dropdown
-  const detectionStatusOptions = [
-    { value: '', label: 'Tất cả trạng thái', color: 'default' },
-    { value: 'detected', label: 'Đã phát hiện', color: 'success' },
-    { value: 'verified', label: 'Đã xác minh', color: 'info' },
-    { value: 'pending', label: 'Chờ xử lý', color: 'warning' },
-    { value: 'error', label: 'Lỗi', color: 'error' }
-  ];
 
   const verificationStatusOptions = [
     { value: '', label: 'Tất cả', color: 'default' },
@@ -407,20 +392,6 @@ const SamplePage = () => {
     loadDetectionResults();
   };
 
-  // Hàm chuyển đổi từ yyyy-MM-ddTHH:mm sang dd/MM/yyyy HH:mm
-  const convertToDisplayFormat = (dateString) => {
-    if (!dateString) return '';
-    
-    const dateRegex = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
-    const match = dateString.match(dateRegex);
-    
-    if (match) {
-      const [, year, month, day, hour, minute] = match;
-      return `${day}/${month}/${year} ${hour}:${minute}`;
-    }
-    
-    return dateString;
-  };
 
   // Hàm format ngày giờ cho hiển thị (dd/mm/yyyy HH:mm)
   const formatDateTimeForDisplay = (dateString) => {
@@ -443,20 +414,6 @@ const SamplePage = () => {
     }
   };
 
-  // Hàm chuyển đổi từ dd/MM/yyyy HH:mm sang yyyy-MM-ddTHH:mm
-  const convertToDateTimeLocal = (dateString) => {
-    if (!dateString) return '';
-    
-    const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/;
-    const match = dateString.match(dateRegex);
-    
-    if (match) {
-      const [, day, month, year, hour, minute] = match;
-      return `${year}-${month}-${day}T${hour}:${minute}`;
-    }
-    
-    return dateString;
-  };
 
 
   // Hàm chuyển đổi datetime từ yyyy-MM-ddTHH:mm sang yyyy-MM-dd HH:mm:ss
@@ -768,7 +725,7 @@ const SamplePage = () => {
     window.startCameraStream = handleCameraClick;
     window.startVideoStream = (videoId) => {
       const streamId = `video-${videoId}-${Date.now()}`;
-      const video = videos.find((v) => v.id === videoId);
+      const video = null; // videos đã bị xóa
       if (video) {
         setRtspStreams((prev) => ({
           ...prev,
@@ -788,7 +745,7 @@ const SamplePage = () => {
       delete window.startCameraStream;
       delete window.startVideoStream;
     };
-  }, [videos]);
+  }, []);
 const getRelativeTime = (dateString) => {
   const now = new Date();
   const date = new Date(dateString);
@@ -804,17 +761,6 @@ const getRelativeTime = (dateString) => {
   return `${Math.floor(diffDays / 7)} tuần trước`;
 };
 
-// Function để get vehicle type label
-const getVehicleTypeLabel = (type) => {
-  const typeLabels = {
-    'motorcycle': '🏍️ Xe máy',
-    'car': '🚗 Ô tô',
-    'truck': '🚛 Xe tải',
-    'bus': '🚌 Xe buýt',
-    'other': '🚙 Khác'
-  };
-  return typeLabels[type] || type;
-};
 useEffect(() => {
     // Tạo global function để CameraViewer có thể gọi
     window.refreshDetectionResults = () => {
@@ -901,94 +847,97 @@ useEffect(() => {
 
   const fetchCameras = async () => {
     try {
-      setLoading(true);
       const token = localStorage.getItem("token");
       const data = await fetchDataFromAPI("/api/cameras/streams/all", token);
       const cameraList = data.data?.cameras || [];
       camerasRef.current = cameraList;
       setCameras(cameraList);
-      const positions = cameraList.map((camera) => ({
-        id: camera.id,
-        config: {
-          name: camera.name,
-          protocol: camera.protocol,
-          host: camera.host,
-          port: camera.port,
-          path: camera.path,
-        },
-      }));
-      setCameraPositions(positions);
     } catch (error) {
       console.error("Fetch error:", error.message);
     } finally {
-      setLoading(false);
     }
   };
 
-  const loadUploadedVideos = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetchDataFromAPI("/api/videos/list-videos", token);
-      if (response.success) {
-        const videos = response.data.reduce((acc, video) => {
-          const streamId = `upload-${video.id}`;
-          acc[streamId] = { url: video.url, name: video.name };
-          return acc;
-        }, {});
-        setUploadedVideos(videos);
-        setSelectedStreams(Object.keys(videos));
-        Object.keys(videos).forEach((streamId) => {
-          setCameraSizes((prev) => ({
-            ...prev,
-            [streamId]: { width: 400, height: 250 },
-          }));
-        });
-        setVideos(response.data);
-      }
-    } catch (error) {
-      console.error("Error loading uploaded videos:", error);
-    }
-  };
 
   const handleCameraClick = async (cameraId) => {
-    if (showConfig || isLoadingStream.current) return;
+    console.log("🎥 Camera clicked:", cameraId);
+    console.log("📋 Current cameras in ref:", camerasRef.current);
+    
+    if (showConfig || isLoadingStream.current) {
+      console.log("⚠️ Camera click ignored - showConfig or loading:", { showConfig, isLoading: isLoadingStream.current });
+      return;
+    }
 
-    const camera = camerasRef.current.find((c) => c.id == cameraId);
+    // Tìm camera trong danh sách hiện tại (so sánh linh hoạt)
+    let camera = camerasRef.current.find((c) => c.id === cameraId || String(c.id) === String(cameraId));
+    console.log("🔍 Found camera in ref:", camera);
 
     if (!camera) {
+      console.log("🔄 Camera not found in ref, fetching cameras...");
       await fetchCameras();
-      const refreshedCamera = camerasRef.current.find(
-        (c) => c.id == cameraId
-      );
-      if (!refreshedCamera) {
+      camera = camerasRef.current.find((c) => c.id === cameraId || String(c.id) === String(cameraId));
+      console.log("🔍 Found camera after fetch:", camera);
+      
+      if (!camera) {
+        console.error("❌ Camera not found after fetch:", cameraId);
+        console.log("📋 Available cameras:", camerasRef.current.map(c => ({ id: c.id, name: c.name })));
         alert(`Không tìm thấy camera ${cameraId}`);
         return;
       }
     }
 
+    // Lưu camera được chọn
+    console.log("✅ Selected camera:", camera);
+
     const streamId = `${cameraId}-${Date.now()}`;
+    console.log("🆔 Generated stream ID:", streamId);
 
     isLoadingStream.current = true;
     try {
       const token = localStorage.getItem("token");
-      const result = await postData(
-        `/api/cameras/${cameraId}/stream/start`,
-        { type: "hls" },
-        token
-      );
-      if (!result.success) {
-        alert(result.message || "Không thể phát camera");
-        return;
+      console.log("🚀 Starting camera stream...");
+      
+      // Thử gọi API stream start
+      let streamUrl;
+      try {
+        const result = await postData(
+          `/api/cameras/${cameraId}/stream/start`,
+          { type: "hls" },
+          token
+        );
+        
+        console.log("📡 Stream start result:", result);
+        
+        if (result.success && result.data?.stream?.streamUrl) {
+          streamUrl = result.data.stream.streamUrl.replace(
+            "localhost",
+            window.location.hostname
+          );
+          console.log("🔗 Stream URL from API:", streamUrl);
+        } else {
+          throw new Error(result.message || "API không trả về stream URL");
+        }
+      } catch (apiError) {
+        console.warn("⚠️ API stream start failed, trying fallback:", apiError);
+        
+        // Fallback: Tạo stream URL từ thông tin camera
+        if (camera.protocol === "rtsp") {
+          streamUrl = `rtsp://${camera.host}:${camera.port}${camera.path}`;
+        } else if (camera.protocol === "http" || camera.protocol === "https") {
+          streamUrl = `${camera.protocol}://${camera.host}:${camera.port}${camera.path}`;
+        } else {
+          streamUrl = camera.stream_url || camera.url || `http://${camera.host}:${camera.port}${camera.path}`;
+        }
+        
+        console.log("🔗 Fallback stream URL:", streamUrl);
       }
-      const streamUrl = result.data.stream.streamUrl.replace(
-        "localhost",
-        window.location.hostname
-      );
+      
       setRtspStreams((prev) => ({
         ...prev,
         [streamId]: {
           cameraId: cameraId,
           url: streamUrl,
+          isCamera: true, // Đánh dấu đây là camera
         },
       }));
       setSelectedStreams((prev) => [...prev, streamId]);
@@ -996,8 +945,10 @@ useEffect(() => {
         ...prev,
         [streamId]: { width: 400, height: 250 },
       }));
+      
+      console.log("✅ Camera stream started successfully");
     } catch (error) {
-      console.error("Error starting stream:", error);
+      console.error("❌ Error starting stream:", error);
       alert("Không thể phát camera: " + (error.message || "Lỗi không xác định"));
     } finally {
       isLoadingStream.current = false;
@@ -1017,11 +968,71 @@ useEffect(() => {
       delete newSizes[streamId];
       return newSizes;
     });
-    setUploadedVideos((prev) => {
-      const newVideos = { ...prev };
-      delete newVideos[streamId];
-      return newVideos;
-    });
+  };
+
+  // Hàm xử lý chọn nguồn video cho camera
+  const handleSelectSource = (streamId) => {
+    console.log("Selecting source for stream:", streamId);
+    
+    // Tạo input file để chọn video
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.style.display = 'none';
+    
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      try {
+        // Upload video lên server sử dụng cùng endpoint như nút "Tải video"
+        const formData = new FormData();
+        formData.append("video", file);
+        
+        const token = localStorage.getItem("token");
+        const response = await postData(
+          "/api/videos/upload-video", // Sử dụng cùng endpoint như handleUploadVideo
+          formData,
+          token,
+          {
+            headers: { "Content-Type": "multipart/form-data" },
+          }
+        );
+        
+        console.log("Video upload response:", response);
+        
+        if (response.success) {
+          // Tạo URL đầy đủ cho video
+          const fullUrl = `${window.location.origin}${response.data.url}`;
+          
+          // Cập nhật nguồn video cho camera này
+          setRtspStreams((prev) => ({
+            ...prev,
+            [streamId]: {
+              ...prev[streamId],
+              url: fullUrl,
+              isVideoSource: true, // Đánh dấu đây là nguồn video
+              videoName: file.name
+            },
+          }));
+          
+          
+          console.log("✅ Video uploaded and set as source:", fullUrl);
+        } else {
+          alert("Lỗi khi tải video: " + (response.message || "Không xác định"));
+        }
+      } catch (error) {
+        console.error("❌ Error uploading video:", error);
+        alert("Lỗi khi tải video: " + (error.message || "Lỗi không xác định"));
+      }
+      
+      // Cleanup
+      document.body.removeChild(input);
+    };
+    
+    // Thêm input vào DOM và trigger click
+    document.body.appendChild(input);
+    input.click();
   };
 
 
@@ -1327,13 +1338,6 @@ useEffect(() => {
   };
 
   const handleSaveConfig = (updatedConfig) => {
-    setCameraPositions((prevPositions) =>
-      prevPositions.map((cam) =>
-        cam.id === selectedCameraId
-          ? { ...cam, config: { ...cam.config, ...updatedConfig } }
-          : cam
-      )
-    );
     setShowConfig(false);
   };
 
@@ -1367,46 +1371,6 @@ useEffect(() => {
     document.addEventListener("mouseup", onMouseUp);
   };
 
-  const handleUploadVideo = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("video", file);
-
-    try {
-      const token = localStorage.getItem("token");
-      const response = await postData(
-        "/api/videos/upload-video",
-        formData,
-        token,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
-      if (response.success) {
-        const streamId = `upload-${response.data.id}`;
-        const fullUrl = `${window.location.origin}${response.data.url}`;
-        setUploadedVideos((prev) => ({
-          ...prev,
-          [streamId]: {
-            url: fullUrl,
-            name: file.name,
-          },
-        }));
-        setSelectedStreams((prev) => [...prev, streamId]);
-        setCameraSizes((prev) => ({
-          ...prev,
-          [streamId]: { width: 400, height: 250 },
-        }));
-      } else {
-        alert(response.message || "Tải video thất bại");
-      }
-    } catch (error) {
-      console.error("Error uploading video:", error);
-      alert("Tải video thất bại: " + (error.message || "Lỗi không xác định"));
-    }
-  };
 
   const handleItemsPerPageChange = (event) => {
     setItemsPerPage(parseInt(event.target.value));
@@ -1746,20 +1710,6 @@ useEffect(() => {
               >
                 Xóa tất cả
               </Button>
-              <Button
-                variant="contained"
-                component="label"
-                startIcon={<UploadIcon />}
-                sx={{ 
-                  backgroundColor: '#1976d2',
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  fontWeight: 600
-                }}
-              >
-                Tải video
-                <input type="file" accept="video/*" hidden onChange={handleUploadVideo} />
-              </Button>
             </Box>
           </Box>
         </CardContent>
@@ -1789,16 +1739,14 @@ useEffect(() => {
         {selectedStreams.length > 0 ? (
             <Grid container spacing={2}>
               {selectedStreams.map((streamId) => {
-                const streamInfo = rtspStreams[streamId] || uploadedVideos[streamId];
+                const streamInfo = rtspStreams[streamId];
             if (!streamInfo) return null;
 
-            const isUploadedVideo = streamId.startsWith("upload-");
-            const cameraId = streamInfo.cameraId || streamId.split("-")[1];
-            const camera = cameras.find((c) => c.id == cameraId) || {
+            const cameraId = streamInfo.cameraId || streamId.split("-")[0];
+            // Tìm camera từ camerasRef.current (danh sách đầy đủ)
+            const camera = camerasRef.current.find((c) => c.id === cameraId || String(c.id) === String(cameraId)) || {
               id: cameraId,
-              name: uploadedVideos[streamId]
-                ? uploadedVideos[streamId].name
-                : `Camera ${cameraId}`,
+              name: `Camera ${cameraId}`,
             };
             
             // Debug log để kiểm tra camera
@@ -1806,9 +1754,10 @@ useEffect(() => {
               streamId,
               cameraId,
               camera,
+              cameraName: camera.name,
+              camerasRef: camerasRef.current.map(c => ({ id: c.id, name: c.name })),
               cameras: cameras.map(c => ({ id: c.id, name: c.name }))
             });
-                const size = cameraSizes[streamId] || { width: 400, height: 250 };
 
             return (
                   <Grid item xs={12} sm={6} md={4} key={streamId}>
@@ -1817,6 +1766,9 @@ useEffect(() => {
                       overflow: 'hidden',
                       border: '1px solid #e0e0e0',
                       transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                      height: '100%', // Full height cho card
+                      display: 'flex',
+                      flexDirection: 'column',
                       '&:hover': {
                         transform: 'translateY(-2px)',
                         boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)'
@@ -1824,16 +1776,21 @@ useEffect(() => {
                     }}>
                       <Box
                 ref={(el) => (resizeRefs.current[streamId] = el)}
-                        sx={{ position: 'relative' }}
+                        sx={{ 
+                          position: 'relative',
+                          flex: 1, // Chiếm toàn bộ không gian còn lại
+                          minHeight: '300px', // Chiều cao tối thiểu
+                          display: 'flex',
+                          flexDirection: 'column'
+                        }}
                 >
                   <CameraViewer
                     camera={{
                       id: streamId,
-                      name: isUploadedVideo
-                        ? uploadedVideos[streamId].name
-                        : `${camera.name} (Stream ${streamId.split("-")[1]})`,
+                      name: camera.name || `Camera ${cameraId}`, // Luôn hiển thị tên camera
                       streamUrl: streamInfo.url,
-                      isUploadedVideo: isUploadedVideo,
+                      isVideoSource: rtspStreams[streamId]?.isVideoSource || false, // Đánh dấu có nguồn video
+                      videoName: rtspStreams[streamId]?.videoName || null, // Tên video nếu có
                     }}
                     actionBar={({
                       startRecognition,
@@ -1866,14 +1823,17 @@ useEffect(() => {
                         isPlaying={playing[streamId] || false}
                         onQualitySettings={(quality) => handleQualitySettings(streamId, quality)}
                         currentQuality={currentQuality[streamId] || 'medium'}
+                        onSelectSource={() => handleSelectSource(streamId)}
+                        hasVideoSource={rtspStreams[streamId]?.isVideoSource || false}
                       />
                     )}
                     onClose={() => handleCloseCameraFeed(streamId)}
                     recordingTimer={recordingTimers[streamId] || 0}
                     style={{
-                      width: `${size.width}px`,
-                      height: `${size.height}px`,
-                      maxWidth: '100%'
+                      width: '100%',
+                      height: '100%',
+                      flex: 1, // Chiếm toàn bộ không gian còn lại
+                      minHeight: '300px'
                     }}
                   />
                         
@@ -1910,7 +1870,7 @@ useEffect(() => {
                 Chưa có camera hoặc video nào được chọn
               </Typography>
               <Typography variant="body2">
-                Vui lòng chọn camera từ sidebar hoặc tải video lên để bắt đầu giám sát
+                Vui lòng chọn camera từ sidebar để bắt đầu giám sát
               </Typography>
             </Box>
           )}
@@ -1962,7 +1922,7 @@ useEffect(() => {
                   variant="contained"
                   startIcon={<SearchIcon />}
                   onClick={applySearch}
-                  disabled={searchLoading}
+                  disabled={false}
                   sx={{ 
                     backgroundColor: '#1976d2',
                     fontWeight: 600,
@@ -1979,7 +1939,7 @@ useEffect(() => {
                     }
                   }}
                 >
-                  {searchLoading ? 'Đang tìm kiếm...' : 'Tìm kiếm'}
+                  {'Tìm kiếm'}
                 </Button>
                 )}
                 
@@ -2592,7 +2552,7 @@ useEffect(() => {
                           </Box>
                         )}
                         
-                        {result.source_type === 'camera' && result.camera_name && (
+                        {result.source_type === 'camera' && (
                           <Box>
                             <Typography variant="caption" color="text.secondary" display="block" sx={{ 
                               mb: 0.5, 
@@ -2601,7 +2561,16 @@ useEffect(() => {
                               color: '#666',
                               wordBreak: 'break-word'
                             }}>
-                              {result.camera_name}
+                              Tên camera: {result.camera_name || `Camera ${result.camera_id}` || 'N/A'}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" display="block" sx={{ 
+                              mb: 0.5, 
+                              fontSize: '0.7rem',
+                              fontWeight: 500,
+                              color: '#666',
+                              wordBreak: 'break-word'
+                            }}>
+                              Vị trí: {result.location_name || 'N/A'}
                             </Typography>
                           </Box>
                         )}
@@ -2879,7 +2848,7 @@ useEffect(() => {
                                     }}
                                   />
                                 ) : (
-                                  <UploadIcon fontSize="small" />
+                                  <VideoIcon fontSize="small" />
                                 )}
                               </IconButton>
                               )}
