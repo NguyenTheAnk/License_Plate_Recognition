@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Box, Grid, Paper, Typography, Avatar, CircularProgress, Alert, 
-  Chip, LinearProgress, Fade, 
+  Chip, LinearProgress, Fade,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   List, ListItem, ListItemText, ListItemIcon, Divider
 } from '@mui/material';
@@ -12,7 +12,7 @@ import {
 } from 'recharts';
 import {
   Videocam, DirectionsCar, EventNote, CheckCircle,
-  Speed, Assessment, Timeline, BarChart as BarChartIcon, Notifications
+  Speed, Timeline, BarChart as BarChartIcon, Notifications
 } from '@mui/icons-material';
 
 
@@ -42,17 +42,19 @@ function Dashboard() {
     heatmapData: [],
     speedAnalysis: [],
     alertTrends: [],
-    efficiencyMetrics: {}
+    efficiencyMetrics: {},
+    hourlyPerformance: []
   });
 
-  // Process raw API data into dashboard format
+  // Process raw API data into dashboard format (legacy - not used anymore)
+  /*
   const processDashboardData = React.useCallback((cameraData, detectionData, journeyData, accessData) => {
     const cameraStats = cameraData.data?.overall || {};
     const detections = detectionData.data?.detections || detectionData.detections || [];
-    const journeys = journeyData || [];
+    const journeys = Array.isArray(journeyData) ? journeyData : [];
 
     // Summary cards
-const summary = [
+    const summary = [
       { 
         label: 'Tổng số camera', 
         value: cameraStats.total_cameras || 0, 
@@ -78,7 +80,6 @@ const summary = [
         color: '#d32f2f' 
       },
     ];
-
 
     // Weekly detection data (last 7 days)
     const eventStats = generateWeeklyStats(detections);
@@ -126,6 +127,186 @@ const summary = [
       efficiencyMetrics
     };
   }, []);
+  */
+
+  // Process new API data format
+  const processNewDashboardData = React.useCallback((apiData) => {
+    const { summary, performance, daily_stats, hourly_stats, top_cameras, top_plates, recent_detections, location_stats, time_series_data, hourly_performance } = apiData || {};
+
+    // Summary cards
+    const summaryCards = [
+      { 
+        label: 'Tổng số camera', 
+        value: summary.total_cameras || 0, 
+        icon: <Videocam fontSize="large" />, 
+        color: '#1976d2' 
+      },
+      { 
+        label: 'Đang hoạt động', 
+        value: summary.online_cameras || 0, 
+        icon: <CheckCircle fontSize="large" />, 
+        color: '#43a047' 
+      },
+      { 
+        label: 'Số lộ trình', 
+        value: summary.total_journeys || 0, 
+        icon: <EventNote fontSize="large" />, 
+        color: '#ffa000' 
+      },
+      { 
+        label: 'Xe nhận diện (7 ngày)', 
+        value: summary.total_detections || 0, 
+        icon: <DirectionsCar fontSize="large" />, 
+        color: '#d32f2f' 
+      },
+    ];
+
+    // Weekly stats from daily_stats
+    const weeklyStats = daily_stats.map(stat => ({
+      name: new Date(stat.date).toLocaleDateString('vi-VN', { weekday: 'short' }),
+      xe: stat.detections,
+      suKien: Math.floor(stat.detections * 0.1)
+    }));
+
+    // Hourly stats - ensure we have 24 hours of data
+    const hourlyData = Array.from({ length: 24 }, (_, i) => {
+      const hourData = hourly_stats.find(h => h.hour === `${i}h`);
+      return {
+        hour: `${i}h`,
+        xe: hourData?.detections || 0
+      };
+    });
+
+    // Camera bar data
+    const cameraBarData = top_cameras.slice(0, 5).map(camera => ({
+      camera: camera.name,
+      xe: camera.detections
+    }));
+
+    // Performance metrics
+    const performanceMetrics = {
+      totalDetections: performance.total_detections || 0,
+      avgConfidence: parseFloat(performance.avg_confidence || 0),
+      highConfidence: performance.high_confidence || 0,
+      mediumConfidence: performance.medium_confidence || 0,
+      lowConfidence: performance.low_confidence || 0,
+      accuracyRate: parseFloat(performance.accuracy_rate || 0),
+      whitelistMatches: performance.whitelist_matches || 0,
+      blacklistMatches: performance.blacklist_matches || 0,
+      minConfidence: parseFloat(performance.min_confidence || 0),
+      maxConfidence: parseFloat(performance.max_confidence || 0),
+      confidenceStddev: parseFloat(performance.confidence_stddev || 0),
+      uniquePlates: performance.unique_plates || 0,
+      whitelistRate: performance.total_detections > 0 ? ((performance.whitelist_matches || 0) / performance.total_detections * 100).toFixed(1) : 0,
+      blacklistRate: performance.total_detections > 0 ? ((performance.blacklist_matches || 0) / performance.total_detections * 100).toFixed(1) : 0
+    };
+
+    // System health
+    const systemHealth = {
+      healthScore: summary.total_cameras > 0 ? Math.round((summary.online_cameras / summary.total_cameras) * 100) : 0,
+      totalCameras: summary.total_cameras || 0,
+      onlineCameras: summary.online_cameras || 0,
+      offlineCameras: summary.offline_cameras || 0,
+      status: summary.online_cameras / summary.total_cameras >= 0.9 ? 'Excellent' : 
+              summary.online_cameras / summary.total_cameras >= 0.7 ? 'Good' : 
+              summary.online_cameras / summary.total_cameras >= 0.5 ? 'Fair' : 'Poor',
+      lastUpdate: new Date().toLocaleString('vi-VN')
+    };
+
+    // Efficiency metrics
+    const efficiencyMetrics = {
+      accuracyRate: performance.accuracy_rate || 0,
+      verificationRate: 0, // Not available in current API
+      whitelistRate: 0, // Not available in current API
+      blacklistRate: 0, // Not available in current API
+      totalCameras: summary.total_cameras || 0,
+      onlineCameras: summary.online_cameras || 0,
+      offlineCameras: summary.offline_cameras || 0
+    };
+
+    // Recent detections
+    const recentDetections = recent_detections.map(detection => ({
+      id: detection.id,
+      plate: detection.plate_number,
+      time: new Date(detection.detected_at).toLocaleString('vi-VN'),
+      confidence: Math.round(parseFloat(detection.confidence_score || 0) * 100),
+      camera: detection.camera_name || 'Unknown',
+      location: detection.location_name || 'Unknown'
+    }));
+
+    // Top plates
+    const topPlates = top_plates.map(plate => ({
+      plate: plate.plate,
+      count: plate.count
+    }));
+
+    // Time series data - use real data from API
+    const timeSeriesData = time_series_data ? time_series_data.map(stat => ({
+      time: stat.time,
+      detections: stat.detections,
+      highConfidence: stat.highConfidence,
+      whitelist: stat.whitelist,
+      blacklist: stat.blacklist
+    })) : Array.from({ length: 24 }, (_, i) => ({
+      time: `${i}:00`,
+      detections: 0,
+      highConfidence: 0,
+      whitelist: 0,
+      blacklist: 0
+    }));
+
+    // Alerts
+    const alerts = [];
+    if (summary.offline_cameras > 0) {
+      alerts.push({
+        id: 1,
+        type: 'warning',
+        message: `${summary.offline_cameras} camera đang offline`,
+        timestamp: new Date().toLocaleString('vi-VN')
+      });
+    }
+    if (performance.low_confidence > 0) {
+      alerts.push({
+        id: 2,
+        type: 'error',
+        message: `${performance.low_confidence} phát hiện có độ tin cậy thấp`,
+        timestamp: new Date().toLocaleString('vi-VN')
+      });
+    }
+
+    return {
+      summary: summaryCards,
+      eventStats: weeklyStats,
+      lineData: hourlyData,
+      camBarData: cameraBarData,
+      hourlyStats: hourlyData,
+      weeklyTrends: weeklyStats.map(stat => ({
+        day: stat.name,
+        detections: stat.xe,
+        uniquePlates: Math.floor(stat.xe * 0.8), // Estimate
+        avgConfidence: 0.75, // Default
+        efficiency: Math.min(100, Math.floor(stat.xe * 0.8 / Math.max(stat.xe, 1) * 100))
+      })),
+      monthlyStats: [], // Not available in current API
+      topPlates: topPlates,
+      recentDetections: recentDetections,
+      systemHealth: systemHealth,
+      performanceMetrics: performanceMetrics,
+      locationStats: location_stats.map(location => ({
+        name: location.name,
+        detections: location.detection_count,
+        cameras: location.camera_count,
+        efficiency: location.camera_count > 0 ? Math.round((location.detection_count / location.camera_count) * 100) / 100 : 0
+      })),
+      alerts: alerts,
+      timeSeriesData: timeSeriesData,
+      heatmapData: [], // Not available in current API
+      speedAnalysis: [], // Not available in current API
+      alertTrends: [], // Not available in current API
+      efficiencyMetrics: efficiencyMetrics,
+      hourlyPerformance: hourly_performance || []
+    };
+  }, []);
 
   // Fetch dashboard data
   useEffect(() => {
@@ -140,71 +321,22 @@ const summary = [
           throw new Error('Bạn cần đăng nhập để xem dashboard');
         }
 
-        // Fetch camera statistics
-        const cameraResponse = await fetch(`${API_BASE_URL}/cameras/statistics`, {
+        // Fetch dashboard statistics from new API
+        const dashboardResponse = await fetch(`${API_BASE_URL}/dashboard/stats`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         });
         
-        if (!cameraResponse.ok) {
-          throw new Error(`Camera API error: ${cameraResponse.status}`);
+        if (!dashboardResponse.ok) {
+          throw new Error(`Dashboard API error: ${dashboardResponse.status}`);
         }
-        const cameraData = await cameraResponse.json();
+        const dashboardApiData = await dashboardResponse.json();
 
-        // Fetch plate detections (last 7 days) - using correct endpoint
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const detectionResponse = await fetch(`${API_BASE_URL}/plate-detections/list?date_from=${sevenDaysAgo.toISOString().split('T')[0]}&rowsPerPage=1000`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-        
-        if (!detectionResponse.ok) {
-          throw new Error(`Detection API error: ${detectionResponse.status}`);
-        }
-        const detectionData = await detectionResponse.json();
+        console.log('Dashboard API data:', dashboardApiData);
 
-        // Fetch journeys (last 7 days) - using correct endpoint
-        const journeyResponse = await fetch(`${API_BASE_URL}/journeys?limit=1000`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-        
-        if (!journeyResponse.ok) {
-          throw new Error(`Journey API error: ${journeyResponse.status}`);
-        }
-        const journeyData = await journeyResponse.json();
-
-        // Fetch access control lists - using correct endpoint
-        const accessResponse = await fetch(`${API_BASE_URL}/access-control?limit=1000`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-        
-        if (!accessResponse.ok) {
-          throw new Error(`Access Control API error: ${accessResponse.status}`);
-        }
-        const accessData = await accessResponse.json();
-
-        // Process data
-        console.log('Raw detection data:', detectionData);
-        console.log('Sample detections:', detectionData.data?.detections?.slice(0, 3) || detectionData.detections?.slice(0, 3));
-        
-        // Debug confidence data specifically
-        const detections = detectionData.data?.detections || detectionData.detections || [];
-        console.log('Confidence analysis:', detections.slice(0, 5).map(d => ({
-          id: d.id,
-          plate_number: d.plate_number,
-          detection_confidence: d.detection_confidence,
-          ocr_confidence: d.ocr_confidence,
-          combined: d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 'N/A'
-        })));
-        
-        const processedData = processDashboardData(cameraData, detectionData, journeyData, accessData);
+        // Process the new API data format
+        const processedData = processNewDashboardData(dashboardApiData.data);
         console.log('Processed dashboard data:', processedData);
         setDashboardData(processedData);
 
@@ -271,9 +403,10 @@ const summary = [
     };
 
     fetchDashboardData();
-  }, [processDashboardData]);
+  }, [processNewDashboardData]);
 
-  // Generate weekly statistics
+  // Generate weekly statistics (legacy - not used anymore)
+  /*
   const generateWeeklyStats = (detections) => {
     const days = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
     const today = new Date();
@@ -297,8 +430,10 @@ const summary = [
 
     return weeklyData;
   };
+  */
 
-  // Generate hourly statistics for today
+  // Generate hourly statistics for today (legacy - not used anymore)
+  /*
   const generateHourlyStats = (detections) => {
     const today = new Date().toISOString().split('T')[0];
     const hourlyData = [];
@@ -354,7 +489,11 @@ const summary = [
 
       const uniquePlates = new Set(dayDetections.map(d => d.plate_number)).size;
       const avgConfidence = dayDetections.length > 0 
-        ? dayDetections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / dayDetections.length 
+        ? dayDetections.reduce((sum, d) => {
+            const confidence = d.confidence_score || 
+              (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+            return sum + confidence;
+          }, 0) / dayDetections.length 
         : 0;
 
       weeklyData.push({
@@ -386,7 +525,11 @@ const summary = [
         detections: monthDetections.length,
         uniquePlates: new Set(monthDetections.map(d => d.plate_number)).size,
         avgConfidence: monthDetections.length > 0 
-          ? Math.round((monthDetections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / monthDetections.length) * 100) / 100
+          ? Math.round((monthDetections.reduce((sum, d) => {
+              const confidence = d.confidence_score || 
+                (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+              return sum + confidence;
+            }, 0) / monthDetections.length) * 100) / 100
           : 0
       });
     }
@@ -419,7 +562,9 @@ const summary = [
         id: detection.id,
         plate: detection.plate_number,
         time: new Date(detection.detected_at).toLocaleString('vi-VN'),
-        confidence: Math.round((detection.confidence_score || 0) * 100),
+        confidence: Math.round(((detection.confidence_score || 
+          (detection.detection_confidence && detection.ocr_confidence ? 
+            (detection.detection_confidence + detection.ocr_confidence) / 2 : 0)) * 100)),
         camera: detection.camera_name || 'Unknown',
         location: detection.location_name || 'Unknown'
       }));
@@ -457,12 +602,31 @@ const summary = [
     
     // Calculate combined confidence from detection_confidence and ocr_confidence
     const avgConfidence = totalDetections > 0 
-      ? detections.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / totalDetections 
+      ? detections.reduce((sum, d) => {
+          // Use confidence_score if available, otherwise calculate from detection_confidence and ocr_confidence
+          const confidence = d.confidence_score || 
+            (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+          return sum + confidence;
+        }, 0) / totalDetections 
       : 0;
     
-    const highConfidence = detections.filter(d => (d.confidence_score || 0) >= 0.8).length;
-    const mediumConfidence = detections.filter(d => (d.confidence_score || 0) >= 0.5 && (d.confidence_score || 0) < 0.8).length;
-    const lowConfidence = detections.filter(d => (d.confidence_score || 0) < 0.5).length;
+    const highConfidence = detections.filter(d => {
+      const confidence = d.confidence_score || 
+        (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+      return confidence >= 0.8;
+    }).length;
+    
+    const mediumConfidence = detections.filter(d => {
+      const confidence = d.confidence_score || 
+        (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+      return confidence >= 0.5 && confidence < 0.8;
+    }).length;
+    
+    const lowConfidence = detections.filter(d => {
+      const confidence = d.confidence_score || 
+        (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+      return confidence < 0.5;
+    }).length;
 
     console.log('Performance metrics:', {
       totalDetections,
@@ -517,7 +681,11 @@ const summary = [
     }
 
     // Low confidence alert
-    const lowConfidenceDetections = detections.filter(d => (d.confidence_score || 0) < 0.5).length;
+    const lowConfidenceDetections = detections.filter(d => {
+      const confidence = d.confidence_score || 
+        (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+      return confidence < 0.5;
+    }).length;
     if (lowConfidenceDetections > 0) {
       alerts.push({
         id: 2,
@@ -564,7 +732,11 @@ const summary = [
         return detectionDate.toISOString().split('T')[0] === hour.toISOString().split('T')[0] && detectionHour === hour.getHours();
       });
 
-      const highConfidence = hourDetections.filter(d => (d.confidence_score || 0) >= 0.8).length;
+      const highConfidence = hourDetections.filter(d => {
+        const confidence = d.confidence_score || 
+          (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+        return confidence >= 0.8;
+      }).length;
 
       data.push({
         time: hour.getHours() + ':00',
@@ -647,11 +819,17 @@ const summary = [
 
     return trends;
   };
+  */
 
-  // Generate efficiency metrics
+  // Generate efficiency metrics (legacy - not used anymore)
+  /*
   const generateEfficiencyMetrics = (detections, cameraStats) => {
     const totalDetections = detections.length;
-    const highConfidenceDetections = detections.filter(d => (d.confidence_score || 0) >= 0.8).length;
+    const highConfidenceDetections = detections.filter(d => {
+      const confidence = d.confidence_score || 
+        (d.detection_confidence && d.ocr_confidence ? (d.detection_confidence + d.ocr_confidence) / 2 : 0);
+      return confidence >= 0.8;
+    }).length;
     const verifiedDetections = detections.filter(d => d.is_verified).length;
     const whitelistMatches = detections.filter(d => d.is_whitelist_match).length;
     const blacklistMatches = detections.filter(d => d.is_blacklist_match).length;
@@ -666,6 +844,7 @@ const summary = [
       offlineCameras: cameraStats.offline_cameras || 0
     };
   };
+  */
 
 
   if (loading) {
@@ -700,12 +879,16 @@ const summary = [
     }}>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" fontWeight={700} sx={{ mb: 1, color: '#1976d2' }}>
-          Dashboard Thống Kê Hệ Thống
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Tổng quan hoạt động hệ thống nhận diện biển số xe
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box>
+            <Typography variant="h4" fontWeight={700} sx={{ mb: 1, color: '#1976d2' }}>
+              Dashboard Thống Kê Hệ Thống
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              Tổng quan hoạt động hệ thống nhận diện biển số xe
+            </Typography>
+          </Box>
+        </Box>
       </Box>
 
       <Grid container spacing={3}>
@@ -785,11 +968,11 @@ const summary = [
               p: 4, 
               borderRadius: 4, 
               boxShadow: 6, 
-              height: 450,
+              minHeight: 700,
               background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
               border: '1px solid #e8f5e8',
               position: 'relative',
-              overflow: 'hidden',
+              overflow: 'visible',
               '&::before': {
                 content: '""',
                 position: 'absolute',
@@ -798,11 +981,12 @@ const summary = [
                 right: 0,
                 bottom: 0,
                 background: 'linear-gradient(45deg, rgba(46, 125, 50, 0.05), transparent)',
-                opacity: 0.5
+                opacity: 0.5,
+                pointerEvents: 'none'
               }
             }}>
               <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 4, 
+                mb: 2, 
                 display: 'flex', 
                 alignItems: 'center', 
                 gap: 1,
@@ -814,7 +998,7 @@ const summary = [
                 Hiệu Suất Hệ Thống
               </Typography>
               
-              <Box sx={{ mb: 3 }}>
+              <Box sx={{ mb: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                   <Typography variant="body2">Độ chính xác</Typography>
                   <Typography variant="body2" fontWeight={700}>
@@ -828,26 +1012,26 @@ const summary = [
                 />
               </Box>
 
-              <Grid container spacing={2}>
+              <Grid container spacing={1.5}>
                 <Grid item xs={4}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e3f2fd', borderRadius: 2 }}>
-                    <Typography variant="h5" color="info.main" fontWeight={700}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: '#e3f2fd', borderRadius: 2 }}>
+                    <Typography variant="h6" color="info.main" fontWeight={700}>
                       {dashboardData.performanceMetrics?.highConfidence || 0}
                     </Typography>
                     <Typography variant="caption">Cao (≥80%)</Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={4}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#fff3e0', borderRadius: 2 }}>
-                    <Typography variant="h5" color="warning.main" fontWeight={700}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: '#fff3e0', borderRadius: 2 }}>
+                    <Typography variant="h6" color="warning.main" fontWeight={700}>
                       {dashboardData.performanceMetrics?.mediumConfidence || 0}
                     </Typography>
                     <Typography variant="caption">Trung bình</Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={4}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
-                    <Typography variant="h5" color="error.main" fontWeight={700}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: '#ffebee', borderRadius: 2 }}>
+                    <Typography variant="h6" color="error.main" fontWeight={700}>
                       {dashboardData.performanceMetrics?.lowConfidence || 0}
                     </Typography>
                     <Typography variant="caption">Thấp (&lt;50%)</Typography>
@@ -855,13 +1039,187 @@ const summary = [
                 </Grid>
               </Grid>
 
-              <Box sx={{ mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Tổng phát hiện: <strong>{dashboardData.performanceMetrics?.totalDetections || 0}</strong>
+              <Box sx={{ mt: 2, p: 1.5, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+                <Grid container spacing={1.5}>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">
+                      Tổng phát hiện: <strong>{dashboardData.performanceMetrics?.totalDetections || 0}</strong>
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Biển số duy nhất: <strong>{dashboardData.performanceMetrics?.uniquePlates || 0}</strong>
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">
+                      Độ tin cậy TB: <strong>{((dashboardData.performanceMetrics?.avgConfidence || 0) * 100).toFixed(1)}%</strong>
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Khoảng tin cậy: <strong>{((dashboardData.performanceMetrics?.minConfidence || 0) * 100).toFixed(1)}% - {((dashboardData.performanceMetrics?.maxConfidence || 0) * 100).toFixed(1)}%</strong>
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              {/* Thông tin whitelist/blacklist */}
+              <Box sx={{ mt: 1.5, p: 1.5, bgcolor: '#e8f5e8', borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1, color: '#2e7d32' }}>
+                  Phân loại phát hiện
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Độ tin cậy TB: <strong>{((dashboardData.performanceMetrics?.avgConfidence || 0) * 100).toFixed(1)}%</strong>
+                <Grid container spacing={1.5}>
+                  <Grid item xs={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h6" color="success.main" fontWeight={700}>
+                        {dashboardData.performanceMetrics?.whitelistMatches || 0}
+                      </Typography>
+                      <Typography variant="caption">Whitelist ({dashboardData.performanceMetrics?.whitelistRate || 0}%)</Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h6" color="error.main" fontWeight={700}>
+                        {dashboardData.performanceMetrics?.blacklistMatches || 0}
+                      </Typography>
+                      <Typography variant="caption">Blacklist ({dashboardData.performanceMetrics?.blacklistRate || 0}%)</Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h6" color="info.main" fontWeight={700}>
+                        {((dashboardData.performanceMetrics?.totalDetections || 0) - (dashboardData.performanceMetrics?.whitelistMatches || 0) - (dashboardData.performanceMetrics?.blacklistMatches || 0))}
+                      </Typography>
+                      <Typography variant="caption">Khác</Typography>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              {/* Biểu đồ xu hướng hiệu suất theo thời gian */}
+              <Box sx={{ mt: 1.5, p: 1.5, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5, color: '#2e7d32' }}>
+                  Xu hướng hiệu suất 24h
                 </Typography>
+                <Box sx={{ height: 180 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={dashboardData.hourlyPerformance || []} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                      <XAxis 
+                        dataKey="hour" 
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={(value) => `${value}h`}
+                      />
+                      <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+                          border: '1px solid #ccc',
+                          borderRadius: '8px',
+                          fontSize: '12px'
+                        }}
+                        formatter={(value, name) => {
+                          if (name === 'avg_confidence') return [`${(value * 100).toFixed(1)}%`, 'Độ tin cậy TB'];
+                          return [value, name];
+                        }}
+                      />
+                      <Legend />
+                      <Line 
+                        yAxisId="left"
+                        type="monotone" 
+                        dataKey="detections" 
+                        stroke="#1976d2" 
+                        strokeWidth={3}
+                        name="Số phát hiện"
+                        dot={{ fill: '#1976d2', strokeWidth: 2, r: 4 }}
+                      />
+                      <Line 
+                        yAxisId="right"
+                        type="monotone" 
+                        dataKey="avg_confidence" 
+                        stroke="#ff9800" 
+                        strokeWidth={3}
+                        name="Độ tin cậy TB"
+                        dot={{ fill: '#ff9800', strokeWidth: 2, r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Box>
+
+              {/* Biểu đồ phân bố độ tin cậy */}
+              <Box sx={{ mt: 1.5, p: 1.5, bgcolor: '#e3f2fd', borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5, color: '#1976d2' }}>
+                  Phân bố độ tin cậy
+                </Typography>
+                <Box sx={{ height: 180 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={[
+                      { 
+                        name: 'Cao (≥80%)', 
+                        value: dashboardData.performanceMetrics?.highConfidence || 0, 
+                        color: '#4caf50',
+                        percentage: dashboardData.performanceMetrics?.totalDetections > 0 
+                          ? ((dashboardData.performanceMetrics?.highConfidence || 0) / dashboardData.performanceMetrics?.totalDetections * 100).toFixed(1)
+                          : 0
+                      },
+                      { 
+                        name: 'Trung bình (50-80%)', 
+                        value: dashboardData.performanceMetrics?.mediumConfidence || 0, 
+                        color: '#ff9800',
+                        percentage: dashboardData.performanceMetrics?.totalDetections > 0 
+                          ? ((dashboardData.performanceMetrics?.mediumConfidence || 0) / dashboardData.performanceMetrics?.totalDetections * 100).toFixed(1)
+                          : 0
+                      },
+                      { 
+                        name: 'Thấp (<50%)', 
+                        value: dashboardData.performanceMetrics?.lowConfidence || 0, 
+                        color: '#f44336',
+                        percentage: dashboardData.performanceMetrics?.totalDetections > 0 
+                          ? ((dashboardData.performanceMetrics?.lowConfidence || 0) / dashboardData.performanceMetrics?.totalDetections * 100).toFixed(1)
+                          : 0
+                      }
+                    ]} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+                          border: '1px solid #ccc',
+                          borderRadius: '8px',
+                          fontSize: '12px'
+                        }}
+                        formatter={(value, name, props) => {
+                          if (name === 'value') return [value, 'Số lượng'];
+                          if (name === 'percentage') return [`${props.payload.percentage}%`, 'Tỷ lệ'];
+                          return [value, name];
+                        }}
+                      />
+                      <Legend />
+                      <Bar yAxisId="left" dataKey="value" fill="#1976d2" radius={[4, 4, 0, 0]} name="Số lượng" />
+                      <Line yAxisId="right" type="monotone" dataKey="percentage" stroke="#ff9800" strokeWidth={3} name="Tỷ lệ (%)" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Box>
+
+              {/* Thống kê chi tiết */}
+              <Box sx={{ mt: 1.5, p: 1.5, bgcolor: '#f8f9fa', borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5, color: '#6c757d' }}>
+                  Thống kê chi tiết
+                </Typography>
+                <Grid container spacing={1.5}>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">
+                      Độ lệch chuẩn: <strong>{((dashboardData.performanceMetrics?.confidenceStddev || 0) * 100).toFixed(2)}%</strong>
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">
+                      Tỷ lệ duy nhất: <strong>{dashboardData.performanceMetrics?.totalDetections > 0 ? ((dashboardData.performanceMetrics?.uniquePlates || 0) / dashboardData.performanceMetrics?.totalDetections * 100).toFixed(1) : 0}%</strong>
+                    </Typography>
+                  </Grid>
+                </Grid>
               </Box>
             </Paper>
           </Fade>
@@ -1022,72 +1380,6 @@ const summary = [
 
 
 
-        {/* Enhanced Performance Metrics Row */}
-        <Grid item xs={12} md={6}>
-          <Fade in={true} timeout={2600}>
-            <Paper sx={{ 
-              p: 3, 
-              borderRadius: 3, 
-              boxShadow: 4, 
-              height: 400,
-              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-              border: '1px solid #e8f5e8'
-            }}>
-              <Typography variant="h6" fontWeight={700} sx={{ 
-                mb: 3, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1,
-                color: '#2e7d32'
-              }}>
-                <Assessment color="primary" />
-                Hiệu Suất Hệ Thống
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e8f5e8', borderRadius: 2 }}>
-                    <Typography variant="h4" color="success.main" fontWeight={700}>
-                      {dashboardData.efficiencyMetrics?.accuracyRate || 0}%
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Độ chính xác
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#e3f2fd', borderRadius: 2 }}>
-                    <Typography variant="h4" color="info.main" fontWeight={700}>
-                      {dashboardData.efficiencyMetrics?.verificationRate || 0}%
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Tỷ lệ xác minh
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#fff3e0', borderRadius: 2 }}>
-                    <Typography variant="h4" color="warning.main" fontWeight={700}>
-                      {dashboardData.efficiencyMetrics?.whitelistRate || 0}%
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      WhiteList
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6}>
-                  <Box sx={{ textAlign: 'center', p: 2, bgcolor: '#ffebee', borderRadius: 2 }}>
-                    <Typography variant="h4" color="error.main" fontWeight={700}>
-                      {dashboardData.efficiencyMetrics?.blacklistRate || 0}%
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      BlackList
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-            </Paper>
-          </Fade>
-        </Grid>
 
         {/* Data Tables Row */}
         <Grid item xs={12} md={6}>
