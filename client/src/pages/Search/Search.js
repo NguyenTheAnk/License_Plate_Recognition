@@ -17,6 +17,9 @@ function SearchPage() {
 
   // Danh sách camera lấy từ API
   const [cameras, setCameras] = useState([]);
+  
+  // Danh sách loại vi phạm lấy từ API
+  const [violationTypes, setViolationTypes] = useState([]);
 
   const statusOptions = [
     { value: '', label: 'Tất cả trạng thái', color: 'default' },
@@ -195,6 +198,22 @@ function SearchPage() {
     fetchCameras();
   }, []);
 
+  // Fetch violation types from API on mount
+  useEffect(() => {
+    const fetchViolationTypes = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const data = await fetchDataFromAPI('/api/blacklist/violation-types', token);
+        if (data.success) {
+          setViolationTypes(data.data || []);
+        }
+      } catch (error) {
+        console.error('Error fetching violation types:', error);
+      }
+    };
+    fetchViolationTypes();
+  }, []);
+
   // Load stats for all tabs on mount
   useEffect(() => {
     const loadAllStats = async () => {
@@ -320,12 +339,42 @@ function SearchPage() {
       severity: 'info'
     });
 
+    // Prepare specific params for each API
+    const whitelistParams = {
+      plate_number: filters.plate_number,
+      valid_status: filters.valid_status,
+      approval_status: filters.approval_status,
+      page: currentPage,
+      limit: itemsPerPage
+    };
+    
+    const blacklistParams = {
+      plate_number: filters.plate_number,
+      valid_status: filters.valid_status,
+      violation_type: filters.violation_type,
+      page: currentPage,
+      limit: itemsPerPage
+    };
+    
+    const cameraParams = {
+      name: filters.name,
+      location_id: filters.location_id,
+      status: filters.status,
+      page: currentPage,
+      limit: itemsPerPage
+    };
+    
+    const locationParams = {
+      page: currentPage,
+      limit: itemsPerPage
+    };
+
     // Parallel API calls with improved error handling
     const [whitelistRes, blacklistRes, cameraRes, locationRes, journeyRes, plateRes, accessRes] = await Promise.allSettled([
-      fetchDataFromAPI(`/api/whitelist`, token, { params }),
-      fetchDataFromAPI(`/api/blacklist`, token, { params }),
-      fetchDataFromAPI(`/api/cameras`, token, { params }),
-      fetchDataFromAPI(`/api/location/active`, token, { params }),
+      fetchDataFromAPI(`/api/whitelist`, token, { params: whitelistParams }),
+      fetchDataFromAPI(`/api/blacklist`, token, { params: blacklistParams }),
+      fetchDataFromAPI(`/api/cameras`, token, { params: cameraParams }),
+      fetchDataFromAPI(`/api/location/active`, token, { params: locationParams }),
       fetchDataFromAPI(`/api/journey`, token, { params }),
       fetchDataFromAPI(`/api/plates`, token, { params }),
       fetchDataFromAPI(`/api/access-control`, token, { params })
@@ -337,19 +386,26 @@ function SearchPage() {
     const newResults = {
       whitelist: processResult(whitelistRes),
       blacklist: processResult(blacklistRes),
-      camera: processResult(cameraRes),
-      location: processResult(locationRes)?.locations || processResult(locationRes),
+      camera: processResult(cameraRes)?.cameras || processResult(cameraRes) || [],
+      location: processResult(locationRes)?.locations || processResult(locationRes) || [],
       journey: processResult(journeyRes),
       plate: processResult(plateRes),
       access: processResult(accessRes)
     };
 
+    console.log('Camera results:', newResults.camera);
+
     setAllResults(newResults);
+    
+    // Debug log
+    console.log('Camera search results:', newResults.camera);
+    console.log('Camera params sent:', cameraParams);
 
     // Enhanced statistics calculation
     const totalWhitelist = newResults.whitelist.length;
     const totalBlacklist = newResults.blacklist.length;
-    const totalResults = totalWhitelist + totalBlacklist;
+    const totalCamera = newResults.camera.length;
+    const totalResults = totalWhitelist + totalBlacklist + totalCamera;
     
     // THÊM: Xử lý thông tin phân trang từ API response
     let apiTotalCount = 0;
@@ -361,6 +417,9 @@ function SearchPage() {
     } else if (blacklistRes.status === 'fulfilled' && blacklistRes.value?.pagination) {
       apiTotalCount = blacklistRes.value.pagination.total || 0;
       apiTotalPages = blacklistRes.value.pagination.total_pages || 1;
+    } else if (cameraRes.status === 'fulfilled' && cameraRes.value?.pagination) {
+      apiTotalCount = cameraRes.value.pagination.total || 0;
+      apiTotalPages = cameraRes.value.pagination.total_pages || 1;
     }
     
     setTotalItems(apiTotalCount || totalResults);
@@ -514,9 +573,9 @@ function getPaginationItems(current, total) {
       case 'whitelist':
         return (
           <>
-            {/* Hàng 1 */}
+            {/* Chỉ hiển thị các tiêu chí cơ bản tương ứng với các cột trong bảng */}
             <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Biển số xe"
                   value={filters.plate_number}
@@ -533,38 +592,7 @@ function getPaginationItems(current, total) {
                   sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                 />
               </Grid>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Khu vực</InputLabel>
-                  <Select
-                    value={filters.location_id}
-                    label="Khu vực"
-                    onChange={e => handleFilterChange('location_id', e.target.value)}
-                    startAdornment={
-                      <InputAdornment position="start">
-                        <LocationOn sx={{ color: '#2e7d32', ml: 1 }} />
-                      </InputAdornment>
-                    }
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 300,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả khu vực</MenuItem>
-                    {locations.map(location => (
-                      <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
                   <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Trạng thái</InputLabel>
                   <Select
@@ -583,19 +611,21 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
+                    <MenuItem value="">Tất cả trạng thái</MenuItem>
                     <MenuItem value="valid">Còn hiệu lực</MenuItem>
                     <MenuItem value="expired">Hết hạn</MenuItem>
+                    <MenuItem value="future">Chưa có hiệu lực</MenuItem>
+                    <MenuItem value="permanent">Vĩnh viễn</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Loại xe</InputLabel>
+                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Phê duyệt</InputLabel>
                   <Select
-                    value={filters.vehicle_type}
-                    label="Loại xe"
-                    onChange={e => handleFilterChange('vehicle_type', e.target.value)}
+                    value={filters.approval_status}
+                    label="Phê duyệt"
+                    onChange={e => handleFilterChange('approval_status', e.target.value)}
                     sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                     MenuProps={{
                       PaperProps: {
@@ -608,93 +638,12 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="car">Ô tô</MenuItem>
-                    <MenuItem value="motorcycle">Xe máy</MenuItem>
-                    <MenuItem value="truck">Xe tải</MenuItem>
-                    <MenuItem value="bus">Xe bus</MenuItem>
+                    <MenuItem value="">Tất cả phê duyệt</MenuItem>
+                    <MenuItem value="approved">Đã phê duyệt</MenuItem>
+                    <MenuItem value="pending">Chờ phê duyệt</MenuItem>
+                    <MenuItem value="rejected">Từ chối</MenuItem>
                   </Select>
                 </FormControl>
-              </Grid>
-            </Grid>
-
-            {/* Hàng 2 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Màu sắc</InputLabel>
-                  <Select
-                    value={filters.color}
-                    label="Màu sắc"
-                    onChange={e => handleFilterChange('color', e.target.value)}
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="white">Trắng</MenuItem>
-                    <MenuItem value="black">Đen</MenuItem>
-                    <MenuItem value="red">Đỏ</MenuItem>
-                    <MenuItem value="blue">Xanh</MenuItem>
-                    <MenuItem value="green">Xanh lá</MenuItem>
-                    <MenuItem value="yellow">Vàng</MenuItem>
-                    <MenuItem value="gray">Xám</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Từ ngày"
-                  type="date"
-                  value={filters.date_from}
-                  onChange={e => handleFilterChange('date_from', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Đến ngày"
-                  type="date"
-                  value={filters.date_to}
-                  onChange={e => handleFilterChange('date_to', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  startIcon={<SearchIcon />}
-                  sx={{ 
-                    borderRadius: 3, 
-                    textTransform: 'none', 
-                    fontWeight: 600, 
-                    fontSize: 15, 
-                    py: 1.5,
-                    background: 'linear-gradient(90deg, #2e7d32 0%, #4caf50 100%)',
-                    boxShadow: '0 4px 12px rgba(46,125,50,0.3)',
-                    '&:hover': {
-                      background: 'linear-gradient(90deg, #1b5e20 0%, #2e7d32 100%)',
-                      boxShadow: '0 6px 16px rgba(46,125,50,0.4)'
-                    }
-                  }}
-                >
-                  Tìm kiếm
-                </Button>
               </Grid>
             </Grid>
           </>
@@ -703,9 +652,9 @@ function getPaginationItems(current, total) {
       case 'blacklist':
         return (
           <>
-            {/* Hàng 1 */}
+            {/* Chỉ hiển thị các tiêu chí cơ bản tương ứng với các cột trong bảng */}
             <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Biển số xe"
                   value={filters.plate_number}
@@ -722,44 +671,13 @@ function getPaginationItems(current, total) {
                   sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                 />
               </Grid>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Khu vực</InputLabel>
+                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Trạng thái</InputLabel>
                   <Select
-                    value={filters.location_id}
-                    label="Khu vực"
-                    onChange={e => handleFilterChange('location_id', e.target.value)}
-                    startAdornment={
-                      <InputAdornment position="start">
-                        <LocationOn sx={{ color: '#d32f2f', ml: 1 }} />
-                      </InputAdornment>
-                    }
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 300,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả khu vực</MenuItem>
-                    {locations.map(location => (
-                      <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Lý do cấm</InputLabel>
-                  <Select
-                    value={filters.reason}
-                    label="Lý do cấm"
-                    onChange={e => handleFilterChange('reason', e.target.value)}
+                    value={filters.valid_status}
+                    label="Trạng thái"
+                    onChange={e => handleFilterChange('valid_status', e.target.value)}
                     sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                     MenuProps={{
                       PaperProps: {
@@ -772,22 +690,21 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="stolen">Xe bị mất cắp</MenuItem>
-                    <MenuItem value="wanted">Xe bị truy nã</MenuItem>
-                    <MenuItem value="violation">Vi phạm giao thông</MenuItem>
-                    <MenuItem value="suspicious">Nghi ngờ</MenuItem>
-                    <MenuItem value="other">Khác</MenuItem>
+                    <MenuItem value="">Tất cả trạng thái</MenuItem>
+                    <MenuItem value="active">Hoạt động</MenuItem>
+                    <MenuItem value="expired">Hết hạn</MenuItem>
+                    <MenuItem value="future">Chưa có hiệu lực</MenuItem>
+                    <MenuItem value="permanent">Vĩnh viễn</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Mức độ nghiêm trọng</InputLabel>
+                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Loại vi phạm</InputLabel>
                   <Select
-                    value={filters.severity}
-                    label="Mức độ nghiêm trọng"
-                    onChange={e => handleFilterChange('severity', e.target.value)}
+                    value={filters.violation_type}
+                    label="Loại vi phạm"
+                    onChange={e => handleFilterChange('violation_type', e.target.value)}
                     sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                     MenuProps={{
                       PaperProps: {
@@ -800,90 +717,32 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="low">Thấp</MenuItem>
-                    <MenuItem value="medium">Trung bình</MenuItem>
-                    <MenuItem value="high">Cao</MenuItem>
-                    <MenuItem value="critical">Nghiêm trọng</MenuItem>
+                    <MenuItem value="">Tất cả loại vi phạm</MenuItem>
+                    {violationTypes.map((violationType) => {
+                      // Mapping từ tiếng Anh sang tiếng Việt
+                      const getVietnameseName = (type) => {
+                        const typeMap = {
+                          'unauthorized': 'Xe không được phép',
+                          'security_threat': 'Mối đe dọa an ninh',
+                          'unpaid_fine': 'Chưa nộp phạt',
+                          'banned': 'Bị cấm',
+                          'stolen': 'Xe bị mất cắp',
+                          'wanted': 'Xe bị truy nã',
+                          'violation': 'Vi phạm giao thông',
+                          'suspicious': 'Nghi ngờ',
+                          'other': 'Khác'
+                        };
+                        return typeMap[type] || type;
+                      };
+                      
+                      return (
+                        <MenuItem key={violationType.violation_type} value={violationType.violation_type}>
+                          {getVietnameseName(violationType.violation_type)} ({violationType.count})
+                        </MenuItem>
+                      );
+                    })}
                   </Select>
                 </FormControl>
-              </Grid>
-            </Grid>
-
-            {/* Hàng 2 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Loại xe</InputLabel>
-                  <Select
-                    value={filters.vehicle_type}
-                    label="Loại xe"
-                    onChange={e => handleFilterChange('vehicle_type', e.target.value)}
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="car">Ô tô</MenuItem>
-                    <MenuItem value="motorcycle">Xe máy</MenuItem>
-                    <MenuItem value="truck">Xe tải</MenuItem>
-                    <MenuItem value="bus">Xe bus</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Từ ngày"
-                  type="date"
-                  value={filters.date_from}
-                  onChange={e => handleFilterChange('date_from', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Đến ngày"
-                  type="date"
-                  value={filters.date_to}
-                  onChange={e => handleFilterChange('date_to', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  startIcon={<SearchIcon />}
-                  sx={{ 
-                    borderRadius: 3, 
-                    textTransform: 'none', 
-                    fontWeight: 600, 
-                    fontSize: 15, 
-                    py: 1.5,
-                    background: 'linear-gradient(90deg, #d32f2f 0%, #f44336 100%)',
-                    boxShadow: '0 4px 12px rgba(211,47,47,0.3)',
-                    '&:hover': {
-                      background: 'linear-gradient(90deg, #b71c1c 0%, #d32f2f 100%)',
-                      boxShadow: '0 6px 16px rgba(211,47,47,0.4)'
-                    }
-                  }}
-                >
-                  Tìm kiếm
-                </Button>
               </Grid>
             </Grid>
           </>
@@ -892,13 +751,13 @@ function getPaginationItems(current, total) {
       case 'camera':
         return (
           <>
-            {/* Hàng 1 */}
+            {/* Chỉ hiển thị các tiêu chí cơ bản tương ứng với các cột trong bảng */}
             <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Tên camera"
-                  value={filters.camera_name}
-                  onChange={e => handleFilterChange('camera_name', e.target.value)}
+                  value={filters.name}
+                  onChange={e => handleFilterChange('name', e.target.value)}
                   fullWidth
                   size="medium"
                   InputProps={{
@@ -911,12 +770,12 @@ function getPaginationItems(current, total) {
                   sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                 />
               </Grid>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Khu vực</InputLabel>
+                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Vị trí</InputLabel>
                   <Select
                     value={filters.location_id}
-                    label="Khu vực"
+                    label="Vị trí"
                     onChange={e => handleFilterChange('location_id', e.target.value)}
                     startAdornment={
                       <InputAdornment position="start">
@@ -935,14 +794,14 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả khu vực</MenuItem>
+                    <MenuItem value="">Tất cả vị trí</MenuItem>
                     {locations.map(location => (
                       <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
                   <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Trạng thái</InputLabel>
                   <Select
@@ -961,116 +820,12 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
+                    <MenuItem value="">Tất cả trạng thái</MenuItem>
                     <MenuItem value="online">Online</MenuItem>
                     <MenuItem value="offline">Offline</MenuItem>
                     <MenuItem value="maintenance">Bảo trì</MenuItem>
                   </Select>
                 </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Loại camera</InputLabel>
-                  <Select
-                    value={filters.camera_type}
-                    label="Loại camera"
-                    onChange={e => handleFilterChange('camera_type', e.target.value)}
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="fixed">Cố định</MenuItem>
-                    <MenuItem value="ptz">PTZ</MenuItem>
-                    <MenuItem value="dome">Dome</MenuItem>
-                    <MenuItem value="bullet">Bullet</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-            </Grid>
-
-            {/* Hàng 2 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Độ phân giải</InputLabel>
-                  <Select
-                    value={filters.resolution}
-                    label="Độ phân giải"
-                    onChange={e => handleFilterChange('resolution', e.target.value)}
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="720p">720p</MenuItem>
-                    <MenuItem value="1080p">1080p</MenuItem>
-                    <MenuItem value="4k">4K</MenuItem>
-                    <MenuItem value="8mp">8MP</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Từ ngày"
-                  type="date"
-                  value={filters.date_from}
-                  onChange={e => handleFilterChange('date_from', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Đến ngày"
-                  type="date"
-                  value={filters.date_to}
-                  onChange={e => handleFilterChange('date_to', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  startIcon={<SearchIcon />}
-                  sx={{ 
-                    borderRadius: 3, 
-                    textTransform: 'none', 
-                    fontWeight: 600, 
-                    fontSize: 15, 
-                    py: 1.5,
-                    background: 'linear-gradient(90deg, #ff9800 0%, #ffc107 100%)',
-                    boxShadow: '0 4px 12px rgba(255,152,0,0.3)',
-                    '&:hover': {
-                      background: 'linear-gradient(90deg, #f57c00 0%, #ff9800 100%)',
-                      boxShadow: '0 6px 16px rgba(255,152,0,0.4)'
-                    }
-                  }}
-                >
-                  Tìm kiếm
-                </Button>
               </Grid>
             </Grid>
           </>
@@ -2582,16 +2337,12 @@ useEffect(() => {
                     </TableHead>
                     <TableBody>
                       {tab === 'camera' ? (
-                        cameras.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={6} align="center">
-                              <Typography color="text.secondary" sx={{ py: 4 }}>
-                                Không có camera nào
-                              </Typography>
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
+                        (() => {
+                          console.log('Rendering camera tab. results:', results);
+                          console.log('results.length:', results?.length);
+                          return results && results.length > 0;
+                        })() ? (
+                          results.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
                             <TableRow key={item.id || index} hover>
                               <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
                               <TableCell>{item.name}</TableCell>
@@ -2612,6 +2363,14 @@ useEffect(() => {
                               </TableCell>
                             </TableRow>
                           ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={6} align="center">
+                              <Typography color="text.secondary" sx={{ py: 4 }}>
+                                Không có camera nào
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
                         )
                       ) : (
                         results?.map((item, index) => {
@@ -2637,37 +2396,22 @@ useEffect(() => {
 
                                 {/* Dynamic table rows based on tab */}
                                 {tab === 'camera' ? (
-                                  cameras.length === 0 ? (
-                                    <TableRow>
-                                      <TableCell colSpan={6} align="center">
-                                        <Typography color="text.secondary" sx={{ py: 4 }}>
-                                          Không có camera nào
-                                        </Typography>
-                                      </TableCell>
-                                    </TableRow>
-                                  ) : (
-                                    cameras.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
-                                      <TableRow key={item.id || index} hover>
-                                        <TableCell>{((currentPage - 1) * itemsPerPage) + index + 1}</TableCell>
-                                        <TableCell>{item.name}</TableCell>
-                                        <TableCell>{item.location_name || item.location || ''}</TableCell>
-                                        <TableCell>
-                                          {getStatusChip(item.status)}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Button 
-                                            variant="outlined" 
-                                            size="small" 
-                                            startIcon={<Visibility />} 
-                                            sx={{ borderRadius: 2, textTransform: 'none' }}
-                                            onClick={() => handleViewCameraDetails(item)}
-                                          >
-                                            Xem chi tiết
-                                          </Button>
-                                        </TableCell>
-                                      </TableRow>
-                                    ))
-                                  )
+                                  <>
+                                    <TableCell>{item.name}</TableCell>
+                                    <TableCell>{item.location_name || item.location || ''}</TableCell>
+                                    <TableCell>
+                                      {getStatusChip(item.status)}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Button 
+                                        variant="outlined" 
+                                        size="small"
+                                        onClick={() => handleViewCameraDetails(item)}
+                                      >
+                                        Xem chi tiết
+                                      </Button>
+                                    </TableCell>
+                                  </>
                                 ) : tab === 'location' ? (
                                   <>
                                     <TableCell>
