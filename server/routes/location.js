@@ -23,7 +23,7 @@ router.post('/create',
 
 router.get('/', 
     auth, 
-    checkPermission('location.view'),
+    checkPermission('location.view_detail'),
     getAllLocations
 );
 
@@ -47,31 +47,31 @@ router.get('/hierarchy',
 
 router.get('/:id', 
     auth, 
-    checkPermission('locations.view_detail'),
+    checkPermission('location.view_detail'),
     getLocationById
 );
 
 router.get('/:id/detailed', 
     auth, 
-    checkPermission('locations.view_detail'),
+    checkPermission('location.view_detail'),
     getLocationDetailedView
 );
 
 router.put('/:id', 
     auth, 
-    checkPermission('locations.update'),
+    checkPermission('location.update'),
     updateLocation
 );
 
 router.put('/:id/status', 
     auth, 
-    // checkPermission('locations.update'),
+    // checkPermission('location.update'),
     updateLocationStatus
 );
 
 router.delete('/:id', 
     auth, 
-    checkPermission('locations.delete'),
+    checkPermission('location.delete'),
     deleteLocation
 );
 
