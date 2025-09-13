@@ -434,7 +434,7 @@ const BlackList = () => {
                     const permissions = user.permissions || [];
                     setHasCreateBlackList(permissions.some(permission => permission.code === 'blacklist.create'));
                     setHasUpdateBlackList(permissions.some(permission => permission.code === 'blacklist.update'));
-                    setHasViewBlackList(permissions.some(permission => permission.code === 'blacklist.view'));
+                    setHasViewBlackList(permissions.some(permission => permission.code === 'blacklist.view_detail'));
                     setHasDeleteBlackList(permissions.some(permission => permission.code === 'blacklist.delete'));
   
                 } catch (error) {

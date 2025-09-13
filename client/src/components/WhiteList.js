@@ -393,7 +393,7 @@ const WhiteList = () => {
                   const permissions = user.permissions || [];
                   setHasCreateWhiteList(permissions.some(permission => permission.code === 'whitelist.create'));
                   setHasUpdateWhiteList(permissions.some(permission => permission.code === 'whitelist.update'));
-                  setHasViewWhiteList(permissions.some(permission => permission.code === 'whitelist.view'));
+                  setHasViewWhiteList(permissions.some(permission => permission.code === 'whitelist.view_detail'));
                   setHasDeleteWhiteList(permissions.some(permission => permission.code === 'whitelist.delete'));
 
               } catch (error) {
