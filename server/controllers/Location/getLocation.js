@@ -83,7 +83,7 @@ const getAllLocations = async (req, res) => {
         const totalRecords = countResult[0].total;
         const totalPages = Math.ceil(totalRecords / limit);
 
-        // Simple query for testing
+        // Main query with proper column names for your database
         const mainQuery = `
             SELECT 
                 l.id,
@@ -112,19 +112,29 @@ const getAllLocations = async (req, res) => {
                 COALESCE(camera_stats.camera_count, 0) as camera_count,
                 COALESCE(camera_stats.online_camera_count, 0) as online_camera_count,
                 COALESCE(camera_stats.detection_enabled_count, 0) as detection_enabled_camera_count,
+                camera_stats.camera_names as camera_names,
                 
                 -- Child locations count
                 COALESCE(child_stats.child_count, 0) as child_locations_count,
                 
-                -- Simplified statistics
-                0 as today_detections,
-                0 as today_unique_vehicles,
-                0 as today_alerts,
-                0 as currently_inside,
-                0 as overstay_count,
-                0 as whitelist_count,
-                0 as blacklist_count,
-                0 as paired_locations_count
+                -- Detection statistics
+                COALESCE(detection_stats.today_detections, 0) as today_detections,
+                COALESCE(detection_stats.today_unique_vehicles, 0) as today_unique_vehicles,
+                COALESCE(detection_stats.total_detections, 0) as total_detections,
+                COALESCE(detection_stats.avg_confidence, 0) as avg_confidence,
+                
+                -- Alert statistics
+                COALESCE(alert_stats.today_alerts, 0) as today_alerts,
+                COALESCE(alert_stats.active_alerts, 0) as active_alerts,
+                
+                -- Entry/Exit statistics
+                COALESCE(entry_exit_stats.currently_inside, 0) as currently_inside,
+                COALESCE(entry_exit_stats.overstay_count, 0) as overstay_count,
+                
+                -- List statistics
+                COALESCE(list_stats.whitelist_count, 0) as whitelist_count,
+                COALESCE(list_stats.blacklist_count, 0) as blacklist_count,
+                COALESCE(child_stats.child_count, 0) as paired_locations_count
                 
             FROM locations l
             LEFT JOIN locations pl ON l.parent_location_id = pl.id
@@ -135,7 +145,8 @@ const getAllLocations = async (req, res) => {
                     location_id,
                     COUNT(*) as camera_count,
                     COUNT(CASE WHEN last_heartbeat >= DATE_SUB(NOW(), INTERVAL 5 MINUTE) THEN 1 END) as online_camera_count,
-                    COUNT(CASE WHEN is_detect = 1 THEN 1 END) as detection_enabled_count
+                    COUNT(CASE WHEN is_detect = 1 THEN 1 END) as detection_enabled_count,
+                    GROUP_CONCAT(name SEPARATOR ', ') as camera_names
                 FROM cameras 
                 WHERE is_active = 1
                 GROUP BY location_id
@@ -150,6 +161,52 @@ const getAllLocations = async (req, res) => {
                 WHERE is_active = 1
                 GROUP BY parent_location_id
             ) child_stats ON l.id = child_stats.parent_location_id
+            
+            -- Detection statistics
+            LEFT JOIN (
+                SELECT 
+                    c.location_id,
+                    COUNT(lpd.id) as total_detections,
+                    COUNT(CASE WHEN DATE(lpd.detected_at) = CURDATE() THEN 1 END) as today_detections,
+                    COUNT(DISTINCT CASE WHEN DATE(lpd.detected_at) = CURDATE() THEN lpd.plate_number END) as today_unique_vehicles,
+                    AVG(lpd.confidence_score) as avg_confidence
+                FROM cameras c
+                LEFT JOIN license_plate_detections lpd ON c.id = lpd.camera_id
+                WHERE c.is_active = 1
+                GROUP BY c.location_id
+            ) detection_stats ON l.id = detection_stats.location_id
+            
+            -- Alert statistics
+            LEFT JOIN (
+                SELECT 
+                    c.location_id,
+                    COUNT(CASE WHEN DATE(a.created_at) = CURDATE() THEN 1 END) as today_alerts,
+                    COUNT(CASE WHEN a.status IN ('new', 'acknowledged', 'investigating') THEN 1 END) as active_alerts
+                FROM cameras c
+                LEFT JOIN alerts a ON c.location_id = a.location_id
+                WHERE c.is_active = 1
+                GROUP BY c.location_id
+            ) alert_stats ON l.id = alert_stats.location_id
+            
+            -- Entry/Exit statistics
+            LEFT JOIN (
+                SELECT 
+                    location_id,
+                    COUNT(CASE WHEN status = 'entered' THEN 1 END) as currently_inside,
+                    COUNT(CASE WHEN is_overstay = 1 THEN 1 END) as overstay_count
+                FROM vehicle_entry_exit_logs
+                GROUP BY location_id
+            ) entry_exit_stats ON l.id = entry_exit_stats.location_id
+            
+            -- List statistics (simplified - whitelist/blacklist don't have location_id)
+            LEFT JOIN (
+                SELECT 
+                    l.id as location_id,
+                    0 as whitelist_count,
+                    0 as blacklist_count
+                FROM locations l
+                WHERE l.is_active = 1
+            ) list_stats ON l.id = list_stats.location_id
             
             ${whereClause}
             ORDER BY l.${sortBy} ${sortOrder}
@@ -211,6 +268,7 @@ const getLocationById = async (req, res) => {
     try {
         const locationId = req.params.id;
 
+        // Simplified query to avoid complex joins that might cause errors
         const [location] = await connection.execute(`
             SELECT 
                 l.*,
@@ -222,41 +280,15 @@ const getLocationById = async (req, res) => {
                 COALESCE(camera_stats.camera_count, 0) as camera_count,
                 COALESCE(camera_stats.online_camera_count, 0) as online_camera_count,
                 COALESCE(camera_stats.detection_enabled_count, 0) as detection_enabled_camera_count,
-                COALESCE(camera_stats.recording_enabled_count, 0) as recording_enabled_camera_count,
+                camera_stats.camera_names as camera_names,
                 camera_stats.last_camera_online as last_camera_online_at,
-                
-                -- Child locations count
-                COALESCE(child_stats.child_count, 0) as child_locations_count,
                 
                 -- Detection statistics
                 COALESCE(detection_stats.total_detections, 0) as total_detections,
-                COALESCE(detection_stats.verified_detections, 0) as verified_detections,
                 COALESCE(detection_stats.today_detections, 0) as today_detections,
                 COALESCE(detection_stats.week_detections, 0) as week_detections,
-                COALESCE(detection_stats.unique_vehicles_today, 0) as unique_vehicles_today,
                 COALESCE(detection_stats.avg_confidence, 0) as avg_detection_confidence,
-                detection_stats.last_detection_at,
-                
-                -- Alert statistics
-                COALESCE(alert_stats.total_alerts, 0) as total_alerts,
-                COALESCE(alert_stats.active_alerts, 0) as active_alerts,
-                COALESCE(alert_stats.critical_alerts, 0) as critical_alerts,
-                alert_stats.last_alert_at,
-                
-                -- Entry/Exit statistics
-                COALESCE(entry_exit_stats.total_entries, 0) as total_entries,
-                COALESCE(entry_exit_stats.total_exits, 0) as total_exits,
-                COALESCE(entry_exit_stats.currently_inside, 0) as currently_inside,
-                COALESCE(entry_exit_stats.overstay_count, 0) as overstay_count,
-                COALESCE(entry_exit_stats.avg_duration_minutes, 0) as avg_stay_duration_minutes,
-                COALESCE(entry_exit_stats.entries_today, 0) as entries_today,
-                COALESCE(entry_exit_stats.exits_today, 0) as exits_today,
-                
-                -- List statistics
-                COALESCE(list_stats.whitelist_count, 0) as whitelist_count,
-                COALESCE(list_stats.blacklist_count, 0) as blacklist_count,
-                COALESCE(list_stats.active_whitelist_count, 0) as active_whitelist_count,
-                COALESCE(list_stats.active_blacklist_count, 0) as active_blacklist_count
+                detection_stats.last_detection_at
                 
             FROM locations l
             LEFT JOIN locations pl ON l.parent_location_id = pl.id
@@ -268,86 +300,25 @@ const getLocationById = async (req, res) => {
                     COUNT(*) as camera_count,
                     COUNT(CASE WHEN last_heartbeat >= DATE_SUB(NOW(), INTERVAL 5 MINUTE) THEN 1 END) as online_camera_count,
                     COUNT(CASE WHEN is_detect = 1 THEN 1 END) as detection_enabled_count,
-                    COUNT(CASE WHEN recording_enabled = 1 THEN 1 END) as recording_enabled_count,
+                    GROUP_CONCAT(name SEPARATOR ', ') as camera_names,
                     MAX(last_heartbeat) as last_camera_online
                 FROM cameras 
                 WHERE is_active = 1
                 GROUP BY location_id
             ) camera_stats ON l.id = camera_stats.location_id
             
-            -- Child locations
-            LEFT JOIN (
-                SELECT 
-                    parent_location_id,
-                    COUNT(*) as child_count
-                FROM locations 
-                WHERE is_active = 1
-                GROUP BY parent_location_id
-            ) child_stats ON l.id = child_stats.parent_location_id
-            
             -- Detection statistics
             LEFT JOIN (
                 SELECT 
                     location_id,
                     COUNT(*) as total_detections,
-                    COUNT(CASE WHEN is_verified = 1 THEN 1 END) as verified_detections,
                     COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 END) as today_detections,
                     COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 END) as week_detections,
-                    COUNT(DISTINCT CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN plate_number END) as unique_vehicles_today,
                     AVG(confidence_score) as avg_confidence,
                     MAX(detected_at) as last_detection_at
                 FROM license_plate_detections 
                 GROUP BY location_id
             ) detection_stats ON l.id = detection_stats.location_id
-            
-            -- Alert statistics
-            LEFT JOIN (
-                SELECT 
-                    location_id,
-                    COUNT(*) as total_alerts,
-                    COUNT(CASE WHEN status IN ('new', 'acknowledged', 'investigating') THEN 1 END) as active_alerts,
-                    COUNT(CASE WHEN severity = 'critical' THEN 1 END) as critical_alerts,
-                    MAX(created_at) as last_alert_at
-                FROM alerts 
-                GROUP BY location_id
-            ) alert_stats ON l.id = alert_stats.location_id
-            
-            -- Entry/Exit statistics
-            LEFT JOIN (
-                SELECT 
-                    location_id,
-                    COUNT(*) as total_entries,
-                    COUNT(CASE WHEN exit_time IS NOT NULL THEN 1 END) as total_exits,
-                    COUNT(CASE WHEN status = 'entered' THEN 1 END) as currently_inside,
-                    COUNT(CASE WHEN is_overstay = 1 THEN 1 END) as overstay_count,
-                    AVG(duration_minutes) as avg_duration_minutes,
-                    COUNT(CASE WHEN entry_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 END) as entries_today,
-                    COUNT(CASE WHEN exit_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 END) as exits_today
-                FROM vehicle_entry_exit_logs 
-                GROUP BY location_id
-            ) entry_exit_stats ON l.id = entry_exit_stats.location_id
-            
-            -- List statistics
-            LEFT JOIN (
-                SELECT 
-                    location_id,
-                    COUNT(CASE WHEN source_table = 'whitelist' THEN 1 END) as whitelist_count,
-                    COUNT(CASE WHEN source_table = 'blacklist' THEN 1 END) as blacklist_count,
-                    COUNT(CASE WHEN source_table = 'whitelist' AND is_active = 1 
-                        AND (valid_from IS NULL OR valid_from <= CURDATE())
-                        AND (valid_to IS NULL OR valid_to >= CURDATE()) THEN 1 END) as active_whitelist_count,
-                    COUNT(CASE WHEN source_table = 'blacklist' AND is_active = 1 
-                        AND (valid_from IS NULL OR valid_from <= CURDATE())
-                        AND (valid_to IS NULL OR valid_to >= CURDATE()) THEN 1 END) as active_blacklist_count
-                FROM (
-                    SELECT location_id, is_active, valid_from, valid_to, 'whitelist' as source_table
-                    FROM vehicle_whitelist
-                    UNION ALL
-                    SELECT location_id, is_active, valid_from, valid_to, 'blacklist' as source_table
-                    FROM vehicle_blacklist
-                ) combined_lists
-                GROUP BY location_id
-            ) list_stats ON l.id = list_stats.location_id
             
             WHERE l.id = ?
         `, [locationId]);
@@ -1865,19 +1836,34 @@ const getAllActiveLocations = async (req, res) => {
         const totalRecords = countResult[0].total;
         const totalPages = Math.ceil(totalRecords / limit);
 
-        // Get paginated data
+        // Get paginated data with camera information
         const [locations] = await connection.execute(`
             SELECT 
-                id,
-                name,
-                code,
-                zone_type,
-                address,
-                is_restricted,
-                parent_location_id
-            FROM locations 
+                l.id,
+                l.name,
+                l.code,
+                l.zone_type,
+                l.address,
+                l.is_restricted,
+                l.parent_location_id,
+                COALESCE(camera_stats.camera_count, 0) as camera_count,
+                COALESCE(camera_stats.online_camera_count, 0) as online_camera_count,
+                COALESCE(camera_stats.detection_enabled_count, 0) as detection_enabled_camera_count,
+                camera_stats.camera_names as camera_names
+            FROM locations l
+            LEFT JOIN (
+                SELECT 
+                    location_id,
+                    COUNT(*) as camera_count,
+                    COUNT(CASE WHEN last_heartbeat >= DATE_SUB(NOW(), INTERVAL 5 MINUTE) THEN 1 END) as online_camera_count,
+                    COUNT(CASE WHEN is_detect = 1 THEN 1 END) as detection_enabled_count,
+                    GROUP_CONCAT(name SEPARATOR ', ') as camera_names
+                FROM cameras 
+                WHERE is_active = 1
+                GROUP BY location_id
+            ) camera_stats ON l.id = camera_stats.location_id
             ${whereClause}
-            ORDER BY name ASC
+            ORDER BY l.name ASC
             LIMIT ${limit} OFFSET ${offset}
         `, queryParams);
 

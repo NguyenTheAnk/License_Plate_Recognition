@@ -19,6 +19,7 @@ const getCameraById = async (req, res) => {
 
         const [cameras] = await connection.execute(`
             SELECT 
+                c.id,
                 c.ke,
                 c.mid,
                 c.name,
@@ -39,6 +40,8 @@ const getCameraById = async (req, res) => {
                 c.last_heartbeat,
                 c.is_active,
                 c.is_detect,
+                c.installation_date,
+                c.maintenance_schedule,
                 c.created_at,
                 c.updated_at,
                 c.username,
@@ -46,15 +49,48 @@ const getCameraById = async (req, res) => {
                 l.name as location_name,
                 l.address as location_address,
                 l.zone_type as location_zone_type,
+                l.latitude as location_latitude,
+                l.longitude as location_longitude,
+                l.description as location_description,
                 TIMESTAMPDIFF(SECOND, c.last_heartbeat, NOW()) as seconds_since_heartbeat,
                 CASE 
                     WHEN c.last_heartbeat IS NULL THEN 'never'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 5 THEN 'online'
                     WHEN TIMESTAMPDIFF(MINUTE, c.last_heartbeat, NOW()) < 15 THEN 'warning'
                     ELSE 'offline'
-                END as connection_status
+                END as connection_status,
+                -- Detection statistics
+                COALESCE(detection_stats.total_detections, 0) as total_detections,
+                COALESCE(detection_stats.today_detections, 0) as today_detections,
+                COALESCE(detection_stats.week_detections, 0) as week_detections,
+                COALESCE(detection_stats.avg_confidence, 0) as avg_confidence,
+                COALESCE(detection_stats.last_detection_at, NULL) as last_detection_at,
+                -- Alert statistics
+                COALESCE(alert_stats.total_alerts, 0) as total_alerts,
+                COALESCE(alert_stats.active_alerts, 0) as active_alerts,
+                COALESCE(alert_stats.last_alert_at, NULL) as last_alert_at
             FROM cameras c
             JOIN locations l ON c.location_id = l.id
+            LEFT JOIN (
+                SELECT 
+                    camera_id,
+                    COUNT(*) as total_detections,
+                    COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 END) as today_detections,
+                    COUNT(CASE WHEN detected_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 END) as week_detections,
+                    AVG(confidence_score) as avg_confidence,
+                    MAX(detected_at) as last_detection_at
+                FROM license_plate_detections
+                GROUP BY camera_id
+            ) detection_stats ON c.id = detection_stats.camera_id
+            LEFT JOIN (
+                SELECT 
+                    camera_id,
+                    COUNT(*) as total_alerts,
+                    COUNT(CASE WHEN status IN ('new', 'acknowledged', 'investigating') THEN 1 END) as active_alerts,
+                    MAX(created_at) as last_alert_at
+                FROM alerts
+                GROUP BY camera_id
+            ) alert_stats ON c.id = alert_stats.camera_id
             WHERE c.id = ? AND c.is_active = 1
         `, [cameraId]);
 
@@ -68,6 +104,13 @@ const getCameraById = async (req, res) => {
         const camera = cameras[0];
         delete camera.username;
         delete camera.password;
+
+        // Add computed fields
+        camera.rtsp_url = buildRtspUrl(camera);
+        camera.uptime_hours = camera.last_heartbeat ? 
+            Math.round(camera.seconds_since_heartbeat / 3600) : 0;
+        camera.resolution = `${camera.width}x${camera.height}`;
+        camera.stream_url = camera.rtsp_url;
 
         try {
             await connection.execute(

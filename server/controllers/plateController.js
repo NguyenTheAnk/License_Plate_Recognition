@@ -40,34 +40,68 @@ async function uploadPlate(req, res) {
 // Tra cứu danh sách biển số
 async function getPlates(req, res) {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
     let query = `
-      SELECT lp.*, c.name as camera_name, l.name as location_name, v.make, v.model, v.color
-      FROM license_plates lp
-      LEFT JOIN cameras c ON lp.camera_id = c.id
-      LEFT JOIN locations l ON lp.location_id = l.id
-      LEFT JOIN vehicles v ON lp.vehicle_id = v.id
+      SELECT 
+        lpd.*,
+        c.name as camera_name,
+        l.name as location_name,
+        l.address as location_address,
+        l.zone_type as location_zone_type
+      FROM license_plate_detections lpd
+      LEFT JOIN cameras c ON lpd.camera_id = c.id
+      LEFT JOIN locations l ON lpd.location_id = l.id
       WHERE 1=1
     `;
     const params = [];
+    
     if (req.query.plate_number) {
-      query += ' AND lp.plate_number LIKE ?';
+      query += ' AND lpd.plate_number LIKE ?';
       params.push(`%${req.query.plate_number}%`);
     }
     if (req.query.location_id) {
-      query += ' AND lp.location_id = ?';
+      query += ' AND lpd.location_id = ?';
       params.push(req.query.location_id);
     }
     if (req.query.camera_id) {
-      query += ' AND lp.camera_id = ?';
+      query += ' AND lpd.camera_id = ?';
       params.push(req.query.camera_id);
     }
-    query += ' ORDER BY lp.timestamp DESC';
-    if (req.query.limit) {
-      query += ' LIMIT ?';
-      params.push(parseInt(req.query.limit));
+    if (req.query.date_from) {
+      query += ' AND lpd.detected_at >= ?';
+      params.push(req.query.date_from);
     }
+    if (req.query.date_to) {
+      query += ' AND lpd.detected_at <= ?';
+      params.push(req.query.date_to);
+    }
+    
+    // Get total count
+    const countQuery = query.replace(/SELECT.*FROM/, 'SELECT COUNT(*) as total FROM');
+    const [countResult] = await db.promise().query(countQuery, params);
+    const total = countResult[0].total;
+    
+    // Add pagination and ordering
+    query += ' ORDER BY lpd.detected_at DESC';
+    query += ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    
     const [rows] = await db.promise().query(query, params);
-    res.json(rows);
+    
+    res.json({
+      success: true,
+      data: rows,
+      total: total,
+      pagination: {
+        page: page,
+        limit: limit,
+        total_pages: Math.ceil(total / limit),
+        total: total
+      }
+    });
   } catch (error) {
     console.error('getPlates error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -78,26 +112,33 @@ async function getPlates(req, res) {
 async function getPlateDetail(req, res) {
   try {
     let query = `
-      SELECT lp.*, c.name as camera_name, l.name as location_name, v.make, v.model, v.color
-      FROM license_plates lp
-      LEFT JOIN cameras c ON lp.camera_id = c.id
-      LEFT JOIN locations l ON lp.location_id = l.id
-      LEFT JOIN vehicles v ON lp.vehicle_id = v.id
+      SELECT 
+        lpd.*,
+        c.name as camera_name,
+        l.name as location_name,
+        l.address as location_address,
+        l.zone_type as location_zone_type
+      FROM license_plate_detections lpd
+      LEFT JOIN cameras c ON lpd.camera_id = c.id
+      LEFT JOIN locations l ON lpd.location_id = l.id
       WHERE 1=1
     `;
     const params = [];
     if (req.params.id) {
-      query += ' AND lp.id = ?';
+      query += ' AND lpd.id = ?';
       params.push(req.params.id);
     } else if (req.params.plate_number) {
-      query += ' AND lp.plate_number = ?';
+      query += ' AND lpd.plate_number = ?';
       params.push(req.params.plate_number);
     } else {
       return res.status(400).json({ error: 'Missing id or plate_number' });
     }
     const [rows] = await db.promise().query(query, params);
     if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json(rows[0]);
+    res.json({
+      success: true,
+      data: rows[0]
+    });
   } catch (error) {
     console.error('getPlateDetail error:', error);
     res.status(500).json({ error: 'Server error' });
