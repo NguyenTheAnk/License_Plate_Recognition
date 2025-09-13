@@ -812,7 +812,7 @@ const PlateRecognition = () => {
   // Clear detected plates
   const handleClearPlates = async () => {
     try {
-      const response = await fetch('http://localhost:5002/clear-detected-plates', {
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/clear-detected-plates`, {
         method: 'POST'
       });
       

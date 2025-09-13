@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import "./CameraActionBar.css";
-import { MdFullscreen, MdVideocam, MdVideocamOff, MdPlayArrow, MdPause, MdVolumeOff, MdVolumeUp, MdCameraAlt, MdHighQuality, MdVideoLibrary } from "react-icons/md";
+import { MdFullscreen, MdVideocam, MdVideocamOff, MdPlayArrow, MdPause, MdVolumeOff, MdVolumeUp, MdCameraAlt, MdHighQuality } from "react-icons/md";
 import { FaTrash } from "react-icons/fa6";
 import { RiVoiceRecognitionLine } from "react-icons/ri";
 
@@ -22,8 +22,6 @@ const CameraActionBar = ({
   isPlaying,         // Trạng thái phát video
   onQualitySettings, // Cài đặt chất lượng
   currentQuality, // Chất lượng hiện tại
-  onSelectSource,    // Chọn nguồn video
-  hasVideoSource,    // Có nguồn video hay không
 }) => {
   const [showQualityDropdown, setShowQualityDropdown] = useState(false);
   
@@ -134,24 +132,6 @@ const CameraActionBar = ({
     }
   };
 
-  // Hàm xử lý chọn nguồn
-  const handleSelectSource = () => {
-    console.log("📁 Select source button clicked for camera:", cameraName);
-    
-    if (onSelectSource) {
-      try {
-        onSelectSource();
-        console.log("✅ Select source executed successfully");
-      } catch (error) {
-        console.error("❌ Error in select source:", error);
-        alert("Lỗi khi chọn nguồn: " + error.message);
-      }
-    } else {
-      console.log("⚠️ No select source handler provided");
-      alert("Chức năng chọn nguồn chưa được cài đặt");
-    }
-  };
-
   return (
     <div className="camera-action-bar"> 
       <button 
@@ -220,20 +200,6 @@ const CameraActionBar = ({
         }}
       >
         {isRecording ? <MdVideocamOff size={18} /> : <MdVideocam size={18} />}
-      </button>
-      
-      {/* Button chọn nguồn */}
-      <button
-        className={`action-btn source-btn ${hasVideoSource ? "has-source" : ""}`}
-        onClick={handleSelectSource}
-        title={hasVideoSource ? "Thay đổi nguồn video" : "Chọn nguồn video"}
-        disabled={isProcessing}
-        style={{ 
-          backgroundColor: hasVideoSource ? '#4caf50' : '#2196f3',
-          opacity: isProcessing ? 0.6 : 1
-        }}
-      >
-        <MdVideoLibrary size={18} />
       </button>
       
       {/* Button cài đặt chất lượng - Icon only */}

@@ -150,21 +150,21 @@ const RoleManagement = () => {
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [expandedModule, setExpandedModule] = useState(null);
   const [gotoPage, setGotoPage] = useState('');
-  const [hasViewRole, sethasViewRole] = useState(false);
-  const [hasCreateRole, sethasCreateRole] = useState(false);
-  const [hasDeleteRole, setHasDeleteRole] = useState(false);
+  const [hasCreateRole, setHasCreateRole] = useState(false);
   const [hasUpdateRole, setHasUpdateRole] = useState(false);
+  const [hasViewRole, setHasViewRole] = useState(false);
+  const [hasDeleteRole, setHasDeleteRole] = useState(false);
 
-    useEffect(() => {
+  useEffect(() => {
             const storedUser = localStorage.getItem('user');
             if (storedUser ) {
                 try {
                     const user = JSON.parse(storedUser); // Parse dữ liệu user
                     const permissions = user.permissions || [];
-                    sethasViewRole(permissions.some(permission => permission.code === 'role.view_detail'));
-                    sethasCreateRole(permissions.some(permission => permission.code === 'role.create'));
-                    setHasDeleteRole(permissions.some(permission => permission.code === 'role.delete'));
+                    setHasCreateRole(permissions.some(permission => permission.code === 'role.create'));
                     setHasUpdateRole(permissions.some(permission => permission.code === 'role.update'));
+                    setHasViewRole(permissions.some(permission => permission.code === 'role.view_detail'));
+                    setHasDeleteRole(permissions.some(permission => permission.code === 'role.delete'));
   
                 } catch (error) {
                     console.error('Error parsing permissions:', error);
@@ -193,7 +193,7 @@ const RoleManagement = () => {
         />
       </Breadcrumbs>
       {hasCreateRole && (
-      <Button
+<Button
         variant="contained"
         size="large"
         startIcon={<AddIcon />}
@@ -218,6 +218,30 @@ const RoleManagement = () => {
     permissionIds: []
   });
 
+  // Permission hierarchy definitions
+  const permissionHierarchy = {
+    'roles': {
+      'view': [],
+      'search': [],
+      'create': ['view', 'search'],
+      'edit': ['view', 'search'],
+      'delete': ['view', 'search', 'edit']
+    },
+    'users': {
+      'view': [],
+      'search': [],
+      'create': ['view', 'search'],
+      'edit': ['view', 'search'],
+      'delete': ['view', 'search', 'edit']
+    },
+    'permissions': {
+      'view': [],
+      'search': [],
+      'create': ['view', 'search'],
+      'edit': ['view', 'search'],
+      'delete': ['view', 'search', 'edit']
+    }
+  };
 
   // Get token from localStorage
   const getToken = () => {
@@ -322,41 +346,23 @@ const RoleManagement = () => {
     setGotoPage('');
   }, [currentPage]);
 
-  // Auto-select dependent permissions based on action type
+  // Auto-select dependent permissions
   const getRequiredPermissions = (module, action, selectedPermissions) => {
+    const hierarchy = permissionHierarchy[module];
+    if (!hierarchy || !hierarchy[action]) return selectedPermissions;
+
+    const requiredActions = hierarchy[action];
     const modulePermissions = permissionsByModule[module] || [];
+    
     const newPermissions = [...selectedPermissions];
-    
-    console.log('getRequiredPermissions called:', { module, action, modulePermissions: modulePermissions.map(p => ({ id: p.id, action: p.action })) });
-    
-    // Define action dependencies dynamically
-    const actionDependencies = {
-      'create': ['view'],
-      'update': ['view'],
-      'edit': ['view'],
-      'delete': ['view'],
-      'verify': ['view'],
-      'export': ['view'],
-      'acknowledge': ['view'],
-      'resolve': ['view'],
-      'assign': ['view'],
-      'update_permission': ['view'],
-      'delete_all': ['view']
-    };
-    
-    const requiredActions = actionDependencies[action] || [];
-    console.log('Required actions for', action, ':', requiredActions);
     
     requiredActions.forEach(requiredAction => {
       const requiredPermission = modulePermissions.find(p => p.action === requiredAction);
-      console.log('Looking for required action:', requiredAction, 'Found:', requiredPermission);
       if (requiredPermission && !newPermissions.includes(requiredPermission.id)) {
-        console.log('Adding required permission:', requiredPermission.id, requiredPermission.action);
         newPermissions.push(requiredPermission.id);
       }
     });
 
-    console.log('Final permissions:', newPermissions);
     return newPermissions;
   };
 
@@ -364,8 +370,6 @@ const RoleManagement = () => {
   const handlePermissionChange = (permissionId, checked) => {
     const permission = permissions.find(p => p.id === permissionId);
     if (!permission) return;
-
-    console.log('Permission change:', { permissionId, checked, permission: permission.action, module: permission.module });
 
     let newPermissions = [...formData.permissionIds];
 
@@ -376,36 +380,27 @@ const RoleManagement = () => {
       }
       
       // Auto-select required permissions
-      console.log('Before auto-select:', newPermissions);
       newPermissions = getRequiredPermissions(permission.module, permission.action, newPermissions);
-      console.log('After auto-select:', newPermissions);
     } else {
       // Remove permission and check if any other permissions depend on it
       newPermissions = newPermissions.filter(id => id !== permissionId);
       
-      // If removing 'view' permission, remove all other permissions in the same module
-      if (permission.action === 'view') {
-        const modulePermissions = permissionsByModule[permission.module] || [];
-        const modulePermissionIds = modulePermissions.map(p => p.id);
-        newPermissions = newPermissions.filter(id => !modulePermissionIds.includes(id));
-      } else {
-        // Remove dependent permissions that are no longer valid
-        const remainingPermissions = permissions.filter(p => newPermissions.includes(p.id));
-        const validPermissions = [];
+      // Remove dependent permissions that are no longer valid
+      const remainingPermissions = permissions.filter(p => newPermissions.includes(p.id));
+      const validPermissions = [];
+      
+      remainingPermissions.forEach(p => {
+        const required = getRequiredPermissions(p.module, p.action, [p.id]);
+        const hasAllRequired = required.every(reqId => 
+          reqId === p.id || newPermissions.includes(reqId)
+        );
         
-        remainingPermissions.forEach(p => {
-          const required = getRequiredPermissions(p.module, p.action, [p.id]);
-          const hasAllRequired = required.every(reqId => 
-            reqId === p.id || newPermissions.includes(reqId)
-          );
-          
-          if (hasAllRequired) {
-            validPermissions.push(p.id);
-          }
-        });
-        
-        newPermissions = validPermissions;
-      }
+        if (hasAllRequired) {
+          validPermissions.push(p.id);
+        }
+      });
+      
+      newPermissions = validPermissions;
     }
 
     setFormData(prev => ({ ...prev, permissionIds: newPermissions }));
@@ -761,8 +756,8 @@ const RoleManagement = () => {
 
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={4}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={3}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
@@ -781,8 +776,8 @@ const RoleManagement = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={4}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={3}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
@@ -801,8 +796,8 @@ const RoleManagement = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={4}>
-          <Card elevation={4}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={3}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
@@ -821,7 +816,25 @@ const RoleManagement = () => {
           </Card>
         </Grid>
 
-        
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={3}>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography color="textSecondary" gutterBottom variant="h6">
+                    Cấp độ cao nhất
+                  </Typography>
+                  <Typography variant="h4" fontWeight="bold" color="warning.main">
+                    {stats.maxLevel}
+                  </Typography>
+                </Box>
+                <Avatar sx={{ bgcolor: 'warning.main' }}>
+                  <FaChartLine />
+                </Avatar>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       {/* Search and Filters */}
@@ -955,6 +968,7 @@ const RoleManagement = () => {
                 <TableCell align="center" sx={{ width: 60 }}>STT</TableCell>
                 <TableCell>Vai trò</TableCell>
                 <TableCell>Mô tả</TableCell>
+                <TableCell align="center">Cấp độ</TableCell>
                 <TableCell align="center">Người dùng</TableCell>
                 <TableCell align="center">Quyền hạn</TableCell>
                 <TableCell align="center">Trạng thái</TableCell>
@@ -1004,6 +1018,14 @@ const RoleManagement = () => {
                       <Typography variant="body2" color="textSecondary">
                         {role.description || 'Không có mô tả'}
                       </Typography>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Chip
+                        label={`Level ${role.level || 0}`}
+                        size="small"
+                        variant="outlined"
+                        color="primary"
+                      />
                     </TableCell>
                     <TableCell align="center">
                       <Chip
