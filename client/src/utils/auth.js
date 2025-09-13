@@ -2,7 +2,7 @@
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 // Flask API configuration for license plate detection
-const FLASK_API_BASE_URL = process.env.REACT_APP_FLASK_API_URL || 'http://localhost:5002';
+const FLASK_API_BASE_URL = process.env.REACT_APP_FLASK_API_URL || (process.env.REACT_APP_API_URL || 'http://localhost:5000');
 
 // Utility function to clean URL (remove extra slashes)
 const cleanUrl = (url) => {
