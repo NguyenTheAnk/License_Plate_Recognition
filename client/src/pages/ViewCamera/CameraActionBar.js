@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import "./CameraActionBar.css";
-import { MdFullscreen, MdVideocam, MdVideocamOff, MdPlayArrow, MdPause, MdVolumeOff, MdVolumeUp, MdCameraAlt, MdHighQuality } from "react-icons/md";
+import { MdFullscreen, MdVideocam, MdVideocamOff, MdPlayArrow, MdPause, MdVolumeOff, MdVolumeUp, MdCameraAlt, MdHighQuality, MdFolderOpen } from "react-icons/md";
 import { FaTrash } from "react-icons/fa6";
 import { RiVoiceRecognitionLine } from "react-icons/ri";
 
@@ -22,6 +22,7 @@ const CameraActionBar = ({
   isPlaying,         // Trạng thái phát video
   onQualitySettings, // Cài đặt chất lượng
   currentQuality, // Chất lượng hiện tại
+  onSelectSource,    // Chọn nguồn video
 }) => {
   const [showQualityDropdown, setShowQualityDropdown] = useState(false);
   
@@ -246,6 +247,24 @@ const CameraActionBar = ({
         <MdFullscreen size={18} />
       </button>
       
+      {/* Button chọn nguồn video */}
+      <button
+        className="action-btn source-btn"
+        onClick={() => {
+          console.log("📁 Select source button clicked for camera:", cameraName);
+          if (onSelectSource) {
+            onSelectSource();
+          }
+        }}
+        title="Chọn nguồn video"
+        disabled={isProcessing}
+        style={{ 
+          backgroundColor: isProcessing ? '#ccc' : '#ff9800',
+          opacity: isProcessing ? 0.6 : 1
+        }}
+      >
+        <MdFolderOpen size={18} />
+      </button>
       
       <button
         className={`action-btn recognize-btn ${

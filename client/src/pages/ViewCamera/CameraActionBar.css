@@ -1,11 +1,10 @@
 .camera-action-bar {
   display: flex;
   gap: 4px;
-  margin-top: 0;
+  margin: 0;
   justify-content: flex-start;
   flex-shrink: 0; /* Quan trọng */
-  min-height: 44px;
-  height: auto;
+  height: 50px; /* Cố định chiều cao */
   background: #2e2e2e;
   border-bottom-left-radius: 8px;
   border-bottom-right-radius: 8px;

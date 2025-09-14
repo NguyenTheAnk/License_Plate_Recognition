@@ -124,8 +124,8 @@ const SamplePage = () => {
   });
   
   // States cho giao diện tìm kiếm
-  const [locations, setLocations] = useState([]);
   const [searchCameras, setSearchCameras] = useState([]);
+  const [searchLocations, setSearchLocations] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(null);
   
@@ -304,6 +304,18 @@ const SamplePage = () => {
       if (response.success) {
         const newResults = response.data || [];
         console.log('Detection results data:', newResults); // Debug log
+        
+        // Debug log để kiểm tra dữ liệu location
+        if (newResults.length > 0) {
+          console.log('First result location data:', {
+            camera_id: newResults[0].camera_id,
+            location_id: newResults[0].location_id,
+            camera_name: newResults[0].camera_name,
+            location_name: newResults[0].location_name,
+            source_type: newResults[0].source_type
+          });
+        }
+        
         setDetectionResults(newResults);
         
         // Kiểm tra và hiển thị thông báo cho kết quả mới có BlackList/WhiteList
@@ -341,30 +353,6 @@ const SamplePage = () => {
     }
   }, [currentPage, itemsPerPage, searchFilters, notifiedPlates]);
 
-  // Load locations và cameras cho dropdown
-  const loadLocationsAndCameras = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      
-      // Load locations
-      const locationsResponse = await fetchDataFromAPI('/api/location', token, { 
-        params: { page: 1, limit: 1000 } 
-      });
-      if (locationsResponse.success) {
-        setLocations(locationsResponse.data?.locations || locationsResponse.data || []);
-      }
-      
-      // Load cameras
-      const camerasResponse = await fetchDataFromAPI('/api/cameras', token, { 
-        params: { page: 1, limit: 1000 } 
-      });
-      if (camerasResponse.success) {
-        setSearchCameras(camerasResponse.data?.cameras || camerasResponse.data || []);
-      }
-    } catch (error) {
-      console.error("Error loading locations and cameras:", error);
-    }
-  }, []);
 
   // Hàm xử lý thay đổi filter
   const handleFilterChange = (field, value) => {
@@ -408,20 +396,7 @@ const SamplePage = () => {
     loadDetectionResults();
   };
 
-  // Hàm chuyển đổi từ yyyy-MM-ddTHH:mm sang dd/MM/yyyy HH:mm
-  const convertToDisplayFormat = (dateString) => {
-    if (!dateString) return '';
-    
-    const dateRegex = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
-    const match = dateString.match(dateRegex);
-    
-    if (match) {
-      const [, year, month, day, hour, minute] = match;
-      return `${day}/${month}/${year} ${hour}:${minute}`;
-    }
-    
-    return dateString;
-  };
+ 
 
   // Hàm format ngày giờ cho hiển thị (dd/mm/yyyy HH:mm)
   const formatDateTimeForDisplay = (dateString) => {
@@ -442,21 +417,6 @@ const SamplePage = () => {
       console.error('Error formatting date for display:', error);
       return 'N/A';
     }
-  };
-
-  // Hàm chuyển đổi từ dd/MM/yyyy HH:mm sang yyyy-MM-ddTHH:mm
-  const convertToDateTimeLocal = (dateString) => {
-    if (!dateString) return '';
-    
-    const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/;
-    const match = dateString.match(dateRegex);
-    
-    if (match) {
-      const [, day, month, year, hour, minute] = match;
-      return `${year}-${month}-${day}T${hour}:${minute}`;
-    }
-    
-    return dateString;
   };
 
 
@@ -884,12 +844,48 @@ useEffect(() => {
     return () => clearInterval(cleanupInterval);
   }, []);
 
-  // Load locations và cameras khi component mount
-  useEffect(() => {
-    loadLocationsAndCameras();
-  }, [loadLocationsAndCameras]);
   // Reset gotoPage khi currentPage thay đổi
   useEffect(() => { setGotoPage(''); }, [currentPage]);
+
+  // Load dữ liệu cho dropdown search
+  const loadSearchData = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Load cameras
+      const camerasResponse = await fetchDataFromAPI('/api/cameras', token);
+      console.log('Cameras response:', camerasResponse);
+      if (camerasResponse && camerasResponse.success) {
+        const camerasData = camerasResponse.data?.cameras || [];
+        setSearchCameras(Array.isArray(camerasData) ? camerasData : []);
+        console.log('Loaded search cameras:', camerasData);
+      } else {
+        setSearchCameras([]);
+        console.warn('Failed to load cameras:', camerasResponse);
+      }
+      
+      // Load locations
+      const locationsResponse = await fetchDataFromAPI('/api/location', token);
+      console.log('Locations response:', locationsResponse);
+      if (locationsResponse && locationsResponse.success) {
+        const locationsData = locationsResponse.data?.locations || [];
+        setSearchLocations(Array.isArray(locationsData) ? locationsData : []);
+        console.log('Loaded search locations:', locationsData);
+      } else {
+        setSearchLocations([]);
+        console.warn('Failed to load locations:', locationsResponse);
+      }
+    } catch (error) {
+      console.error('Error loading search data:', error);
+      setSearchCameras([]);
+      setSearchLocations([]);
+    }
+  }, []);
+
+  // Load dữ liệu khi component mount
+  useEffect(() => {
+    loadSearchData();
+  }, [loadSearchData]);
 
   useEffect(() => {
     if (pendingCameraId && cameras.length > 0) {
@@ -1409,6 +1405,96 @@ useEffect(() => {
     }
   };
 
+  // Hàm xử lý chọn nguồn video từ nút trong CameraActionBar
+  const handleSelectSource = (streamId) => {
+    console.log("📁 Select source button clicked for stream:", streamId);
+    console.log("📁 Current uploadedVideos:", uploadedVideos);
+    console.log("📁 Current rtspStreams:", rtspStreams);
+    
+    // Tạo input file ẩn để chọn video
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.style.display = 'none';
+    
+    input.onchange = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append("video", file);
+
+      try {
+        const token = localStorage.getItem("token");
+        const response = await postData(
+          "/api/videos/upload-video",
+          formData,
+          token,
+          {
+            headers: { "Content-Type": "multipart/form-data" },
+          }
+        );
+        
+        if (response.success) {
+          const fullUrl = `${window.location.origin}${response.data.url}`;
+          
+          // Cập nhật video cho stream hiện tại
+          setUploadedVideos((prev) => ({
+            ...prev,
+            [streamId]: {
+              url: fullUrl,
+              name: file.name,
+            },
+          }));
+          
+          // Xóa rtspStreams cho streamId này để tránh xung đột
+          if (rtspStreams[streamId]) {
+            setRtspStreams((prev) => {
+              const newRtspStreams = { ...prev };
+              delete newRtspStreams[streamId];
+              return newRtspStreams;
+            });
+          }
+          
+          // Nếu stream chưa được chọn, thêm vào danh sách
+          if (!selectedStreams.includes(streamId)) {
+            setSelectedStreams((prev) => [...prev, streamId]);
+          }
+          
+          setCameraSizes((prev) => ({
+            ...prev,
+            [streamId]: { width: 400, height: 250 },
+          }));
+          
+          console.log("✅ Video uploaded and will play in stream:", streamId);
+          console.log("📹 Updated streamInfo:", {
+            streamId,
+            url: fullUrl,
+            name: file.name,
+            uploadedVideos: uploadedVideos[streamId]
+          });
+          
+          // Video sẽ tự động phát thông qua CameraViewer component
+          // khi streamUrl được cập nhật trong state
+          
+        } else {
+          console.error("❌ Video upload failed:", response.message);
+          alert("Tải video thất bại: " + (response.message || "Lỗi không xác định"));
+        }
+      } catch (error) {
+        console.error("❌ Error uploading video:", error);
+        alert("Tải video thất bại: " + (error.message || "Lỗi không xác định"));
+      }
+      
+      // Cleanup
+      document.body.removeChild(input);
+    };
+    
+    // Thêm input vào DOM và trigger click
+    document.body.appendChild(input);
+    input.click();
+  };
+
   const handleItemsPerPageChange = (event) => {
     setItemsPerPage(parseInt(event.target.value));
     setCurrentPage(1);
@@ -1790,10 +1876,11 @@ useEffect(() => {
         {selectedStreams.length > 0 ? (
             <Grid container spacing={2}>
               {selectedStreams.map((streamId) => {
-                const streamInfo = rtspStreams[streamId] || uploadedVideos[streamId];
+                // Ưu tiên uploadedVideos nếu có, sau đó mới đến rtspStreams
+                const streamInfo = uploadedVideos[streamId] || rtspStreams[streamId];
             if (!streamInfo) return null;
 
-            const isUploadedVideo = streamId.startsWith("upload-");
+            const isUploadedVideo = streamId.startsWith("upload-") || !!uploadedVideos[streamId];
             const cameraId = streamInfo.cameraId || streamId.split("-")[1];
             const camera = cameras.find((c) => c.id == cameraId) || {
               id: cameraId,
@@ -1805,9 +1892,12 @@ useEffect(() => {
             // Debug log để kiểm tra camera
             console.log('Camera debug:', {
               streamId,
+              streamInfo,
               cameraId,
               camera,
-              cameras: cameras.map(c => ({ id: c.id, name: c.name }))
+              isUploadedVideo,
+              uploadedVideos: uploadedVideos[streamId],
+              rtspStreams: rtspStreams[streamId]
             });
                 const size = cameraSizes[streamId] || { width: 400, height: 250 };
 
@@ -1867,6 +1957,7 @@ useEffect(() => {
                         isPlaying={playing[streamId] || false}
                         onQualitySettings={(quality) => handleQualitySettings(streamId, quality)}
                         currentQuality={currentQuality[streamId] || 'medium'}
+                        onSelectSource={() => handleSelectSource(streamId)}
                       />
                     )}
                     onClose={() => handleCloseCameraFeed(streamId)}
@@ -2020,6 +2111,14 @@ useEffect(() => {
                       label="Khu vực"
                       onChange={e => handleFilterChange('location_id', e.target.value)}
                       startAdornment={<LocationIcon color="info" sx={{ mr: 1, fontSize: 22 }} />}
+                      MenuProps={{
+                        PaperProps: {
+                          style: {
+                            maxHeight: 300,
+                            overflow: 'auto',
+                          },
+                        },
+                      }}
                       sx={{ 
                         borderRadius: 3, 
                         bgcolor: 'background.paper', 
@@ -2030,8 +2129,10 @@ useEffect(() => {
                       }}
                     >
                       <MenuItem value="">Tất cả khu vực</MenuItem>
-                      {locations.map(loc => (
-                        <MenuItem key={loc.id} value={loc.id}>{loc.name}</MenuItem>
+                      {Array.isArray(searchLocations) && searchLocations.map(location => (
+                        <MenuItem key={location.id} value={location.id}>
+                          {location.name || `Khu vực ${location.id}`}
+                        </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
@@ -2045,6 +2146,14 @@ useEffect(() => {
                       value={searchFilters.camera_id}
                       label="Camera"
                       onChange={e => handleFilterChange('camera_id', e.target.value)}
+                      MenuProps={{
+                        PaperProps: {
+                          style: {
+                            maxHeight: 300,
+                            overflow: 'auto',
+                          },
+                        },
+                      }}
                       sx={{ 
                         borderRadius: 3, 
                         bgcolor: 'background.paper', 
@@ -2055,7 +2164,7 @@ useEffect(() => {
                       }}
                     >
                       <MenuItem value="">Tất cả camera</MenuItem>
-                      {searchCameras.map(camera => (
+                      {Array.isArray(searchCameras) && searchCameras.map(camera => (
                         <MenuItem key={camera.id} value={camera.id}>
                           {camera.name || `Camera ${camera.id}`}
                         </MenuItem>
@@ -2580,33 +2689,38 @@ useEffect(() => {
                           </Box>
                         )}
                         
-                        {(result.camera_name || result.location_name) && (
-                          <Box>
-                            {result.camera_name && (
-                              <Typography variant="caption" color="text.secondary" display="block" sx={{ 
-                                mb: 0.5, 
-                                fontSize: '0.7rem',
-                                fontWeight: 500,
-                                color: '#666',
-                                wordBreak: 'break-word'
-                              }}>
-                                Tên camera: {result.camera_name}
-                              </Typography>
-                            )}
-                            
-                            {result.location_name && (
-                              <Typography variant="caption" color="text.secondary" display="block" sx={{ 
-                                mb: 0.5, 
-                                fontSize: '0.7rem',
-                                fontWeight: 500,
-                                color: '#666',
-                                wordBreak: 'break-word'
-                              }}>
-                                Khu vực: {result.location_name}
-                              </Typography>
-                            )}
-                          </Box>
-                        )}
+                        {/* Hiển thị thông tin camera và khu vực */}
+                        <Box>
+                          {/* Debug log để kiểm tra dữ liệu */}
+                          {console.log('Result data for source display:', {
+                            camera_name: result.camera_name,
+                            camera_id: result.camera_id,
+                            location_name: result.location_name,
+                            source_type: result.source_type
+                          })}
+                          
+                          {/* Dòng Camera - luôn hiển thị */}
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ 
+                            mb: 0.5, 
+                            fontSize: '0.7rem',
+                            fontWeight: 500,
+                            color: '#666',
+                            wordBreak: 'break-word'
+                          }}>
+                            📹 Camera: {result.camera_name || `Camera ${result.camera_id}` || 'N/A'}
+                          </Typography>
+                          
+                          {/* Dòng Khu vực - luôn hiển thị */}
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ 
+                            mb: 0.5, 
+                            fontSize: '0.7rem',
+                            fontWeight: 500,
+                            color: '#666',
+                            wordBreak: 'break-word'
+                          }}>
+                            📍 Khu vực: {result.location_name || 'N/A'}
+                          </Typography>
+                        </Box>
                       </Box>
                     </TableCell>
                     
@@ -3513,7 +3627,7 @@ useEffect(() => {
                           border: '1px solid #e0e0e0'
                         }}>
                           <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
-                            📍 Vị trí
+                            📍 Khu vực
                           </div>
                           <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
                             {selectedResult.location_name || 'N/A'}

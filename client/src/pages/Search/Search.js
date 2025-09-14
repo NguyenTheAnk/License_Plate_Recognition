@@ -100,7 +100,9 @@ function SearchPage() {
     is_active: '',
     location_name: '',
     location_code: '',
-    zone_type: ''
+    zone_type: '',
+    address: '',           // ✅ Thêm cho location search
+    camera_status: ''      // ✅ Thêm cho location search
   });
   
   const [tab, setTab] = useState('whitelist');
@@ -365,10 +367,28 @@ function SearchPage() {
     };
     
     const locationParams = {
+      name: filters.location_name,
+      address: filters.address,
+      camera_status: filters.camera_status,
+      page: currentPage,
+      limit: itemsPerPage
+    };
+    
+    const plateParams = {
+      plate_number: filters.plate_number,
+      camera_id: filters.camera_id,
+      location_id: filters.location_id,
+      start_date: filters.date_from,  // ✅ Map date_from to start_date
+      end_date: filters.date_to,      // ✅ Map date_to to end_date
       page: currentPage,
       limit: itemsPerPage
     };
 
+    // Debug: Log params before API call
+    console.log('🔍 About to call location API with params:', locationParams);
+    console.log('🔍 About to call plate API with params:', plateParams);
+    console.log('🔍 Current tab:', tab);
+    
     // Parallel API calls with improved error handling
     const [whitelistRes, blacklistRes, cameraRes, locationRes, journeyRes, plateRes, accessRes] = await Promise.allSettled([
       fetchDataFromAPI(`/api/whitelist`, token, { params: whitelistParams }),
@@ -376,12 +396,24 @@ function SearchPage() {
       fetchDataFromAPI(`/api/cameras`, token, { params: cameraParams }),
       fetchDataFromAPI(`/api/location/active`, token, { params: locationParams }),
       fetchDataFromAPI(`/api/journey`, token, { params }),
-      fetchDataFromAPI(`/api/plates`, token, { params }),
+      fetchDataFromAPI(`/api/plate-recognitions`, token, { params: plateParams }), // ✅ Use plateParams
       fetchDataFromAPI(`/api/access-control`, token, { params })
     ]);
 
     // Process results
     const processResult = (result) => result.status === 'fulfilled' ? result.value?.data || [] : [];
+    
+    // Debug location API response
+    console.log('🔍 Location API Response Debug:');
+    console.log('locationRes.status:', locationRes.status);
+    console.log('locationRes.value:', locationRes.value);
+    console.log('locationRes.reason:', locationRes.reason);
+    
+    // Debug plate API response
+    console.log('🔍 Plate API Response Debug:');
+    console.log('plateRes.status:', plateRes.status);
+    console.log('plateRes.value:', plateRes.value);
+    console.log('plateRes.reason:', plateRes.reason);
     
     const newResults = {
       whitelist: processResult(whitelistRes),
@@ -392,14 +424,53 @@ function SearchPage() {
       plate: processResult(plateRes),
       access: processResult(accessRes)
     };
+    
+    // Debug: Check if location data is correct
+    if (locationRes.status === 'fulfilled' && locationRes.value?.data?.locations) {
+      console.log('✅ Location data found in API response:', locationRes.value.data.locations);
+      newResults.location = locationRes.value.data.locations;
+    } else {
+      console.log('❌ No location data found in API response');
+    }
+    
+    console.log('🔍 Processed location results:', newResults.location);
 
     console.log('Camera results:', newResults.camera);
 
     setAllResults(newResults);
     
+    // Set results for current tab
+    switch (tab) {
+      case 'whitelist':
+        setResults(newResults.whitelist);
+        break;
+      case 'blacklist':
+        setResults(newResults.blacklist);
+        break;
+      case 'camera':
+        setResults(newResults.camera);
+        break;
+      case 'location':
+        setResults(newResults.location);
+        break;
+      case 'journey':
+        setResults(newResults.journey);
+        break;
+      case 'plate':
+        setResults(newResults.plate);
+        break;
+      case 'access':
+        setResults(newResults.access);
+        break;
+      default:
+        setResults([]);
+    }
+    
     // Debug log
     console.log('Camera search results:', newResults.camera);
     console.log('Camera params sent:', cameraParams);
+    console.log('Location search results:', newResults.location);
+    console.log('Location params sent:', locationParams);
 
     // Enhanced statistics calculation
     const totalWhitelist = newResults.whitelist.length;
@@ -834,9 +905,8 @@ function getPaginationItems(current, total) {
       case 'location':
         return (
           <>
-            {/* Hàng 1 */}
             <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Tên khu vực"
                   value={filters.location_name}
@@ -853,83 +923,7 @@ function getPaginationItems(current, total) {
                   sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                 />
               </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Mã khu vực"
-                  value={filters.location_code}
-                  onChange={e => handleFilterChange('location_code', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Code sx={{ color: '#2196f3' }} />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Loại khu vực</InputLabel>
-                  <Select
-                    value={filters.zone_type}
-                    label="Loại khu vực"
-                    onChange={e => handleFilterChange('zone_type', e.target.value)}
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="entrance">Lối vào</MenuItem>
-                    <MenuItem value="exit">Lối ra</MenuItem>
-                    <MenuItem value="parking">Bãi đỗ xe</MenuItem>
-                    <MenuItem value="monitoring">Giám sát</MenuItem>
-                    <MenuItem value="restricted">Khu hạn chế</MenuItem>
-                    <MenuItem value="public">Khu công cộng</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Trạng thái</InputLabel>
-                  <Select
-                    value={filters.status}
-                    label="Trạng thái"
-                    onChange={e => handleFilterChange('status', e.target.value)}
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="active">Hoạt động</MenuItem>
-                    <MenuItem value="inactive">Không hoạt động</MenuItem>
-                    <MenuItem value="maintenance">Bảo trì</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-            </Grid>
-
-            {/* Hàng 2 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={4}>
                 <TextField
                   label="Địa chỉ"
                   value={filters.address}
@@ -946,51 +940,32 @@ function getPaginationItems(current, total) {
                   sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                 />
               </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Từ ngày"
-                  type="date"
-                  value={filters.date_from}
-                  onChange={e => handleFilterChange('date_from', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Đến ngày"
-                  type="date"
-                  value={filters.date_to}
-                  onChange={e => handleFilterChange('date_to', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  startIcon={<SearchIcon />}
-                  sx={{ 
-                    borderRadius: 3, 
-                    textTransform: 'none', 
-                    fontWeight: 600, 
-                    fontSize: 15, 
-                    py: 1.5,
-                    background: 'linear-gradient(90deg, #1976d2 0%, #2196f3 100%)',
-                    boxShadow: '0 4px 12px rgba(25,118,210,0.3)',
-                    '&:hover': {
-                      background: 'linear-gradient(90deg, #1565c0 0%, #1976d2 100%)',
-                      boxShadow: '0 6px 16px rgba(25,118,210,0.4)'
-                    }
-                  }}
-                >
-                  Tìm kiếm
-                </Button>
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
+                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Camera</InputLabel>
+                  <Select
+                    value={filters.camera_status}
+                    label="Camera"
+                    onChange={e => handleFilterChange('camera_status', e.target.value)}
+                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
+                    MenuProps={{
+                      PaperProps: {
+                        style: {
+                          maxHeight: 200,
+                          overflowY: 'auto',
+                          borderRadius: 8,
+                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
+                        }
+                      }
+                    }}
+                  >
+                    <MenuItem value="">Tất cả camera</MenuItem>
+                    <MenuItem value="has_camera">Có camera</MenuItem>
+                    <MenuItem value="no_camera">Không có camera</MenuItem>
+                    <MenuItem value="online_camera">Camera online</MenuItem>
+                    <MenuItem value="offline_camera">Camera offline</MenuItem>
+                  </Select>
+                </FormControl>
               </Grid>
             </Grid>
           </>
@@ -1191,124 +1166,31 @@ function getPaginationItems(current, total) {
       case 'plate':
         return (
           <>
-            {/* Hàng 1 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-            <Grid item xs={12} md={3}>
-              <TextField
-                label="Biển số xe"
-                value={filters.plate_number}
-                onChange={e => handleFilterChange('plate_number', e.target.value)}
-                fullWidth
-                size="medium"
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon sx={{ color: '#5d4037' }} />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Khu vực</InputLabel>
-                <Select
-                  value={filters.location_id}
-                  label="Khu vực"
-                  onChange={e => handleFilterChange('location_id', e.target.value)}
-                  startAdornment={
-                    <InputAdornment position="start">
-                      <LocationOn sx={{ color: '#5d4037', ml: 1 }} />
-                    </InputAdornment>
-                  }
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 300,
-                        overflowY: 'auto',
-                        borderRadius: 8,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                      }
-                    }
-                  }}
-                >
-                  <MenuItem value="">Tất cả khu vực</MenuItem>
-                  {locations.map(location => (
-                    <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Camera</InputLabel>
-                <Select
-                  value={filters.camera_id}
-                  label="Camera"
-                  onChange={e => handleFilterChange('camera_id', e.target.value)}
-                  startAdornment={
-                    <InputAdornment position="start">
-                      <Videocam sx={{ color: '#5d4037', ml: 1 }} />
-                    </InputAdornment>
-                  }
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 300,
-                        overflowY: 'auto',
-                        borderRadius: 8,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                      }
-                    }
-                  }}
-                >
-                  <MenuItem value="">Tất cả camera</MenuItem>
-                  {cameras.map(camera => (
-                    <MenuItem key={camera.id} value={camera.id}>{camera.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Độ tin cậy</InputLabel>
-                <Select
-                  value={filters.confidence}
-                  label="Độ tin cậy"
-                  onChange={e => handleFilterChange('confidence', e.target.value)}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 200,
-                        overflowY: 'auto',
-                        borderRadius: 8,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                      }
-                    }
-                  }}
-                >
-                  <MenuItem value="">Tất cả</MenuItem>
-                  <MenuItem value="high">Cao (&gt;80%)</MenuItem>
-                  <MenuItem value="medium">Trung bình (60-80%)</MenuItem>
-                  <MenuItem value="low">Thấp (&lt;60%)</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            </Grid>
-
-            {/* Hàng 2 */}
             <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
               <Grid item xs={12} md={3}>
+                <TextField
+                  label="Biển số xe"
+                  value={filters.plate_number}
+                  onChange={e => handleFilterChange('plate_number', e.target.value)}
+                  fullWidth
+                  size="medium"
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <DirectionsCar sx={{ color: '#5d4037' }} />
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
+                />
+              </Grid>
+              <Grid item xs={12} md={3}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Loại xe</InputLabel>
+                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Camera</InputLabel>
                   <Select
-                    value={filters.vehicle_type}
-                    label="Loại xe"
-                    onChange={e => handleFilterChange('vehicle_type', e.target.value)}
+                    value={filters.camera_id}
+                    label="Camera"
+                    onChange={e => handleFilterChange('camera_id', e.target.value)}
                     sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                     MenuProps={{
                       PaperProps: {
@@ -1321,21 +1203,20 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="car">Ô tô</MenuItem>
-                    <MenuItem value="motorcycle">Xe máy</MenuItem>
-                    <MenuItem value="truck">Xe tải</MenuItem>
-                    <MenuItem value="bus">Xe bus</MenuItem>
+                    <MenuItem value="">Tất cả camera</MenuItem>
+                    {cameras.map(camera => (
+                      <MenuItem key={camera.id} value={camera.id}>{camera.name}</MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
               <Grid item xs={12} md={3}>
                 <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Màu sắc</InputLabel>
+                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Khu vực</InputLabel>
                   <Select
-                    value={filters.color}
-                    label="Màu sắc"
-                    onChange={e => handleFilterChange('color', e.target.value)}
+                    value={filters.location_id}
+                    label="Khu vực"
+                    onChange={e => handleFilterChange('location_id', e.target.value)}
                     sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                     MenuProps={{
                       PaperProps: {
@@ -1348,14 +1229,10 @@ function getPaginationItems(current, total) {
                       }
                     }}
                   >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="white">Trắng</MenuItem>
-                    <MenuItem value="black">Đen</MenuItem>
-                    <MenuItem value="red">Đỏ</MenuItem>
-                    <MenuItem value="blue">Xanh</MenuItem>
-                    <MenuItem value="green">Xanh lá</MenuItem>
-                    <MenuItem value="yellow">Vàng</MenuItem>
-                    <MenuItem value="gray">Xám</MenuItem>
+                    <MenuItem value="">Tất cả khu vực</MenuItem>
+                    {locations.map(location => (
+                      <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
@@ -1371,6 +1248,8 @@ function getPaginationItems(current, total) {
                   sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                 />
               </Grid>
+            </Grid>
+            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
               <Grid item xs={12} md={3}>
                 <TextField
                   label="Đến ngày"
@@ -1383,35 +1262,7 @@ function getPaginationItems(current, total) {
                   sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
                 />
               </Grid>
-            </Grid>
-
-            {/* Hàng 3 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Từ giờ"
-                  type="time"
-                  value={filters.time_from}
-                  onChange={e => handleFilterChange('time_from', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Đến giờ"
-                  type="time"
-                  value={filters.time_to}
-                  onChange={e => handleFilterChange('time_to', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={9}>
                 <Button
                   variant="contained"
                   onClick={handleSearch}
@@ -1540,9 +1391,13 @@ useEffect(() => {
           totalPagesFromAPI = Math.ceil(totalCountFromAPI / itemsPerPage);
           break;
         case 'location':
-          data = await fetchDataFromAPI(`/api/location/active`, token, { params });
+          const initialLocationParams = {
+            page: 1,
+            limit: itemsPerPage
+          };
+          data = await fetchDataFromAPI(`/api/location/active`, token, { params: initialLocationParams });
           console.log('Location API response:', data);
-          console.log('Params sent:', params);
+          console.log('Params sent:', initialLocationParams);
           if (data.data && data.data.locations) {
             setResults(data.data.locations);
             totalCountFromAPI = data.data.pagination?.total_records || 0; // Sửa: lấy từ pagination.total_records
@@ -1705,33 +1560,40 @@ useEffect(() => {
         case 'location':
             // SỬA: Gửi đúng tham số cho location API với filters
             const locationFilterParams = {
-              name: filters.location_name,     // ✅ ĐÚNG field name
-              code: filters.location_code,     // ✅ ĐÚNG field name
-              zone_type: filters.zone_type,
-              is_active: filters.is_active,
+              name: filters.location_name,     // ✅ Tên khu vực
+              address: filters.address,        // ✅ Địa chỉ
+              camera_status: filters.camera_status, // ✅ Trạng thái camera
               page: currentPage, 
               limit: itemsPerPage
             };
+            console.log('🔍 Location Search Debug:');
+            console.log('Current filters:', filters);
+            console.log('Location filter params:', locationFilterParams);
             data = await fetchDataFromAPI(`/api/location/active`, token, { params: locationFilterParams });
             console.log('Filtered Location API response:', data);
             console.log('Location filter params sent:', locationFilterParams);
           if (data.data && data.data.locations) {
+            console.log('✅ Setting results from data.data.locations:', data.data.locations);
             setResults(data.data.locations);
             totalCountFromAPI = data.data.pagination?.total_records || 0; // Sửa: lấy từ pagination.total_records
             totalPagesFromAPI = data.data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           } else if (data.locations) {
+            console.log('✅ Setting results from data.locations:', data.locations);
             setResults(data.locations);
             totalCountFromAPI = data.pagination?.total_records || 0; // Sửa: lấy từ pagination.total_records
             totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           } else if (Array.isArray(data.data)) {
+            console.log('✅ Setting results from data.data (array):', data.data);
             setResults(data.data);
             totalCountFromAPI = data.total || data.pagination?.total || 0;
             totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
           } else if (Array.isArray(data)) {
+            console.log('✅ Setting results from data (array):', data);
             setResults(data);
             totalCountFromAPI = data.length;
             totalPagesFromAPI = 1;
           } else {
+            console.log('❌ No valid data found, setting empty results');
             setResults([]);
             totalCountFromAPI = 0;
             totalPagesFromAPI = 1;
