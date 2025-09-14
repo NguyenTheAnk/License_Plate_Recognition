@@ -864,7 +864,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         flexDirection: "column",
         width: "100%",
         height: "100%",
-        minHeight: "300px",
       }}
     >
       <style jsx>{`
@@ -930,7 +929,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             height: "100%",
             borderRadius: "8px 8px 0 0",
             backgroundColor: "#000",
-            objectFit: "cover",
+            objectFit: "contain",
             // Luôn hiển thị video gốc
             display: "block",
             // Ẩn các controls và overlays
