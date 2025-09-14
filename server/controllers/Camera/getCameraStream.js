@@ -166,10 +166,6 @@ const getAllCameraStreams = async (req, res) => {
                 c.is_detect,
                 c.status,
                 c.last_heartbeat,
-                c.location_id,
-                l.name as location_name,
-                l.address as location_address,
-                l.zone_type as location_zone_type,
                 CASE 
                     WHEN c.username IS NOT NULL AND c.password IS NOT NULL THEN
                         CONCAT(c.protocol, '://', c.username, ':', c.password, '@', c.host, ':', c.port, c.path)
@@ -183,7 +179,6 @@ const getAllCameraStreams = async (req, res) => {
                     ELSE 'offline'
                 END as connection_status
             FROM cameras c
-            LEFT JOIN locations l ON c.location_id = l.id
             ${whereClause}
             ORDER BY c.name
         `, queryParams);

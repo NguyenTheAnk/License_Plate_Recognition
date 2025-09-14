@@ -523,10 +523,38 @@ const searchBlacklist = async (req, res) => {
     }
 };
 
+// Lấy danh sách các loại vi phạm distinct
+const getViolationTypes = async (req, res) => {
+    const connection = await db.promise();
+    
+    try {
+        const [violationTypes] = await connection.execute(`
+            SELECT DISTINCT violation_type, COUNT(*) as count
+            FROM vehicle_blacklist 
+            WHERE violation_type IS NOT NULL AND violation_type != ''
+            GROUP BY violation_type
+            ORDER BY violation_type
+        `);
+
+        res.status(200).json({
+            success: true,
+            data: violationTypes
+        });
+    } catch (error) {
+        console.error('Error getting violation types:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy danh sách loại vi phạm',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     getAllBlacklist,
     getBlacklistById,
     getBlacklistByPlateNumber,
     getBlacklistStatistics,
-    searchBlacklist
+    searchBlacklist,
+    getViolationTypes
 };

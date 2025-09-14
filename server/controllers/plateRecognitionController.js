@@ -96,7 +96,7 @@ const getLicensePlateRecognitions = async (req, res) => {
 
         // Validate and parse pagination parameters
         const parsedPage = Math.max(1, parseInt(page) || 1);
-        const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 10));
+        const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
         const offset = (parsedPage - 1) * parsedLimit;
         
         // Validate pagination bounds
@@ -117,7 +117,6 @@ const getLicensePlateRecognitions = async (req, res) => {
         }
         
         console.log('Pagination params:', { page, limit, offset, parsedPage, parsedLimit });
-        console.log('Raw query params:', req.query);
         
         // Debug: Test if table exists and has data
         const testQuery = `SELECT COUNT(*) as total FROM license_plate_detections LIMIT 1`;
@@ -348,7 +347,7 @@ const getLicensePlateRecognitions = async (req, res) => {
                 loc.name as location_name
             FROM license_plate_detections lpd
             LEFT JOIN cameras c ON lpd.camera_id = c.id
-            LEFT JOIN locations loc ON lpd.location_id = loc.id
+            LEFT JOIN locations loc ON c.location_id = loc.id
             ${whereClause}
             ORDER BY lpd.${sortBy} ${sortOrder}
             LIMIT ${parsedLimit} OFFSET ${offset}`;
@@ -490,7 +489,7 @@ const getLicensePlateRecognitionById = async (req, res) => {
                 loc.name as location_name
             FROM license_plate_detections lpd
             LEFT JOIN cameras c ON lpd.camera_id = c.id
-            LEFT JOIN locations loc ON lpd.location_id = loc.id
+            LEFT JOIN locations loc ON c.location_id = loc.id
             WHERE lpd.id = ?
         `;
         
@@ -1251,7 +1250,7 @@ const getRealtimeDetections = async (req, res) => {
                 loc.name as location_name
             FROM license_plate_detections lpd
             LEFT JOIN cameras c ON lpd.camera_id = c.id
-            LEFT JOIN locations loc ON lpd.location_id = loc.id
+            LEFT JOIN locations loc ON c.location_id = loc.id
             ${whereClause}
             ORDER BY lpd.detected_at DESC
             LIMIT ?
