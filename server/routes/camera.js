@@ -69,7 +69,7 @@ router.get('/:id/stream/status',
 
 router.get('/',
     auth,
-    checkPermission('camera.view'), 
+    checkPermission('camera.view_detail'), 
     getAllCameras
 );
 

@@ -13,7 +13,8 @@ const {
     getBlacklistById, 
     getBlacklistByPlateNumber, 
     getBlacklistStatistics,
-    searchBlacklist 
+    searchBlacklist,
+    getViolationTypes
 } = require('../controllers/BlackList/getBlackList');
 const { 
     updateBlacklist, 
@@ -55,6 +56,12 @@ router.get('/statistics',
     auth, 
     //checkPermission('blacklist.view'), 
     getBlacklistStatistics
+);
+
+// Get violation types for dropdown
+router.get('/violation-types', 
+    auth, 
+    getViolationTypes
 );
 
 // Search blacklist entries
