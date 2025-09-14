@@ -55,7 +55,8 @@ const SamplePage = () => {
   const [cameraPositions, setCameraPositions] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [showConfig, setShowConfig] = useState(false);
-  const [selectedCameraId] = useState(null);
+  const [selectedCameraId, setSelectedCameraId] = useState(null);
+  const [selectedCameraInfo, setSelectedCameraInfo] = useState(null); // Lưu thông tin camera đã chọn
   const [loading, setLoading] = useState(true);
   const [recording, setRecording] = useState({}); // Thêm state cho ghi hình
   const [muted, setMuted] = useState({}); // State cho âm thanh
@@ -950,17 +951,24 @@ useEffect(() => {
   const handleCameraClick = async (cameraId) => {
     if (showConfig || isLoadingStream.current) return;
 
-    const camera = camerasRef.current.find((c) => c.id == cameraId);
+    const camera = camerasRef.current.find((c) => c.id === cameraId);
 
     if (!camera) {
       await fetchCameras();
       const refreshedCamera = camerasRef.current.find(
-        (c) => c.id == cameraId
+        (c) => c.id === cameraId
       );
       if (!refreshedCamera) {
         alert(`Không tìm thấy camera ${cameraId}`);
         return;
       }
+    }
+
+    // Lưu thông tin camera đã chọn
+    const selectedCamera = camerasRef.current.find((c) => c.id === cameraId);
+    if (selectedCamera) {
+      setSelectedCameraInfo(selectedCamera);
+      setSelectedCameraId(cameraId);
     }
 
     const streamId = `${cameraId}-${Date.now()}`;
@@ -1014,6 +1022,12 @@ useEffect(() => {
       delete newSizes[streamId];
       return newSizes;
     });
+    
+    // Reset camera info nếu không còn stream nào
+    if (selectedStreams.length <= 1) {
+      setSelectedCameraInfo(null);
+      setSelectedCameraId(null);
+    }
     setUploadedVideos((prev) => {
       const newVideos = { ...prev };
       delete newVideos[streamId];
@@ -1869,12 +1883,16 @@ useEffect(() => {
 
             const isUploadedVideo = streamId.startsWith("upload-") || !!uploadedVideos[streamId];
             const cameraId = streamInfo.cameraId || streamId.split("-")[1];
-            const camera = cameras.find((c) => c.id == cameraId) || {
+            
+            // Sử dụng thông tin camera đã chọn từ sidebar
+            const originalCamera = selectedCameraInfo || cameras.find((c) => c.id === cameraId);
+            const camera = originalCamera || {
               id: cameraId,
-              name: uploadedVideos[streamId]
-                ? uploadedVideos[streamId].name
-                : `Camera ${cameraId}`,
+              name: `Camera ${cameraId}`,
             };
+            
+            // Luôn giữ tên camera gốc đã chọn từ sidebar
+            const originalCameraName = selectedCameraInfo ? selectedCameraInfo.name : (originalCamera ? originalCamera.name : `Camera ${cameraId}`);
             
             // Debug log để kiểm tra camera
             console.log('Camera debug:', {
@@ -1882,6 +1900,8 @@ useEffect(() => {
               streamInfo,
               cameraId,
               camera,
+              selectedCameraInfo,
+              originalCameraName,
               isUploadedVideo,
               uploadedVideos: uploadedVideos[streamId],
               rtspStreams: rtspStreams[streamId]
@@ -1921,7 +1941,7 @@ useEffect(() => {
                       onForcePlay,
                     }) => (
                       <CameraActionBar
-                        cameraName={camera.name || `Camera ${cameraId}`}
+                        cameraName={originalCameraName}
                         cameraId={cameraId}
                         onFullscreen={() => {
                           const video = document.getElementById(`video-${streamId}`);
