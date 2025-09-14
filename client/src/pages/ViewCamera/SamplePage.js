@@ -303,6 +303,7 @@ const SamplePage = () => {
       const response = await fetchDataFromAPI(`/api/plate-recognitions?${params.toString()}`, token);
       if (response.success) {
         const newResults = response.data || [];
+        console.log('Detection results data:', newResults); // Debug log
         setDetectionResults(newResults);
         
         // Kiểm tra và hiển thị thông báo cho kết quả mới có BlackList/WhiteList
@@ -2392,11 +2393,11 @@ useEffect(() => {
                                 }
                                 // Xử lý đường dẫn ảnh
                                 if (imagePath.startsWith('/static/crops/')) {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
+                                  return `http://localhost:5000${imagePath}`;
                                 } else if (imagePath.startsWith('static/crops/')) {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/${imagePath}`;
+                                  return `http://localhost:5000/${imagePath}`;
                                 } else {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/static/crops/${imagePath}`;
+                                  return `http://localhost:5000/static/crops/${imagePath}`;
                                 }
                               })()}
                               alt="Ảnh biển số"
@@ -2423,7 +2424,7 @@ useEffect(() => {
                                   imagePath = `/static/crops/${imagePath}`;
                                 }
                                 
-                                const cropImageUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
+                                const cropImageUrl = `http://localhost:5000${imagePath}`;
                                 console.log('Opening image URL:', cropImageUrl);
                                 window.open(cropImageUrl, '_blank');
                               }}
@@ -2435,7 +2436,7 @@ useEffect(() => {
                                 if (!imagePath.startsWith('/static/crops/')) {
                                   imagePath = `/static/crops/${imagePath}`;
                                 }
-                                const fullUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
+                                const fullUrl = `http://localhost:5000${imagePath}`;
                                 console.error('Full URL:', fullUrl);
                                 
                                 e.target.style.display = 'none';
@@ -2579,25 +2580,29 @@ useEffect(() => {
                           </Box>
                         )}
                         
-                        {result.source_type === 'camera' && result.camera_name && (
+                        {(result.camera_name || result.location_name) && (
                           <Box>
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{ 
-                              mb: 0.5, 
-                              fontSize: '0.7rem',
-                              fontWeight: 500,
-                              color: '#666',
-                              wordBreak: 'break-word'
-                            }}>
-                              Tên camera: {result.camera_name}
-                            </Typography>
-                            {result.location_name && (
+                            {result.camera_name && (
                               <Typography variant="caption" color="text.secondary" display="block" sx={{ 
+                                mb: 0.5, 
                                 fontSize: '0.7rem',
                                 fontWeight: 500,
                                 color: '#666',
                                 wordBreak: 'break-word'
                               }}>
-                                Vị trí: {result.location_name}
+                                Tên camera: {result.camera_name}
+                              </Typography>
+                            )}
+                            
+                            {result.location_name && (
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ 
+                                mb: 0.5, 
+                                fontSize: '0.7rem',
+                                fontWeight: 500,
+                                color: '#666',
+                                wordBreak: 'break-word'
+                              }}>
+                                Khu vực: {result.location_name}
                               </Typography>
                             )}
                           </Box>
@@ -3557,11 +3562,11 @@ useEffect(() => {
                           }
                                 // Xử lý đường dẫn ảnh
                                 if (imagePath.startsWith('/static/crops/')) {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
+                                  return `http://localhost:5000${imagePath}`;
                                 } else if (imagePath.startsWith('static/crops/')) {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/${imagePath}`;
+                                  return `http://localhost:5000/${imagePath}`;
                                 } else {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/static/crops/${imagePath}`;
+                                  return `http://localhost:5000/static/crops/${imagePath}`;
                                 }
                         })()}
                         alt="Biển số xe"
@@ -3618,8 +3623,8 @@ useEffect(() => {
                           imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
                         }
                         const imageUrl = imagePath.startsWith('/static/crops/') 
-                          ? `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`
-                          : `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/static/crops/${imagePath}`;
+                          ? `http://localhost:5000${imagePath}`
+                          : `http://localhost:5000/static/crops/${imagePath}`;
                         window.open(imageUrl, '_blank');
                       }
                     }}
@@ -3858,11 +3863,11 @@ useEffect(() => {
                           }
                                 // Xử lý đường dẫn ảnh
                                 if (imagePath.startsWith('/static/crops/')) {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${imagePath}`;
+                                  return `http://localhost:5000${imagePath}`;
                                 } else if (imagePath.startsWith('static/crops/')) {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/${imagePath}`;
+                                  return `http://localhost:5000/${imagePath}`;
                                 } else {
-                                  return `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/static/crops/${imagePath}`;
+                                  return `http://localhost:5000/static/crops/${imagePath}`;
                                 }
                         })()}
                         alt="Biển số xe"
