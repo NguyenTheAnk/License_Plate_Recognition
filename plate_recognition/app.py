@@ -321,6 +321,28 @@ def video_stream(video_id):
     temp_video_path = os.path.join('temp_videos', video_id)
     if not os.path.exists(temp_video_path):
         return jsonify({"error": "Video không tồn tại"}), 404
+    
+    # Extract camera info from video_id (format: upload-{cameraId}-{timestamp})
+    camera_id = None
+    camera_name = f"Video_{video_id}"
+    if video_id.startswith('upload-') and '-' in video_id:
+        try:
+            parts = video_id.split('-')
+            if len(parts) >= 3:
+                camera_id = int(parts[1])
+                # Get actual camera name from database
+                try:
+                    import requests
+                    response = requests.get(f"http://localhost:5000/api/cameras/{camera_id}", timeout=2)
+                    if response.status_code == 200:
+                        camera_data = response.json()
+                        camera_name = camera_data.get('data', {}).get('name', f"Camera_{camera_id}")
+                    else:
+                        camera_name = f"Camera_{camera_id}"
+                except:
+                    camera_name = f"Camera_{camera_id}"
+        except (ValueError, IndexError):
+            pass
 
     def generate():
         cap = cv2.VideoCapture(temp_video_path)
@@ -337,7 +359,7 @@ def video_stream(video_id):
 
                 # Xử lý frame với detection/OCR
                 try:
-                    result = detect_and_ocr_stable(frame, source_type="video_upload", video_filename=video_id, camera_name=f"Video_{video_id}")
+                    result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
 
                     # Handle both dict and direct frame results
                     if isinstance(result, dict):
@@ -556,6 +578,28 @@ def processed_video_ws(ws, video_id):
         logger.error(f"Video không tồn tại: {video_id}")
         ws.close()
         return
+    
+    # Extract camera info from video_id (format: upload-{cameraId}-{timestamp})
+    camera_id = None
+    camera_name = f"Video_{video_id}"
+    if video_id.startswith('upload-') and '-' in video_id:
+        try:
+            parts = video_id.split('-')
+            if len(parts) >= 3:
+                camera_id = int(parts[1])
+                # Get actual camera name from database
+                try:
+                    import requests
+                    response = requests.get(f"http://localhost:5000/api/cameras/{camera_id}", timeout=2)
+                    if response.status_code == 200:
+                        camera_data = response.json()
+                        camera_name = camera_data.get('data', {}).get('name', f"Camera_{camera_id}")
+                    else:
+                        camera_name = f"Camera_{camera_id}"
+                except:
+                    camera_name = f"Camera_{camera_id}"
+        except (ValueError, IndexError):
+            pass
 
     cap = None
     try:
@@ -581,7 +625,7 @@ def processed_video_ws(ws, video_id):
                 break
 
             # Xử lý frame với detection/OCR
-            result = detect_and_ocr_stable(frame, camera_id="1", source_type="video_upload", video_filename=video_id, camera_name=f"Video_{video_id}")
+            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
 
             # Handle both dict and direct frame results
             if isinstance(result, dict):

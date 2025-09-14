@@ -821,7 +821,7 @@ os.makedirs(FRAMES_FOLDER, exist_ok=True)
 # REMOVED: Vietnamese plate validation function - using original logic
 
 # Gửi dữ liệu biển số tới server Node.js - ORIGINAL VERSION
-def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
+def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
     try:
         current_time = time.time()
         plate_text = plate_data['plate']
@@ -871,9 +871,15 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
         
         # Tạo hash ngắn từ unique_string
         unique_hash = hashlib.md5(unique_string.encode()).hexdigest()[:8]
+        # Process plate text to ensure correct format
+        processed_plate = process_plate_text(plate_data['plate'])
+        if not processed_plate:
+            logger.warning(f"⚠️ Plate text '{plate_data['plate']}' failed format validation, skipping...")
+            return False
+            
         data = {
             "detection_uuid": f"cam_{camera_id}_{unique_hash}",
-            "plate_number": plate_data['plate'],
+            "plate_number": processed_plate,
             "raw_plate_text": plate_data['plate'],
             "camera_id": camera_id or 1,
             "location_id": 1,
@@ -888,7 +894,7 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             "source_type": source_type,
             "video_filename": video_filename,
             "camera_location": camera_location,
-            "camera_name": f"Camera_{camera_id}" if camera_id else "Camera_1",
+            "camera_name": camera_name or (f"Camera_{camera_id}" if camera_id else "Camera_1"),
             "is_whitelist_match": is_whitelist_match,
             "is_blacklist_match": is_blacklist_match,
             "alert_triggered": is_blacklist_match  # Trigger alert for blacklist matches
@@ -897,7 +903,7 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
         # Gửi trực tiếp tới Node.js API (như test files)
         url = "http://localhost:5000/api/plate-recognitions/detected-plates"
         
-        logger.info(f"🔄 Sending plate data to Node.js API: {plate_text}")
+        logger.info(f"🔄 Sending plate data to Node.js API: {processed_plate}")
         logger.info(f"🌐 URL: {url}")
         
         # Kiểm tra Node.js server có chạy không
@@ -918,15 +924,15 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
                 logger.error(f"📄 Response error: {response.text}")
             
             if response.status_code in [200, 201]:
-                logger.info(f"✅ Biển số {plate_text} đã lưu vào database thành công!")
+                logger.info(f"✅ Biển số {processed_plate} đã lưu vào database thành công!")
                 # Cập nhật thời gian gửi cuối cùng
-                sent_plates[plate_text] = current_time
+                sent_plates[processed_plate] = current_time
                 return True
             else:
                 logger.error(f"❌ Lỗi lưu biển số vào database: {response.status_code}")
                 return False
         except requests.exceptions.Timeout:
-            logger.error(f"⏰ Timeout khi gửi biển số {plate_text} tới Node.js API")
+            logger.error(f"⏰ Timeout khi gửi biển số {processed_plate} tới Node.js API")
             return False
         except requests.exceptions.RequestException as e:
             logger.error(f"🌐 Lỗi kết nối tới Node.js API: {e}")
@@ -1692,7 +1698,7 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
     except redis.RedisError as e:
         logger.error(f"Redis error: {str(e)}")
 
-def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None):
+def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
     """Main detection function with enhanced plate detection and CENTERED ROI - OPTIMIZED FOR 20 FPS"""
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
     global frame_count, tracked_objects, skip_frame_count, last_detection_time, last_alpr_call_time
@@ -2002,7 +2008,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                 'plate': processed_text,
                                 'confidence': confidence,
                                 'bbox': detection['bbox']
-                            }, frame_path, camera_id, source_type, video_filename, camera_location
+                            }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
                         )
                         logger.debug(f"🚀 Direct plate '{processed_text}' queued for database (async)")
                         last_detection_time = current_time
@@ -2012,7 +2018,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'plate': processed_text,
                             'confidence': confidence,
                             'bbox': detection['bbox']
-                        }, frame_path, camera_id, source_type, video_filename, camera_location)
+                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
                         logger.debug(f"🚀 Direct plate '{processed_text}' sent to database: {success}")
                         last_detection_time = current_time
                 else:
@@ -2383,7 +2389,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'plate': processed_text,
                             'confidence': conf_val,
                             'bbox': [x1, y1, x2, y2]
-                        }, frame_path, camera_id, source_type, video_filename, camera_location
+                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
                     )
                     logger.debug(f"🚀 NEW plate '{processed_text}' queued for database (async)")
                 else:
@@ -2392,7 +2398,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         'plate': processed_text,
                         'confidence': conf_val,
                         'bbox': [x1, y1, x2, y2]
-                    }, frame_path, camera_id, source_type, video_filename, camera_location)
+                    }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
                 
                 # Đánh dấu chưa gửi để app.py xử lý
                 tracked_objects[final_track_id]['sent_to_db'] = False
@@ -2450,7 +2456,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                 'plate': processed_text,
                                 'confidence': conf_val,
                                 'bbox': [x1, y1, x2, y2]
-                            }, frame_path, camera_id, source_type, video_filename, camera_location
+                            }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
                         )
                         logger.debug(f"🚀 NEW plate '{processed_text}' queued for database (async)")
                     else:
@@ -2459,7 +2465,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'plate': processed_text,
                             'confidence': conf_val,
                             'bbox': [x1, y1, x2, y2]
-                        }, frame_path, camera_id, source_type, video_filename, camera_location)
+                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
                     
                     # Đánh dấu đã gửi
                     obj['sent_to_db'] = True
@@ -2581,12 +2587,12 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         thread_pool.submit(
                             send_plate_to_server, track_id, plate_data, frame_path, 
                             camera_id=camera_id, source_type=source_type, 
-                            video_filename=video_filename, camera_location=camera_location
+                            video_filename=video_filename, camera_location=camera_location, camera_name=camera_name
                         )
                     else:
                         send_plate_to_server(track_id, plate_data, frame_path, 
                                            camera_id=camera_id, source_type=source_type, 
-                                           video_filename=video_filename, camera_location=camera_location)
+                                           video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                     logger.info(f"🎯 INACTIVE track '{track_info[track_id]['plate']}' - waiting for app.py to save")
                 
                 tracks_to_remove.append(track_id)
