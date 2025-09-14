@@ -901,8 +901,15 @@ useEffect(() => {
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
+      console.log("Fetching cameras with token:", token ? "Present" : "Missing");
+      
       const data = await fetchDataFromAPI("/api/cameras/streams/all", token);
+      console.log("API Response:", data);
+      
       const cameraList = data.data?.cameras || [];
+      console.log("Camera list:", cameraList);
+      console.log("Number of cameras:", cameraList.length);
+      
       camerasRef.current = cameraList;
       setCameras(cameraList);
       const positions = cameraList.map((camera) => ({
@@ -918,6 +925,7 @@ useEffect(() => {
       setCameraPositions(positions);
     } catch (error) {
       console.error("Fetch error:", error.message);
+      console.error("Full error:", error);
     } finally {
       setLoading(false);
     }
@@ -951,33 +959,49 @@ useEffect(() => {
   const handleCameraClick = async (cameraId) => {
     if (showConfig || isLoadingStream.current) return;
 
-    const camera = camerasRef.current.find((c) => c.id === cameraId);
+    console.log("handleCameraClick called with cameraId:", cameraId);
+    console.log("camerasRef.current:", camerasRef.current);
+    console.log("camerasRef.current.length:", camerasRef.current.length);
+
+    // Convert cameraId to number for comparison
+    const numericCameraId = parseInt(cameraId);
+    console.log("Numeric camera ID:", numericCameraId);
+    
+    const camera = camerasRef.current.find((c) => c.id === numericCameraId);
+    console.log("Found camera:", camera);
 
     if (!camera) {
+      console.log("Camera not found, fetching cameras...");
       await fetchCameras();
+      console.log("After fetch, camerasRef.current:", camerasRef.current);
+      console.log("After fetch, camerasRef.current.length:", camerasRef.current.length);
+      
       const refreshedCamera = camerasRef.current.find(
-        (c) => c.id === cameraId
+        (c) => c.id === numericCameraId
       );
+      console.log("Refreshed camera:", refreshedCamera);
+      
       if (!refreshedCamera) {
+        console.log("Still no camera found after refresh");
         alert(`Không tìm thấy camera ${cameraId}`);
         return;
       }
     }
 
     // Lưu thông tin camera đã chọn
-    const selectedCamera = camerasRef.current.find((c) => c.id === cameraId);
+    const selectedCamera = camerasRef.current.find((c) => c.id === numericCameraId);
     if (selectedCamera) {
       setSelectedCameraInfo(selectedCamera);
-      setSelectedCameraId(cameraId);
+      setSelectedCameraId(numericCameraId);
     }
 
-    const streamId = `${cameraId}-${Date.now()}`;
+    const streamId = `${numericCameraId}-${Date.now()}`;
 
     isLoadingStream.current = true;
     try {
       const token = localStorage.getItem("token");
       const result = await postData(
-        `/api/cameras/${cameraId}/stream/start`,
+        `/api/cameras/${numericCameraId}/stream/start`,
         { type: "hls" },
         token
       );
@@ -992,7 +1016,7 @@ useEffect(() => {
       setRtspStreams((prev) => ({
         ...prev,
         [streamId]: {
-          cameraId: cameraId,
+          cameraId: numericCameraId,
           url: streamUrl,
         },
       }));
