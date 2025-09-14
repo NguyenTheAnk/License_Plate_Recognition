@@ -636,6 +636,9 @@ ocr_attempts_per_track = {}
 plate_history = {}
 # Track which plates have been saved to database per track_id
 track_saved_plates = {}  # {track_id: plate_text} - chỉ lưu 1 biển số mỗi track
+# STRICT: Chỉ cho phép lưu 1 biển số duy nhất cho mỗi session
+session_saved_plate = None  # Biển số đã lưu trong session hiện tại
+session_save_time = 0  # Thời gian lưu biển số cuối cùng
 
 # Global background subtractor for motion detection
 global_bg_subtractor = None
@@ -1574,6 +1577,22 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
         logger.info(f"✅ NEW PLATE SAVED: '{clean_text}' (conf: {confidence:.3f})")
         return True
 
+def reset_anti_duplicate_system():
+    """Reset the anti-duplicate system"""
+    global plate_history, track_consistency, ocr_attempts_per_track, track_saved_plates, session_saved_plate, session_save_time
+    try:
+        plate_history.clear()
+        track_consistency.clear()
+        ocr_attempts_per_track.clear()
+        track_saved_plates.clear()
+        session_saved_plate = None
+        session_save_time = 0
+        logger.info("✅ Anti-duplicate system reset successfully")
+        return {"success": True, "message": "Anti-duplicate system reset successfully"}
+    except Exception as e:
+        logger.error(f"Error resetting anti-duplicate system: {e}")
+        return {"success": False, "message": f"Error resetting anti-duplicate system: {e}"}
+
 def cleanup_tracked_objects():
     """Enhanced cleanup with consistency tracking"""
     global tracked_objects, plate_history, last_cleanup_time, track_consistency, ocr_attempts_per_track, track_saved_plates
@@ -1977,14 +1996,23 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         detections_np = np.zeros((0, 5), dtype=np.float32)
         logger.info(f"🔍 No detections for tracker")
 
-    # Update tracker
-    tracks = tracker.update(
-        output_results=detections_np,
-        img_info=(original_height, original_width),
-        img_size=(original_height, original_width)
-    )
-    
-    logger.info(f"🔍 Tracker update completed: {len(tracks)} tracks")
+    # SỬ DỤNG BYTETRACKER ĐỂ TRACK ỔN ĐỊNH
+    # Update ByteTracker với detections
+    try:
+        if len(detections_np) > 0:
+            logger.info(f"🔍 ByteTracker input: {len(detections_np)} detections")
+            tracks = byte_tracker.update(
+                output_results=detections_np,
+                img_info=(original_height, original_width),
+                img_size=(original_height, original_width)
+            )
+            logger.info(f"🔍 ByteTracker output: {len(tracks)} tracks")
+        else:
+            tracks = []
+            logger.info(f"🔍 No detections for ByteTracker")
+    except Exception as e:
+        logger.error(f"ByteTracker update failed: {e}")
+        tracks = []
 
     # Find the BEST plate detection only
     best_detection = None
@@ -2005,66 +2033,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 best_conf_val = confidence
                 best_bbox = detection['bbox']
 
-    # CHỈ GỬI BIỂN SỐ TỐT NHẤT - không gửi tất cả detections
-    if best_detection and best_plate_text:
-        # Kiểm tra cooldown để tránh spam
-        current_time = time.time()
-        plate_key = f"best_{best_plate_text}"
-        
-        if plate_key not in plate_history or current_time - plate_history[plate_key] >= 5.0:
-            logger.info(f"🎯 BEST PLATE DETECTION: '{best_plate_text}' (conf: {best_conf_val:.3f})")
-                
-                # Tạo frame path
-            clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", best_plate_text)
-            frame_filename = f"plate_best_{clean_plate_text}_{int(time.time())}.jpg"
-            frame_path = f"static/crops/{frame_filename}"
-                
-            # Lưu crop image - CHỈ CROP BIỂN SỐ TỐT NHẤT
-            try:
-                bbox = best_bbox
-                crop = crop_and_enhance_plate(frame, bbox, enhancement_level="light")
-                    
-                if crop is not None and crop.size > 0:
-                    crop_path = os.path.join(FRAMES_FOLDER, frame_filename)
-                    success_save = cv2.imwrite(crop_path, crop)
-                    if success_save:
-                        logger.info(f"✅ Best crop image saved: {crop_path}")
-                    else:
-                        logger.warning(f"❌ Failed to save best crop image: {crop_path}")
-                else:
-                    logger.warning("Best crop area is empty")
-            except Exception as e:
-                logger.error(f"Error saving best crop image: {e}")
-            
-            # Gửi chỉ biển số tốt nhất tới database
-                if current_time - last_detection_time >= detection_cooldown:
-                    if ENABLE_THREADING:
-                        # Gửi async để không block frame processing
-                        thread_pool.submit(
-                        send_plate_to_server, "1", {  # ID cố định là 1
-                            'plate': best_plate_text,
-                            'confidence': best_conf_val,
-                            'bbox': best_bbox
-                            }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
-                        )
-                        logger.debug(f"🚀 Best plate '{best_plate_text}' queued for database (async)")
-                        last_detection_time = current_time
-                    else:
-                        # Gửi sync như cũ
-                        success = send_plate_to_server("1", {  # ID cố định là 1
-                        'plate': best_plate_text,
-                        'confidence': best_conf_val,
-                        'bbox': best_bbox
-                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
-                    logger.debug(f"🚀 Best plate '{best_plate_text}' sent to database: {success}")
-                    last_detection_time = current_time
-                
-                # Ghi nhận đã gửi để tránh spam
-                plate_history[plate_key] = current_time
-            else:
-                    logger.debug(f"⏱️ Detection throttled - next in {detection_cooldown - (current_time - last_detection_time):.1f}s")
-        else:
-            logger.debug(f"⏭️ Best plate '{best_plate_text}' đã được gửi gần đây, bỏ qua")
+    # CHỈ HIỂN THỊ - KHÔNG GỬI DATABASE Ở ĐÂY
+    # Database sẽ được gửi ở phần BEST TRACK bên dưới
 
     # ROI đã được vẽ ở trên
 
@@ -2102,314 +2072,123 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         
         logger.info(f"✅ BEST DISPLAY: '{best_plate_text}' at ({x1},{y1})-({x2},{y2}) conf: {best_conf_val:.3f}")
 
-    # Gọi FastALPR trên toàn bộ frame nếu chưa có kết quả
-    if not alpr_results:
-        try:
-            roi_frame_rgb = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2RGB)
-            alpr_results = alpr.predict(roi_frame_rgb)
-            logger.info(f"🔍 FastALPR detected {len(alpr_results)} objects in ROI")
-        except Exception as e:
-            logger.error(f"FastALPR prediction failed: {e}")
-            alpr_results = []
-
-    # OPTIMIZED: Use ByteTracker for better object tracking
-    # Prepare detections for ByteTracker
-    detections = []
-    for res in alpr_results:
-        bbox = res.detection.bounding_box
-        x1 = max(int(bbox.x1) + roi_xmin, 0)
-        y1 = max(int(bbox.y1) + roi_ymin, 0)
-        x2 = min(int(bbox.x2) + roi_xmin, original_width)
-        y2 = min(int(bbox.y2) + roi_ymin, original_height)
-        conf = res.detection.confidence or 0.7
-        
-        if is_bbox_in_roi((x1, y1, x2, y2), (roi_xmin, roi_ymin, roi_xmax, roi_ymax)):
-            # ByteTracker expects [x1, y1, x2, y2, conf] format
-            detections.append([x1, y1, x2, y2, conf])
-
-    # Convert to numpy array for ByteTracker
-    if detections:
-        detections_np = np.array(detections, dtype=np.float32)
-        logger.info(f"🔍 Prepared {len(detections)} detections for ByteTracker")
-    else:
-        detections_np = np.zeros((0, 5), dtype=np.float32)
-        logger.info(f"🔍 No detections for ByteTracker")
-
-    # Update ByteTracker - use same format as test1.py
-    try:
-        if len(detections_np) > 0:
-            logger.info(f"🔍 ByteTracker input shape: {detections_np.shape}")
-            logger.info(f"🔍 ByteTracker input sample: {detections_np[0] if len(detections_np) > 0 else 'None'}")
-            
-            # Use same format as test1.py: [x1, y1, x2, y2, conf]
-            tracks = byte_tracker.update(
-                output_results=detections_np,
-                img_info=(original_height, original_width),
-                img_size=(original_height, original_width)
-            )
-            logger.info(f"🔍 ByteTracker output: {len(tracks)} tracks")
-            
-            # If ByteTracker returns 0 tracks but we have detections, try with lower threshold
-            if len(tracks) == 0 and len(detections_np) > 0:
-                logger.warning("⚠️ ByteTracker returned 0 tracks, trying with lower confidence threshold")
-                # Create new tracker with lower threshold
-                temp_tracker = BYTETracker(
-                    track_thresh=0.1,  # Very low threshold
-                    track_buffer=30,
-                    match_thresh=0.5,
-                    frame_rate=30
-                )
-                tracks = temp_tracker.update(
-                    output_results=detections_np,
-                    img_info=(original_height, original_width),
-                    img_size=(original_height, original_width)
-                )
-                logger.info(f"🔍 ByteTracker retry output: {len(tracks)} tracks")
-        else:
-            tracks = []
-    except Exception as e:
-        logger.error(f"ByteTracker update failed: {e}")
-        logger.error(f"ByteTracker input was: {detections_np}")
-        tracks = []
+    # SIMPLIFIED: Không cần ByteTracker phức tạp nữa
+    # Chỉ tìm biển số tốt nhất từ detections hiện có
     
-    # Debug ByteTracker
-    if len(detections) > 0:
-        logger.info(f"🔍 ByteTracker input: {len(detections)} detections, output: {len(tracks)} tracks")
-        if len(tracks) == 0:
-            logger.warning(f"⚠️ ByteTracker received {len(detections)} detections but returned 0 tracks")
-
-    # Process tracker results for vehicles
-    current_track_ids = set()
+    # XỬ LÝ TRACKS TỪ BYTETRACKER - LƯU 1 BIỂN SỐ CHO MỖI TRACK
+    current_time = time.time()
     
-    logger.info(f"🔍 ByteTracker results: {len(tracks)} tracks found")
+    # Xóa các biển số cũ khỏi plate_history (hơn 60 giây)
+    old_plates = []
+    for saved_plate, save_time in plate_history.items():
+        if current_time - save_time > 60.0:  # Xóa sau 60 giây
+            old_plates.append(saved_plate)
     
-    # REMOVED: Immediate tracking logic - using ByteTracker only
+    for old_plate in old_plates:
+        del plate_history[old_plate]
+        logger.debug(f"🗑️ Xóa biển số cũ khỏi history: '{old_plate}'")
     
-    # If no tracks but we have detections, find BEST detection only
-    if len(tracks) == 0 and len(detections) > 0:
-        logger.info(f"🔍 No tracks from ByteTracker, finding BEST detection only")
+    # Xử lý từng track từ ByteTracker
+    for track in tracks:
+        tlwh = track.tlwh
+        track_id = track.track_id
+        x1, y1, w, h = map(int, tlwh)
+        x2, y2 = x1 + w, y1 + h
         
-        # Find the BEST detection with highest confidence
-        best_detection = None
-        best_plate_text = ""
-        best_conf_val = 0
-        best_ocr_conf = 0
+        # Kiểm tra kích thước bbox
+        if (x2 - x1) < 30 or (y2 - y1) < 15:
+            continue
         
-        for i, detection in enumerate(detections):
-            x1, y1, x2, y2, conf = detection
-            
-            # Find best OCR result for this detection
-            plate_text = ""
-            conf_val = 0
-            ocr_conf = 0
-            
-            for res in alpr_results:
-                bbox = res.detection.bounding_box
-                res_x1 = int(bbox.x1) + roi_xmin
-                res_y1 = int(bbox.y1) + roi_ymin
-                
-                if (abs(res_x1 - x1) < 30 and abs(res_y1 - y1) < 30 and 
-                    res.ocr and res.ocr.text):
-                    plate_text = res.ocr.text
-                    ocr_conf = res.ocr.confidence
-                    conf_val = mean(ocr_conf) if isinstance(ocr_conf, list) else ocr_conf
-                    break
-            
-            # Check if this is the best detection so far - LOWERED THRESHOLD
-            if (plate_text and conf_val > 0.4 and len(plate_text) >= 4 and 
-                conf_val > best_conf_val):
-                best_detection = detection
-                best_plate_text = plate_text
-                best_conf_val = conf_val
-                best_ocr_conf = conf_val
+        # Tìm biển số tốt nhất cho track này
+        best_plate_for_track = ""
+        best_conf_for_track = 0
+        best_bbox_for_track = None
         
-        # Process only the BEST detection - CHỈ HIỂN THỊ VÀ LƯU 1 BIỂN SỐ TỐT NHẤT
-        if best_detection and best_plate_text:
-            x1, y1, x2, y2, conf = best_detection
-            track_id = "1"  # Single ID for best detection
+        for detection in plate_detections:
+            det_x1, det_y1, det_x2, det_y2 = detection['bbox']
+            plate_text = detection['plate_text']
+            confidence = detection['confidence']
             
-            processed_text = process_plate_text(best_plate_text)
-            if processed_text:
-                # Check if this plate was already sent recently
-                plate_key = f"best_{processed_text}"
-                if plate_key in plate_history and time.time() - plate_history[plate_key] < 5.0:
-                    logger.info(f"⏭️ Best plate '{processed_text}' đã được gửi gần đây, bỏ qua")
-                else:
-                    logger.info(f"🎯 BEST DETECTION: '{processed_text}' (conf: {best_conf_val:.3f})")
-                    plate_history[plate_key] = time.time()  # Record when sent
+            # Kiểm tra xem detection có nằm trong track không
+            if (abs(det_x1 - x1) < 50 and abs(det_y1 - y1) < 50 and 
+                abs(det_x2 - x2) < 50 and abs(det_y2 - y2) < 50):
                 
-                    # Find the actual plate bounding box from OCR results
-                    plate_x1, plate_y1, plate_x2, plate_y2 = x1, y1, x2, y2
-                    for res in alpr_results:
-                        bbox = res.detection.bounding_box
-                        res_x1 = int(bbox.x1) + roi_xmin
-                        res_y1 = int(bbox.y1) + roi_ymin
-                        res_x2 = int(bbox.x2) + roi_xmin
-                        res_y2 = int(bbox.y2) + roi_ymin
-                        
-                        if (abs(res_x1 - x1) < 30 and abs(res_y1 - y1) < 30 and 
-                            res.ocr and res.ocr.text and res.ocr.text == best_plate_text):
-                            plate_x1, plate_y1, plate_x2, plate_y2 = res_x1, res_y1, res_x2, res_y2
-                            break
-                    
-                    # Save crop directly - CHỈ CROP BIỂN SỐ TỐT NHẤT
-                    clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_text)
-                    crop_filename = f"plate_best_{clean_plate_text}_{int(curr_time)}.jpg"
-                
-                    # Crop chỉ vùng biển số thực tế
-                    bbox = [plate_x1, plate_y1, plate_x2, plate_y2]
-                    crop = crop_and_enhance_plate(frame, bbox, enhancement_level="medium")
-                    
-                    if crop.size > 0:
-                        crop_path = os.path.join(CROPS_FOLDER, crop_filename)
-                        success_save = cv2.imwrite(crop_path, crop)
-                        if success_save:
-                            logger.info(f"✅ Best crop image saved: {crop_path}")
-                            
-                            # Send to database directly - CHỈ GỬI 1 BIỂN SỐ TỐT NHẤT
-                            frame_path = f"static/crops/{crop_filename}"
-                            logger.info(f"🔗 Sending best plate to database: {frame_path}")
-                            if ENABLE_THREADING:
-                                thread_pool.submit(
-                                    send_plate_to_server, track_id, {
-                                        'plate': processed_text,
-                                        'confidence': best_conf_val,
-                                        'bbox': [plate_x1, plate_y1, plate_x2, plate_y2],
-                                        'crop_image_path': frame_path
-                                    }, frame_path, camera_id, source_type, video_filename, camera_location
-                                )
-                                logger.info(f"🚀 Best plate '{processed_text}' queued for database")
-                
-                # Display on frame - CHỈ 1 TEXT: ID: 1 + biển số
-                display_text = f"ID: 1 {processed_text}"
-                text_y = max(plate_y1 - 20, 20)
-                cv2.putText(display_frame, display_text, (plate_x1, text_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                # Draw only the plate bounding box
-                cv2.rectangle(display_frame, (plate_x1, plate_y1), (plate_x2, plate_y2), (0, 255, 0), 2)
-    
-    # CHỈ XỬ LÝ 1 TRACK TỐT NHẤT - không xử lý tất cả tracks
-    if len(tracks) > 0:
-        # Tìm track có biển số tốt nhất
-        best_track = None
-        best_track_plate = ""
-        best_track_conf = 0
-        best_track_bbox = None
+                if plate_text and len(plate_text.strip()) > 0 and confidence > best_conf_for_track:
+                    processed_text = process_plate_text(plate_text)
+                    if processed_text and confidence > MIN_CONFIDENCE:
+                        best_plate_for_track = processed_text
+                        best_conf_for_track = confidence
+                        best_bbox_for_track = detection['bbox']
         
-        for track in tracks:
-            tlwh = track.tlwh
-            current_track_id = track.track_id
-            x1, y1, w, h = map(int, tlwh)
-            x2, y2 = x1 + w, y1 + h
+        # Nếu có biển số hợp lệ cho track này
+        if best_plate_for_track:
+            # Kiểm tra xem track này đã lưu biển số chưa
+            track_key = f"track_{track_id}_{best_plate_for_track}"
             
-            # Check bbox size and ROI
-            if (x2 - x1) < 30 or (y2 - y1) < 15 or not is_bbox_in_roi((x1, y1, x2, y2), (roi_xmin, roi_ymin, roi_xmax, roi_ymax)):
-                continue
-
-            # Tìm kết quả OCR tốt nhất cho track này
-            best_plate_text = ""
-            best_conf_val = 0
-            
-            for res in alpr_results:
-                bbox = res.detection.bounding_box
-                res_x1 = int(bbox.x1) + roi_xmin
-                res_y1 = int(bbox.y1) + roi_ymin
+            if track_key not in plate_history or current_time - plate_history[track_key] >= 30.0:
+                logger.info(f"🎯 TRACK {track_id}: '{best_plate_for_track}' (conf: {best_conf_for_track:.3f}) - SENDING TO DATABASE")
                 
-                if (abs(res_x1 - x1) < 30 and abs(res_y1 - y1) < 30 and 
-                    res.ocr and res.ocr.text):
-                    plate_text = res.ocr.text
-                    conf = res.ocr.confidence
-                    conf_val = mean(conf) if isinstance(conf, list) else conf
-                    
-                    # Chọn kết quả có confidence cao nhất
-                    if conf_val > best_conf_val:
-                        best_plate_text = plate_text
-                        best_conf_val = conf_val
-            
-            # Chỉ xử lý nếu có biển số hợp lệ và confidence cao hơn track hiện tại
-            if best_plate_text and len(best_plate_text.strip()) > 0 and best_conf_val > best_track_conf:
-                processed_text = process_plate_text(best_plate_text)
-                if processed_text and best_conf_val > MIN_CONFIDENCE:
-                    best_track = track
-                    best_track_plate = processed_text
-                    best_track_conf = best_conf_val
-                    best_track_bbox = (x1, y1, x2, y2)
-        
-        # CHỈ XỬ LÝ TRACK TỐT NHẤT
-        if best_track and best_track_plate:
-            tlwh = best_track.tlwh
-            current_track_id = best_track.track_id
-            x1, y1, x2, y2 = best_track_bbox
-            
-            # Kiểm tra cooldown để tránh spam
-            plate_key = f"track_{best_track_plate}"
-            if plate_key not in plate_history or time.time() - plate_history[plate_key] >= 5.0:
-                logger.info(f"🎯 BEST TRACK: '{best_track_plate}' (conf: {best_track_conf:.3f})")
-                
-                # Lưu crop image - CHỈ CROP BIỂN SỐ TỐT NHẤT
-                clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", best_track_plate)
-                crop_filename = f"plate_track_{clean_plate_text}_{int(curr_time)}.jpg"
+                # Lưu crop image
+                clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", best_plate_for_track)
+                crop_filename = f"plate_track_{track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
                 
                 try:
-                    bbox = [x1, y1, x2, y2]
+                    bbox = best_bbox_for_track
                     crop = crop_and_enhance_plate(frame, bbox, enhancement_level="medium")
                     
                     if crop.size > 0:
                         crop_path = os.path.join(CROPS_FOLDER, crop_filename)
                         success_save = cv2.imwrite(crop_path, crop)
                         if success_save:
-                            logger.info(f"✅ Track crop image saved: {crop_path}")
+                            logger.info(f"✅ Track {track_id} crop image saved: {crop_path}")
                             
-                            # Send to database - CHỈ GỬI 1 BIỂN SỐ TỐT NHẤT
+                            # Send to database
                             frame_path = f"static/crops/{crop_filename}"
                             if ENABLE_THREADING:
                                 thread_pool.submit(
-                                    send_plate_to_server, "1", {  # ID cố định là 1
-                                        'plate': best_track_plate,
-                                        'confidence': best_track_conf,
-                                        'bbox': [x1, y1, x2, y2],
+                                    send_plate_to_server, str(track_id), {
+                                        'plate': best_plate_for_track,
+                                        'confidence': best_conf_for_track,
+                                        'bbox': bbox,
                                         'crop_image_path': frame_path
                                     }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
                                 )
-                                logger.info(f"🚀 Best track plate '{best_track_plate}' queued for database")
+                                logger.info(f"🚀 Track {track_id} plate '{best_plate_for_track}' queued for database")
+                            else:
+                                # Gửi sync
+                                success = send_plate_to_server(str(track_id), {
+                                    'plate': best_plate_for_track,
+                                    'confidence': best_conf_for_track,
+                                    'bbox': bbox,
+                                    'crop_image_path': frame_path
+                                }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
+                                logger.info(f"🚀 Track {track_id} plate '{best_plate_for_track}' sent to database: {success}")
                 except Exception as e:
-                    logger.error(f"Error saving track crop image: {e}")
+                    logger.error(f"Error saving track {track_id} crop image: {e}")
                 
-                # Ghi nhận đã gửi để tránh spam
-                plate_history[plate_key] = time.time()
+                # Ghi nhận đã gửi để tránh spam (30 giây cooldown)
+                plate_history[track_key] = current_time
+                logger.info(f"✅ Đã lưu biển số '{best_plate_for_track}' cho track {track_id} - cooldown 30 giây")
+            else:
+                logger.debug(f"⏭️ Track {track_id} plate '{best_plate_for_track}' đã được lưu gần đây, bỏ qua")
             
-            # Display on frame - CHỈ 1 TEXT: ID: 1 + biển số
-            display_text = f"ID: 1 {best_track_plate}"
+            # Display on frame
+            display_text = f"ID: {track_id} {best_plate_for_track}"
             text_y = max(y1 - 20, 20)
             cv2.putText(display_frame, display_text, (x1, text_y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            # Draw only the plate bounding box
+            # Draw bounding box
             cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
             # Add to response arrays
             boxes.append([x1, y1, x2, y2])
-            labels.append(f"Plate: {best_track_plate}")
-            ocr_results.append([best_track_plate, best_track_conf])
+            labels.append(f"Plate: {best_plate_for_track}")
+            ocr_results.append([best_plate_for_track, best_conf_for_track])
             
-            logger.info(f"✅ BEST TRACK DISPLAY: '{best_track_plate}' at ({x1},{y1})-({x2},{y2}) conf: {best_track_conf:.3f}")
+            logger.info(f"✅ TRACK {track_id} DISPLAY: '{best_plate_for_track}' at ({x1},{y1})-({x2},{y2}) conf: {best_conf_for_track:.3f}")
 
-    # Update current track IDs
-    current_track_ids = set()
-    for track in tracks:
-        current_track_ids.add(track.track_id)
-    
-    # Clean up disappeared tracks
-    disappeared_tracks = []
-    for track_id in list(tracked_objects.keys()):
-        if track_id not in current_track_ids:
-            disappeared_tracks.append(track_id)
-    
-    for track_id in disappeared_tracks:
-        if track_id in tracked_objects:
-            tracked_objects[track_id]['disappeared'] += 1
-            if tracked_objects[track_id]['disappeared'] > 30:  # Remove after 30 frames
-                del tracked_objects[track_id]
-                logger.info(f"🗑️ Removed disappeared track: {track_id}")
+    # SIMPLIFIED: Không cần quản lý track IDs phức tạp nữa
+    # Chỉ sử dụng 1 track ID cố định cho tất cả
 
     # Update FPS counter
     if current_time - last_fps_time >= 1.0:
@@ -2417,21 +2196,47 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         fps_counter = 0
         last_fps_time = current_time
 
-    # Return results
-    return {
-        'frame': cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 30])[1].tobytes(),
-        'boxes': boxes,
-        'labels': labels,
-        'ocr_results': ocr_results,
-        'tracked_objects': tracked_objects.copy(),
-        'ids': [1] if boxes else [],
-        'frame_width': original_width,
-        'frame_height': original_height,
-        'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
-        'fps': current_fps,
-        'detection_count': len(boxes),
-        'track_count': len(tracked_objects),
-        'skipped': should_skip
-    }
+    # Return results - với error handling
+    try:
+        # Encode frame với error handling
+        encode_result = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
+        if encode_result[0]:  # Nếu encode thành công
+            frame_bytes = encode_result[1].tobytes()
+        else:
+            logger.error("Failed to encode frame")
+            frame_bytes = b''
+        
+        return {
+            'frame': frame_bytes,
+            'boxes': boxes,
+            'labels': labels,
+            'ocr_results': ocr_results,
+            'tracked_objects': tracked_objects.copy(),
+            'ids': [track.track_id for track in tracks] if tracks else [],
+            'frame_width': original_width,
+            'frame_height': original_height,
+            'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
+            'fps': current_fps,
+            'detection_count': len(boxes),
+            'track_count': len(tracks),
+            'skipped': should_skip
+        }
+    except Exception as e:
+        logger.error(f"Error encoding frame: {e}")
+        return {
+            'frame': b'',
+            'boxes': [],
+            'labels': [],
+            'ocr_results': [],
+            'tracked_objects': {},
+            'ids': [],
+            'frame_width': original_width,
+            'frame_height': original_height,
+            'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
+            'fps': current_fps,
+            'detection_count': 0,
+            'track_count': 0,
+            'skipped': True
+        }
                         
                         
