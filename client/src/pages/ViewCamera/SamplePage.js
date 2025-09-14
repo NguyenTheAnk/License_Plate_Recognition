@@ -1833,20 +1833,7 @@ useEffect(() => {
               >
                 Xóa tất cả
               </Button>
-              <Button
-                variant="contained"
-                component="label"
-                startIcon={<UploadIcon />}
-                sx={{ 
-                  backgroundColor: '#1976d2',
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  fontWeight: 600
-                }}
-              >
-                Tải video
-                <input type="file" accept="video/*" hidden onChange={handleUploadVideo} />
-              </Button>
+             
             </Box>
           </Box>
         </CardContent>
