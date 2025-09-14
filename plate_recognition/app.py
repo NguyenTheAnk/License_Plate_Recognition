@@ -88,7 +88,7 @@ from flask_sock import Sock
 from flask_cors import CORS
 import cv2
 import numpy as np
-from detector import detect_and_ocr_stable, enable_performance_optimizations, get_performance_stats, clear_detection_cache, set_performance_mode, start_redis_server, is_redis_running
+from detector import detect_and_ocr_stable, enable_performance_optimizations, start_redis_server, is_redis_running
 import json
 import logging
 import time
@@ -681,28 +681,28 @@ def processed_video_ws(ws, video_id):
 
 
 # Performance API endpoints
-@app.route('/performance/stats', methods=['GET'])
-def get_performance_stats_api():
-    """Get performance statistics"""
-    try:
-        stats = get_performance_stats()
-        return jsonify(stats)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# @app.route('/performance/stats', methods=['GET'])
+# def get_performance_stats_api():
+#     """Get performance statistics"""
+#     try:
+#         stats = get_performance_stats()
+#         return jsonify(stats)
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
 
-@app.route('/performance/mode', methods=['POST'])
-def set_performance_mode_api():
-    """Set performance mode"""
-    try:
-        data = request.get_json()
-        mode = data.get('mode', 'balanced')
-        success = set_performance_mode(mode)
-        if success:
-            return jsonify({'message': f'Performance mode set to {mode}'})
-        else:
-            return jsonify({'error': 'Failed to set performance mode'}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# @app.route('/performance/mode', methods=['POST'])
+# def set_performance_mode_api():
+#     """Set performance mode"""
+#     try:
+#         data = request.get_json()
+#         mode = data.get('mode', 'balanced')
+#         success = set_performance_mode(mode)
+#         if success:
+#             return jsonify({'message': f'Performance mode set to {mode}'})
+#         else:
+#             return jsonify({'error': 'Failed to set performance mode'}), 400
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
 
 @app.route('/performance/optimize', methods=['POST'])
 def enable_optimizations_api():
@@ -715,17 +715,17 @@ def enable_optimizations_api():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/performance/clear-cache', methods=['POST'])
-def clear_cache_api():
-    """Clear detection cache"""
-    try:
-        success = clear_detection_cache()
-        if success:
-            return jsonify({'message': 'Cache cleared successfully'})
-        else:
-            return jsonify({'error': 'Failed to clear cache'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# @app.route('/performance/clear-cache', methods=['POST'])
+# def clear_cache_api():
+#     """Clear detection cache"""
+#     try:
+#         success = clear_detection_cache()
+#         if success:
+#             return jsonify({'message': 'Cache cleared successfully'})
+#         else:
+#             return jsonify({'error': 'Failed to clear cache'}), 500
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
     # Tạo các thư mục cần thiết
@@ -742,7 +742,7 @@ if __name__ == "__main__":
     
     # Enable performance optimizations
     enable_performance_optimizations(True)
-    set_performance_mode('balanced')
+    # set_performance_mode('balanced')
     
     # Display GPU information
     logger.info("=" * 50)
