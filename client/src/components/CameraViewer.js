@@ -864,6 +864,8 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         flexDirection: "column",
         width: "100%",
         height: "100%",
+        minHeight: "300px", // Chiều cao vừa phải
+        maxHeight: "350px" // Giới hạn chiều cao tối đa
       }}
     >
       <style jsx>{`
@@ -914,6 +916,11 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           position: "relative",
           width: "100%",
           height: "calc(100% - 50px)",
+          minHeight: "250px", // Chiều cao vừa phải cho video
+          maxHeight: "300px", // Giới hạn chiều cao tối đa
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center"
         }}
       >
         <video
