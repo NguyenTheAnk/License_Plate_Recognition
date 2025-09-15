@@ -1939,6 +1939,9 @@ useEffect(() => {
                       overflow: 'hidden',
                       border: '1px solid #e0e0e0',
                       transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                      height: '350px', // Chiều cao vừa phải để phù hợp với layout
+                      display: 'flex',
+                      flexDirection: 'column',
                       '&:hover': {
                         transform: 'translateY(-2px)',
                         boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)'
@@ -1946,7 +1949,13 @@ useEffect(() => {
                     }}>
                       <Box
                 ref={(el) => (resizeRefs.current[streamId] = el)}
-                        sx={{ position: 'relative' }}
+                        sx={{ 
+                          position: 'relative',
+                          flex: 1,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          minHeight: 0 // Quan trọng để flex hoạt động đúng
+                        }}
                 >
                   <CameraViewer
                     camera={{
@@ -1994,9 +2003,12 @@ useEffect(() => {
                     onClose={() => handleCloseCameraFeed(streamId)}
                     recordingTimer={recordingTimers[streamId] || 0}
                     style={{
-                      width: `${size.width}px`,
-                      height: `${size.height}px`,
-                      maxWidth: '100%'
+                      width: '100%',
+                      height: '100%',
+                      maxWidth: '100%',
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column'
                     }}
                   />
                         
