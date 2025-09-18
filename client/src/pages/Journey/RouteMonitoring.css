@@ -1,0 +1,107 @@
+.route-monitoring-container {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+}
+
+.threejs-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: auto;
+  flex: 1;
+}
+
+.control-panel {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 20px;
+  border-radius: 15px;
+  width: 350px;
+  z-index: 100;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  pointer-events: auto;
+}
+
+.control-panel h2 {
+  color: #4CAF50;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #4CAF50;
+  font-size: 1.5rem;
+}
+
+.camera-buttons {
+  margin-bottom: 15px;
+}
+
+.camera-buttons h3 {
+  color: #4CAF50;
+  margin-bottom: 10px;
+  font-size: 1.1rem;
+}
+
+.camera-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.camera-btn {
+  background: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+  white-space: nowrap;
+}
+
+.camera-btn:hover {
+  background: #1976D2;
+}
+
+.instructions {
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.instructions p {
+  margin: 5px 0;
+}
+
+.threejs-container canvas {
+  pointer-events: auto !important;
+  cursor: grab;
+  display: block;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.threejs-container canvas:active {
+  cursor: grabbing;
+}
+
+/* Đảm bảo container map có thể tương tác */
+.route-monitoring-container>div:first-child {
+  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
+}

@@ -1,0 +1,30 @@
+# Python dependencies for OCR and YOLOv5
+opencv-python
+torch
+torchvision
+torchaudio
+paddlepaddle
+paddleocr
+matplotlib
+seaborn
+numpy
+Pillow
+ultralytics
+
+# ONNX Runtime CPU-only version to avoid CUDA/TensorRT issues
+onnxruntime
+fast-alpr
+
+# Additional dependencies
+pandas
+scikit-image
+scipy
+
+# Flask and WebSocket dependencies
+flask
+flask-sock
+flask-cors
+gevent
+gevent-websocket
+simple-websocket
+easyocr

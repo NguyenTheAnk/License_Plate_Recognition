@@ -1,0 +1,90 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gradient Definitions -->
+  <defs>
+    <!-- Main gradient -->
+    <linearGradient id="mainGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#764ba2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f093fb;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Overlay gradient -->
+    <linearGradient id="overlayGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:rgba(0,0,0,0.4);stop-opacity:1" />
+      <stop offset="100%" style="stop-color:rgba(0,0,0,0.6);stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Circle gradient -->
+    <radialGradient id="circleGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:rgba(255,255,255,0.1);stop-opacity:1" />
+      <stop offset="100%" style="stop-color:rgba(255,255,255,0);stop-opacity:1" />
+    </radialGradient>
+    
+    <!-- Grid pattern -->
+    <pattern id="gridPattern" x="0" y="0" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+    </pattern>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1920" height="1080" fill="url(#mainGradient)"/>
+  
+  <!-- Grid overlay -->
+  <rect width="1920" height="1080" fill="url(#gridPattern)"/>
+  
+  <!-- Large decorative circles -->
+  <circle cx="300" cy="200" r="150" fill="url(#circleGradient)" opacity="0.3"/>
+  <circle cx="1600" cy="800" r="200" fill="url(#circleGradient)" opacity="0.2"/>
+  <circle cx="1400" cy="300" r="100" fill="url(#circleGradient)" opacity="0.25"/>
+  <circle cx="500" cy="700" r="120" fill="url(#circleGradient)" opacity="0.15"/>
+  
+  <!-- Abstract geometric shapes -->
+  <polygon points="0,400 200,300 400,400 200,500" fill="rgba(255,255,255,0.05)" opacity="0.6"/>
+  <polygon points="1600,200 1800,100 1920,200 1800,300" fill="rgba(255,255,255,0.05)" opacity="0.6"/>
+  <polygon points="1400,800 1600,700 1800,800 1600,900" fill="rgba(255,255,255,0.05)" opacity="0.6"/>
+  
+  <!-- Floating elements representing license plates -->
+  <g opacity="0.1">
+    <!-- License plate 1 -->
+    <rect x="200" y="150" width="120" height="40" rx="5" fill="rgba(255,255,255,0.8)"/>
+    <text x="260" y="175" text-anchor="middle" fill="#333" font-family="Arial, sans-serif" font-size="12" font-weight="bold">51A-12345</text>
+    
+    <!-- License plate 2 -->
+    <rect x="1600" y="600" width="120" height="40" rx="5" fill="rgba(255,255,255,0.8)"/>
+    <text x="1660" y="625" text-anchor="middle" fill="#333" font-family="Arial, sans-serif" font-size="12" font-weight="bold">30A-67890</text>
+    
+    <!-- License plate 3 -->
+    <rect x="400" y="800" width="120" height="40" rx="5" fill="rgba(255,255,255,0.8)"/>
+    <text x="460" y="825" text-anchor="middle" fill="#333" font-family="Arial, sans-serif" font-size="12" font-weight="bold">29A-11111</text>
+  </g>
+  
+  <!-- Security/technology icons -->
+  <g opacity="0.08">
+    <!-- Camera icon -->
+    <circle cx="800" cy="300" r="30" fill="rgba(255,255,255,0.3)"/>
+    <circle cx="800" cy="300" r="20" fill="rgba(255,255,255,0.5)"/>
+    <circle cx="800" cy="300" r="10" fill="rgba(255,255,255,0.7)"/>
+    
+    <!-- Shield icon -->
+    <path d="M 1200 600 L 1180 580 L 1200 560 L 1220 580 Z" fill="rgba(255,255,255,0.3)"/>
+    <path d="M 1200 600 L 1180 620 L 1200 640 L 1220 620 Z" fill="rgba(255,255,255,0.3)"/>
+    
+    <!-- Database icon -->
+    <ellipse cx="600" cy="600" rx="40" ry="15" fill="rgba(255,255,255,0.3)"/>
+    <ellipse cx="600" cy="600" rx="30" ry="10" fill="rgba(255,255,255,0.5)"/>
+  </g>
+  
+  <!-- Animated wave effect -->
+  <path d="M 0 900 Q 480 850 960 900 T 1920 900 L 1920 1080 L 0 1080 Z" fill="rgba(255,255,255,0.05)" opacity="0.3"/>
+  <path d="M 0 950 Q 480 900 960 950 T 1920 950 L 1920 1080 L 0 1080 Z" fill="rgba(255,255,255,0.03)" opacity="0.2"/>
+  
+  <!-- Overlay for better text readability -->
+  <rect width="1920" height="1080" fill="url(#overlayGradient)"/>
+  
+  <!-- Subtle noise texture -->
+  <filter id="noise">
+    <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/>
+    <feColorMatrix type="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 0.1 0"/>
+  </filter>
+  <rect width="1920" height="1080" filter="url(#noise)" opacity="0.02"/>
+</svg> 

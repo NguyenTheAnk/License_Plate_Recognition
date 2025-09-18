@@ -1,0 +1,61 @@
+# Core dependencies for License Plate Recognition System
+# Python 3.11 compatible
+
+# Web Framework
+Flask==2.3.3
+Flask-Sock==0.5.1
+Flask-CORS==4.0.0
+
+# Computer Vision and Image Processing
+opencv-python==4.8.1.78
+opencv-contrib-python==4.8.1.78
+numpy==1.24.3
+Pillow==10.0.1
+
+# Machine Learning and AI
+fast-alpr==0.3.0
+fast-plate-ocr==1.0.2
+open-image-models==0.1.0
+onnxruntime==1.16.3
+onnxruntime-gpu==1.16.3
+
+# Object Tracking
+cjm-byte-track==0.1.0
+
+# Data Processing
+pandas==2.0.3
+scikit-learn==1.3.0
+
+# Database and Caching
+redis==5.0.1
+psutil==5.9.6
+
+# HTTP Requests
+requests==2.31.0
+
+# Image Enhancement and Augmentation
+albumentations==1.3.1
+
+# Progress Bars and CLI
+tqdm==4.66.1
+rich==13.7.0
+click==8.1.7
+
+# Configuration and Data Validation
+pydantic==2.4.2
+PyYAML==6.0.1
+
+# Utilities
+pathlib2==2.3.7
+typing-extensions==4.7.1
+
+# Optional: TensorRT for GPU acceleration (uncomment if needed)
+# tensorrt==8.6.1
+
+# Optional: PyTorch for additional ML capabilities (uncomment if needed)
+# torch==2.0.1
+# torchvision==0.15.2
+
+# Development and Testing (optional)
+# pytest==7.4.2
+# pytest-cov==4.1.0
