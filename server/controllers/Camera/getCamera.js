@@ -464,23 +464,15 @@ const getCamerasForRouteMonitoring = async (req, res) => {
             ORDER BY l.Ox, l.Oy
         `);
 
-        // Nhóm camera theo vị trí và chỉ lấy camera đầu tiên cho mỗi vị trí
-        const camerasByLocation = {};
-        cameras.forEach(camera => {
-            const locationKey = `${camera.Ox}_${camera.Oy}`;
-            if (!camerasByLocation[locationKey]) {
-                camerasByLocation[locationKey] = {
-                    ...camera,
-                    // Chuyển đổi tọa độ để phù hợp với bản đồ 3D
-                    mapX: camera.Ox,
-                    mapY: camera.Oy,
-                    // Tên hiển thị trên bản đồ
-                    displayName: camera.name || camera.code || `Camera ${camera.id}`
-                };
-            }
-        });
-
-        const activeCameras = Object.values(camerasByLocation);
+        // Chuyển đổi tất cả camera thành format phù hợp với bản đồ 3D
+        const activeCameras = cameras.map(camera => ({
+            ...camera,
+            // Chuyển đổi tọa độ để phù hợp với bản đồ 3D
+            mapX: camera.Ox,
+            mapY: camera.Oy,
+            // Tên hiển thị trên bản đồ
+            displayName: camera.name || camera.code || `Camera ${camera.id}`
+        }));
 
         try {
             await connection.execute(

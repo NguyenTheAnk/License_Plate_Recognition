@@ -34,12 +34,16 @@ const RouteMonitoring = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedPlateRoute, setSelectedPlateRoute] = useState(null);
+  const [showTimeTexts, setShowTimeTexts] = useState(true);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   // Biến để lưu trạng thái camera thực tế từ API
   const cameraStateRef = useRef({
     allCameras: [],
     activeCameras: []
   });
+
 
   // Vị trí các thành phố (cần di chuyển ra ngoài để có thể sử dụng)
   const cities = {
@@ -327,7 +331,23 @@ const RouteMonitoring = () => {
     setIsSearching(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/plates/search-route?plate_number=${encodeURIComponent(plateNumber)}`, {
+
+      // Xây dựng URL với tham số thời gian
+      const params = new URLSearchParams({
+        plate_number: plateNumber
+      });
+
+      // Thêm start_date nếu có
+      if (startDate) {
+        params.append('start_date', startDate);
+      }
+
+      // Thêm end_date nếu có
+      if (endDate) {
+        params.append('end_date', endDate);
+      }
+
+      const response = await fetch(`/api/plate-routes/search-route?${params.toString()}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -342,10 +362,11 @@ const RouteMonitoring = () => {
       const data = await response.json();
 
       if (data.success) {
+
         setSearchResults(data.data);
         // Tự động vẽ đường đi nếu có kết quả
         if (data.data.length > 0) {
-          drawPlateRoute(data.data, plateNumber);
+          drawPlateRoute(data.data, plateNumber, data.orderedCameras);
         }
       } else {
         console.error('API error:', data.message);
@@ -447,34 +468,84 @@ const RouteMonitoring = () => {
   };
 
   // Hàm vẽ đường đi của biển số xe
-  const drawPlateRoute = (detections, plateNumber) => {
+  const drawPlateRoute = (detections, plateNumber, orderedCameras = null) => {
     if (!sceneRef.current || detections.length === 0) return;
 
     // Xóa đường đi cũ nếu có
     clearPlateRoute();
 
-    // Sắp xếp theo thời gian
-    const sortedDetections = detections.sort((a, b) => new Date(a.detected_at) - new Date(b.detected_at));
+    // Sử dụng orderedCameras từ backend nếu có, nếu không thì tự tính toán
+    let routePoints = [];
 
-    // Lấy danh sách camera từ detections
-    const cameraIds = [...new Set(sortedDetections.map(d => d.camera_id))];
+    if (orderedCameras && orderedCameras.length > 0) {
 
-    // Tìm vị trí camera trên map
-    const routePoints = [];
-    cameraIds.forEach(cameraId => {
-      const camera = activeCamerasRef.current.find(cam => cam.cameraData.id === parseInt(cameraId));
-      if (camera) {
-        routePoints.push({
-          x: camera.cameraData.x,
-          y: camera.cameraData.y,
-          cameraId: cameraId,
-          cameraName: camera.cameraData.name,
-          detections: sortedDetections.filter(d => d.camera_id === cameraId)
-        });
-      }
-    });
+      // Sử dụng dữ liệu camera đã được sắp xếp từ backend
+      orderedCameras.forEach(cameraData => {
+        const camera = activeCamerasRef.current.find(cam => cam.cameraData.id === parseInt(cameraData.camera_id));
+        if (camera) {
+          routePoints.push({
+            x: camera.cameraData.x,
+            y: camera.cameraData.y,
+            cameraId: cameraData.camera_id,
+            cameraName: cameraData.camera_name,
+            detections: cameraData.detections,
+            firstDetectedAt: cameraData.first_detected_at,
+            detectionCount: cameraData.detection_count
+          });
+        } else {
+          console.warn(`❌ Camera với ID ${cameraData.camera_id} (${cameraData.camera_name}) không tìm thấy trên map. Có thể camera chưa có tọa độ hoặc chưa được load.`);
 
-    if (routePoints.length === 0) return;
+          // Thử tìm camera trong allCameras
+          const allCamera = cameraStateRef.current.allCameras.find(cam => cam.id === parseInt(cameraData.camera_id));
+          if (allCamera) {
+            console.log(`🔍 Found camera in allCameras:`, allCamera);
+            if (allCamera.mapX && allCamera.mapY) {
+              console.log(`📍 Camera has coordinates: (${allCamera.mapX}, ${allCamera.mapY})`);
+              // Thêm camera với tọa độ từ allCameras
+              routePoints.push({
+                x: allCamera.mapX,
+                y: allCamera.mapY,
+                cameraId: cameraData.camera_id,
+                cameraName: cameraData.camera_name,
+                detections: cameraData.detections,
+                firstDetectedAt: cameraData.first_detected_at,
+                detectionCount: cameraData.detection_count
+              });
+            } else {
+              console.warn(`⚠️ Camera ${cameraData.camera_id} không có tọa độ map (mapX: ${allCamera.mapX}, mapY: ${allCamera.mapY})`);
+            }
+          } else {
+            console.error(`🚫 Camera ${cameraData.camera_id} không tồn tại trong cả activeCameras và allCameras`);
+          }
+        }
+      });
+    } else {
+      console.log('⚠️ No ordered cameras from backend, calculating manually...');
+
+      // Fallback: tự tính toán như cũ
+      const sortedDetections = detections.sort((a, b) => new Date(a.detected_at) - new Date(b.detected_at));
+      const cameraIds = [...new Set(sortedDetections.map(d => d.camera_id))];
+
+      cameraIds.forEach(cameraId => {
+        const camera = activeCamerasRef.current.find(cam => cam.cameraData.id === parseInt(cameraId));
+        if (camera) {
+          routePoints.push({
+            x: camera.cameraData.x,
+            y: camera.cameraData.y,
+            cameraId: cameraId,
+            cameraName: camera.cameraData.name,
+            detections: sortedDetections.filter(d => d.camera_id === cameraId)
+          });
+        } else {
+          console.warn(`Camera với ID ${cameraId} không tìm thấy trên map.`);
+        }
+      });
+    }
+
+    if (routePoints.length === 0) {
+      console.error('❌ No valid route points found!');
+      return;
+    }
 
     // Tạo đường đi theo các con đường thực tế
     const allPathPoints = [];
@@ -523,7 +594,7 @@ const RouteMonitoring = () => {
     routeLine.userData = {
       type: 'plateRoute',
       plateNumber: plateNumber,
-      detections: sortedDetections
+      detections: detections
     };
 
     sceneRef.current.add(routeLine);
@@ -620,20 +691,50 @@ const RouteMonitoring = () => {
           vehicleType: detection.detected_vehicle_type || 'Unknown'
         }));
 
-        const infoText = `📍 Điểm ${index + 1}: ${point.cameraName}\n` +
+        const firstDetection = point.detections[0];
+        const lastDetection = point.detections[point.detections.length - 1];
+        const avgConfidence = (point.detections.reduce((sum, d) => sum + d.confidence_score, 0) / point.detections.length * 100).toFixed(1);
+
+        let infoText = `📍 Điểm ${index + 1}: ${point.cameraName}\n` +
           `🚗 Biển số: ${plateNumber}\n` +
           `📊 Số lần phát hiện: ${point.detections.length}\n` +
-          `⏰ Thời gian: ${new Date(point.detections[0].detected_at).toLocaleString()}\n` +
-          `🎯 Độ tin cậy: ${(point.detections[0].confidence_score * 100).toFixed(1)}%\n` +
-          `🚙 Loại xe: ${point.detections[0].detected_vehicle_type || 'Unknown'}`;
+          `⏰ Thời gian đầu: ${new Date(firstDetection.detected_at).toLocaleString()}\n`;
+
+        if (point.detections.length > 1) {
+          infoText += `⏰ Thời gian cuối: ${new Date(lastDetection.detected_at).toLocaleString()}\n`;
+        }
+
+        infoText += `🎯 Độ tin cậy TB: ${avgConfidence}%\n` +
+          `🚙 Loại xe: ${firstDetection.detected_vehicle_type || 'Unknown'}`;
+
+        if (point.detectionCount && point.firstDetectedAt) {
+          infoText += `\n🕒 Lần đầu phát hiện: ${new Date(point.firstDetectedAt).toLocaleString()}`;
+        }
 
         alert(infoText);
       };
+
+      // Tạo text hiển thị thời gian phía trên camera (nếu được bật)
+      const timeText = showTimeTexts ? createTimeText(
+        point.cameraName,
+        point.detections[0].detected_at,
+        point.detections.length,
+        point.x, // X coordinate
+        point.y  // Z coordinate (tọa độ thứ 2)
+      ) : null;
+
+      if (timeText) {
+      } else {
+        console.log(`❌ Failed to create time text for camera ${point.cameraId}`);
+      }
 
       // Thêm tất cả marker vào scene
       sceneRef.current.add(marker);
       sceneRef.current.add(glowMarker);
       sceneRef.current.add(numberMarker);
+      if (timeText) {
+        sceneRef.current.add(timeText);
+      }
     });
 
     // Lưu route để có thể xóa sau
@@ -642,6 +743,13 @@ const RouteMonitoring = () => {
       markers: sceneRef.current.children.filter(child =>
         child.userData.type === 'routeMarker'
       )
+    });
+
+    // Debug: Kiểm tra tất cả time text trong scene
+    const timeTextsInScene = sceneRef.current.children.filter(child =>
+      child.userData.type === 'routeTimeText'
+    );
+    timeTextsInScene.forEach((text, index) => {
     });
 
     // Bay đến điểm đầu tiên
@@ -653,17 +761,101 @@ const RouteMonitoring = () => {
     }
   };
 
+  // Hàm tạo text hiển thị thời gian phía trên camera
+  const createTimeText = (cameraName, detectedAt, detectionCount, x, z) => {
+    try {
+      // Format thời gian
+      const date = new Date(detectedAt);
+      const timeStr = date.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+
+      // Tạo text hiển thị (rút gọn tên camera nếu quá dài)
+      const shortCameraName = cameraName.length > 15 ? cameraName.substring(0, 15) + '...' : cameraName;
+      const displayText = `${shortCameraName}\n${timeStr}\n(${detectionCount} lần)`;
+
+      // Tạo canvas cho text
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+
+      // Kích thước canvas dựa trên text
+      const fontSize = 16;
+      const lineHeight = fontSize + 4;
+      const lines = displayText.split('\n');
+      const maxLineWidth = Math.max(...lines.map(line => line.length * fontSize * 0.6));
+
+      canvas.width = maxLineWidth + 20;
+      canvas.height = lines.length * lineHeight + 10;
+
+      // Vẽ background
+      context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Vẽ border
+      context.strokeStyle = '#00ff00';
+      context.lineWidth = 2;
+      context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+
+      // Vẽ text
+      context.fillStyle = '#ffffff';
+      context.font = `bold ${fontSize}px Arial`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+
+      lines.forEach((line, index) => {
+        const yPos = (index + 1) * lineHeight - lineHeight / 2 + 5;
+        context.fillText(line, canvas.width / 2, yPos);
+      });
+
+      // Tạo texture từ canvas
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+
+      // Tạo material
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 0.9
+      });
+
+      // Tạo sprite (giống như createTextAtPosition)
+      const sprite = new THREE.Sprite(material);
+      sprite.position.set(x, 6, z); // Y = 6 để cao hơn camera, Z = tọa độ thứ 2
+      sprite.scale.set(canvas.width / 10, canvas.height / 5, 1); // Giống như createTextAtPosition
+      sprite.center.set(0.5, 0.5);
+
+      // Lưu thông tin vào userData
+      sprite.userData = {
+        type: 'routeTimeText',
+        cameraName: cameraName,
+        detectedAt: detectedAt,
+        detectionCount: detectionCount
+      };
+
+      return sprite;
+    } catch (error) {
+      console.error(`❌ Error creating time text for ${cameraName}:`, error);
+      return null;
+    }
+  };
+
   // Hàm xóa đường đi biển số xe
   const clearPlateRoute = () => {
     if (!sceneRef.current) return;
 
-    // Xóa đường đi cũ
+    // Xóa đường đi cũ (bao gồm cả time text)
     const objectsToRemove = sceneRef.current.children.filter(child =>
       child.userData.type === 'plateRoute' ||
       child.userData.type === 'plateRouteGlow' ||
       child.userData.type === 'routeMarker' ||
       child.userData.type === 'routeMarkerGlow' ||
-      child.userData.type === 'routeMarkerNumber'
+      child.userData.type === 'routeMarkerNumber' ||
+      child.userData.type === 'routeTimeText'
     );
 
     objectsToRemove.forEach(obj => {
@@ -1635,6 +1827,14 @@ const RouteMonitoring = () => {
     }
   }, [selectedCamera?.id]);
 
+  // Vẽ lại route khi showTimeTexts thay đổi
+  useEffect(() => {
+    if (searchResults.length > 0 && searchPlateNumber) {
+      // Vẽ lại route với cài đặt hiển thị thời gian mới
+      drawPlateRoute(searchResults, searchPlateNumber);
+    }
+  }, [showTimeTexts]);
+
   // Action bar cho CameraViewer sử dụng CameraActionBar
   const actionBar = ({ startRecognition, stopRecognition, isRecognizing, isProcessing, onForcePlay }) => (
     <CameraActionBar
@@ -1680,7 +1880,91 @@ const RouteMonitoring = () => {
           <h2 style={{ margin: '0 0 15px 0', fontSize: '18px' }}>Giám sát theo lộ trình</h2>
 
           <div className="plate-search-section" style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '4px' }}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '14px' }}>Tìm kiếm biển số xe</h3>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#000' }}>Tìm kiếm biển số xe</h3>
+
+            {/* Date range inputs */}
+            <div style={{ marginBottom: '10px' }}>
+              <label style={{ fontSize: '12px', color: '#000', marginBottom: '5px', display: 'block' }}>
+                Khoảng thời gian:
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', color: '#666', display: 'block', marginBottom: '2px' }}>
+                    Từ ngày:
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      backgroundColor: 'white'
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', color: '#666', display: 'block', marginBottom: '2px' }}>
+                    Đến ngày:
+                  </label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      backgroundColor: 'white'
+                    }}
+                  />
+                </div>
+              </div>
+              <div style={{ marginTop: '5px', display: 'flex', gap: '5px' }}>
+                <button
+                  onClick={() => {
+                    setStartDate('');
+                    setEndDate('');
+                  }}
+                  style={{
+                    padding: '4px 8px',
+                    backgroundColor: '#f5f5f5',
+                    color: '#666',
+                    border: '1px solid #ddd',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    fontSize: '11px'
+                  }}
+                >
+                  Xóa bộ lọc
+                </button>
+                <button
+                  onClick={() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                    setStartDate(sevenDaysAgo);
+                    setEndDate(today);
+                  }}
+                  style={{
+                    padding: '4px 8px',
+                    backgroundColor: '#e3f2fd',
+                    color: '#1976d2',
+                    border: '1px solid #bbdefb',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    fontSize: '11px'
+                  }}
+                >
+                  7 ngày qua
+                </button>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
               <input
                 type="text"
@@ -1739,16 +2023,42 @@ const RouteMonitoring = () => {
                 </p>
                 <p style={{ margin: '5px 0' }}>Biển số: <strong>{searchPlateNumber}</strong></p>
                 <p style={{ margin: '5px 0' }}>
+                  📅 Khoảng thời gian: <strong>
+                    {startDate && endDate
+                      ? `Từ ${new Date(startDate).toLocaleDateString('vi-VN')} đến ${new Date(endDate).toLocaleDateString('vi-VN')}`
+                      : startDate
+                        ? `Từ ${new Date(startDate).toLocaleDateString('vi-VN')}`
+                        : endDate
+                          ? `Đến ${new Date(endDate).toLocaleDateString('vi-VN')}`
+                          : 'Tất cả thời gian'
+                    }
+                  </strong>
+                </p>
+                <p style={{ margin: '5px 0' }}>
                   Thời gian: {new Date(searchResults[0].detected_at).toLocaleString()} - {new Date(searchResults[searchResults.length - 1].detected_at).toLocaleString()}
                 </p>
                 <p style={{ margin: '5px 0' }}>
                   Camera đã đi qua: {[...new Set(searchResults.map(r => r.camera_id))].length} camera
                 </p>
-                <p style={{ margin: '5px 0', fontSize: '10px', color: '#888' }}>
-                  💡 Click vào các điểm màu cam trên map để xem chi tiết
+
+                <p style={{ margin: '5px 0', fontSize: '10px', color: '#4CAF50' }}>
+                  🗺️ Đường đi được vẽ theo thứ tự thời gian phát hiện
                 </p>
               </div>
             )}
+
+            {/* Tùy chọn hiển thị thời gian */}
+            <div style={{ marginTop: '10px', padding: '8px', backgroundColor: '#f9f9f9', borderRadius: '4px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={showTimeTexts}
+                  onChange={(e) => setShowTimeTexts(e.target.checked)}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ color: '#000' }}>Hiển thị thời gian trên camera</span>
+              </label>
+            </div>
           </div>
 
           <div className="camera-controls">
@@ -1798,7 +2108,6 @@ const RouteMonitoring = () => {
             <p style={{ margin: '5px 0' }}>↻ Xoay camera: Giữ chuột phải + kéo</p>
             <p style={{ margin: '5px 0' }}>Zoom: Cuộn chuột</p>
             <p style={{ margin: '5px 0', fontWeight: 'bold', color: '#2196F3' }}>📹 Click vào camera để xem</p>
-            <p style={{ margin: '5px 0', fontWeight: 'bold', color: '#ff6b35' }}>🔶 Click vào điểm cam để xem chi tiết hành trình</p>
           </div>
         </div>
       </div>

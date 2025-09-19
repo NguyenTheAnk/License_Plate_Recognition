@@ -99,3 +99,4 @@ Các trường quan trọng:
 - Cần có dữ liệu trong bảng `license_plate_detections`
 - Camera phải có tọa độ `map_x`, `map_y` để hiển thị trên map
 - Hệ thống tự động sắp xếp theo thời gian phát hiện
+

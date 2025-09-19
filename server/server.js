@@ -22,7 +22,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 app.use('/api/cameras', require('./routes/camera')); // Sửa thành /api/cameras
 app.use('/api/videos', require('./routes/videoRoutes'));
-app.use('/api/plates', require('./routes/plateRoute')); // Route cho tìm kiếm hành trình biển số xe
+app.use('/api/plate-routes', require('./routes/plateRoute')); // Route cho tìm kiếm hành trình biển số xe
 // Plate recognition and uploads
 app.use('/api', require('./routes/upload'));
 app.use('/streams', express.static(path.join(__dirname, '../public/streams')));

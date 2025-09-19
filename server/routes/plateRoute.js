@@ -10,3 +10,4 @@ router.get('/search-route', authMiddleware, searchPlateRoute);
 router.get('/route-stats', authMiddleware, getPlateRouteStats);
 
 module.exports = router;
+
