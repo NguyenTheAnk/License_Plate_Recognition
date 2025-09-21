@@ -472,6 +472,39 @@ def cleanup_system():
         logger.error(f"Error in cleanup: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/persistent-displays', methods=['GET'])
+def get_persistent_displays_api():
+    """Get current persistent displays"""
+    try:
+        from detector import get_persistent_displays
+        result = get_persistent_displays()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting persistent displays: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/persistent-displays/clear', methods=['POST'])
+def clear_persistent_displays_api():
+    """Clear all persistent displays"""
+    try:
+        from detector import clear_persistent_displays
+        result = clear_persistent_displays()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error clearing persistent displays: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/enhanced-plate-history', methods=['GET'])
+def get_enhanced_plate_history_api():
+    """Get enhanced plate history with similarity information"""
+    try:
+        from detector import get_enhanced_plate_history
+        result = get_enhanced_plate_history()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting enhanced plate history: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # SIMPLIFIED: Removed queue-related endpoints
 # Detector.py now sends directly to Node.js API
 
