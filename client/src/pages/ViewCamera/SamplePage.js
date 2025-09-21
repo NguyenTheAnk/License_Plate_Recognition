@@ -57,6 +57,7 @@ const SamplePage = () => {
   const [showConfig, setShowConfig] = useState(false);
   const [selectedCameraId, setSelectedCameraId] = useState(null);
   const [selectedCameraInfo, setSelectedCameraInfo] = useState(null); // Lưu thông tin camera đã chọn
+  const [streamCameraInfo, setStreamCameraInfo] = useState({}); // Lưu thông tin camera cho từng stream
   const [loading, setLoading] = useState(true);
   const [recording, setRecording] = useState({}); // Thêm state cho ghi hình
   const [muted, setMuted] = useState({}); // State cho âm thanh
@@ -131,15 +132,7 @@ const SamplePage = () => {
   const [searchError, setSearchError] = useState(null);
   
   
-  // Options cho các dropdown
-  const detectionStatusOptions = [
-    { value: '', label: 'Tất cả trạng thái', color: 'default' },
-    { value: 'detected', label: 'Đã phát hiện', color: 'success' },
-    { value: 'verified', label: 'Đã xác minh', color: 'info' },
-    { value: 'pending', label: 'Chờ xử lý', color: 'warning' },
-    { value: 'error', label: 'Lỗi', color: 'error' }
-  ];
-
+ 
   const verificationStatusOptions = [
     { value: '', label: 'Tất cả', color: 'default' },
     { value: 'verified', label: 'Đã xác minh', color: 'success' },
@@ -766,17 +759,7 @@ const getRelativeTime = (dateString) => {
   return `${Math.floor(diffDays / 7)} tuần trước`;
 };
 
-// Function để get vehicle type label
-const getVehicleTypeLabel = (type) => {
-  const typeLabels = {
-    'motorcycle': '🏍️ Xe máy',
-    'car': '🚗 Ô tô',
-    'truck': '🚛 Xe tải',
-    'bus': '🚌 Xe buýt',
-    'other': '🚙 Khác'
-  };
-  return typeLabels[type] || type;
-};
+
 useEffect(() => {
     // Tạo global function để CameraViewer có thể gọi
     window.refreshDetectionResults = () => {
@@ -931,31 +914,7 @@ useEffect(() => {
     }
   };
 
-  const loadUploadedVideos = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetchDataFromAPI("/api/videos/list-videos", token);
-      if (response.success) {
-        const videos = response.data.reduce((acc, video) => {
-          const streamId = `upload-${video.id}`;
-          acc[streamId] = { url: video.url, name: video.name };
-          return acc;
-        }, {});
-        setUploadedVideos(videos);
-        setSelectedStreams(Object.keys(videos));
-        Object.keys(videos).forEach((streamId) => {
-          setCameraSizes((prev) => ({
-            ...prev,
-            [streamId]: { width: 400, height: 250 },
-          }));
-        });
-        setVideos(response.data);
-      }
-    } catch (error) {
-      console.error("Error loading uploaded videos:", error);
-    }
-  };
-
+  
   const handleCameraClick = async (cameraId) => {
     if (showConfig || isLoadingStream.current) return;
 
@@ -996,6 +955,14 @@ useEffect(() => {
     }
 
     const streamId = `${numericCameraId}-${Date.now()}`;
+    
+    // Lưu thông tin camera riêng cho stream này
+    if (selectedCamera) {
+      setStreamCameraInfo(prev => ({
+        ...prev,
+        [streamId]: selectedCamera
+      }));
+    }
 
     isLoadingStream.current = true;
     try {
@@ -1051,11 +1018,19 @@ useEffect(() => {
     if (selectedStreams.length <= 1) {
       setSelectedCameraInfo(null);
       setSelectedCameraId(null);
+      setStreamCameraInfo({});
     }
     setUploadedVideos((prev) => {
       const newVideos = { ...prev };
       delete newVideos[streamId];
       return newVideos;
+    });
+    
+    // Xóa thông tin camera cho stream này
+    setStreamCameraInfo((prev) => {
+      const newStreamCameraInfo = { ...prev };
+      delete newStreamCameraInfo[streamId];
+      return newStreamCameraInfo;
     });
   };
 
@@ -1402,46 +1377,7 @@ useEffect(() => {
     document.addEventListener("mouseup", onMouseUp);
   };
 
-  const handleUploadVideo = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("video", file);
-
-    try {
-      const token = localStorage.getItem("token");
-      const response = await postData(
-        "/api/videos/upload-video",
-        formData,
-        token,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
-      if (response.success) {
-        const streamId = `upload-${response.data.id}`;
-        const fullUrl = `${window.location.origin}${response.data.url}`;
-        setUploadedVideos((prev) => ({
-          ...prev,
-          [streamId]: {
-            url: fullUrl,
-            name: file.name,
-          },
-        }));
-        setSelectedStreams((prev) => [...prev, streamId]);
-        setCameraSizes((prev) => ({
-          ...prev,
-          [streamId]: { width: 400, height: 250 },
-        }));
-      } else {
-        alert(response.message || "Tải video thất bại");
-      }
-    } catch (error) {
-      console.error("Error uploading video:", error);
-      alert("Tải video thất bại: " + (error.message || "Lỗi không xác định"));
-    }
-  };
+  
 
   // Hàm xử lý chọn nguồn video từ nút trong CameraActionBar
   const handleSelectSource = (streamId) => {
@@ -1484,6 +1420,20 @@ useEffect(() => {
               name: file.name,
             },
           }));
+          
+          // Lưu thông tin camera cho video upload (giữ nguyên camera gốc của stream này)
+          // Không cập nhật từ selectedCameraInfo để tránh thay đổi tên camera của video khác
+          if (!streamCameraInfo[streamId]) {
+            // Chỉ lưu thông tin camera nếu stream này chưa có
+            const cameraId = streamId.split("-")[1];
+            const defaultCamera = cameras.find((c) => c.id === parseInt(cameraId));
+            if (defaultCamera) {
+              setStreamCameraInfo(prev => ({
+                ...prev,
+                [streamId]: defaultCamera
+              }));
+            }
+          }
           
           // Xóa rtspStreams cho streamId này để tránh xung đột
           if (rtspStreams[streamId]) {
@@ -1908,15 +1858,16 @@ useEffect(() => {
             const isUploadedVideo = streamId.startsWith("upload-") || !!uploadedVideos[streamId];
             const cameraId = streamInfo.cameraId || streamId.split("-")[1];
             
-            // Sử dụng thông tin camera đã chọn từ sidebar
-            const originalCamera = selectedCameraInfo || cameras.find((c) => c.id === cameraId);
+            // Sử dụng thông tin camera riêng cho từng stream
+            const streamCamera = streamCameraInfo[streamId];
+            const originalCamera = streamCamera || cameras.find((c) => c.id === cameraId);
             const camera = originalCamera || {
               id: cameraId,
               name: `Camera ${cameraId}`,
             };
             
-            // Luôn giữ tên camera gốc đã chọn từ sidebar
-            const originalCameraName = selectedCameraInfo ? selectedCameraInfo.name : (originalCamera ? originalCamera.name : `Camera ${cameraId}`);
+            // Luôn giữ tên camera gốc đã chọn cho stream này
+            const originalCameraName = streamCamera ? streamCamera.name : (originalCamera ? originalCamera.name : `Camera ${cameraId}`);
             
             // Debug log để kiểm tra camera
             console.log('Camera debug:', {
@@ -1924,7 +1875,7 @@ useEffect(() => {
               streamInfo,
               cameraId,
               camera,
-              selectedCameraInfo,
+              streamCamera,
               originalCameraName,
               isUploadedVideo,
               uploadedVideos: uploadedVideos[streamId],
