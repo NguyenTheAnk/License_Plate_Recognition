@@ -48,7 +48,13 @@ import {
   LocationOn as LocationIcon,
   FilterList,
   Refresh,
-  Description
+  Description,
+  Notifications as NotificationIcon,
+  VisibilityOff as HideIcon,
+  Visibility as ShowIcon,
+  CheckCircle as VerifiedIcon,
+  Warning as UnverifiedIcon,
+  AccessTime as TimeIcon,
 } from '@mui/icons-material';
 
 const SamplePage = () => {
@@ -89,6 +95,11 @@ const SamplePage = () => {
   const [hasVerifyPlate, setHasVerifyPlate] = useState(false);
   const [hasDeletePlate, setHasDeletePlate] = useState(false);
   const [hasSearchPlate, setHasSearchPlate] = useState(false);
+
+  // States cho Log Panel
+  const [logEntries, setLogEntries] = useState([]);
+  const [showLogPanel, setShowLogPanel] = useState(true);
+  const [logFilter, setLogFilter] = useState('all'); // 'all', 'recent', 'verified', 'unverified'
 
     useEffect(() => {
             const storedUser = localStorage.getItem('user');
@@ -831,6 +842,46 @@ useEffect(() => {
   // Reset gotoPage khi currentPage thay đổi
   useEffect(() => { setGotoPage(''); }, [currentPage]);
 
+
+  // Hàm format thời gian cho log - hiển thị chi tiết dd/mm/yyyy hh:mm:ss
+  const formatLogTime = (timestamp) => {
+    const time = new Date(timestamp);
+    
+    // Format theo định dạng dd/mm/yyyy hh:mm:ss
+    const day = time.getDate().toString().padStart(2, '0');
+    const month = (time.getMonth() + 1).toString().padStart(2, '0');
+    const year = time.getFullYear();
+    const hours = time.getHours().toString().padStart(2, '0');
+    const minutes = time.getMinutes().toString().padStart(2, '0');
+    const seconds = time.getSeconds().toString().padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  };
+
+  // Hàm lọc log entries
+  const getFilteredLogEntries = () => {
+    let filtered = logEntries;
+    
+    switch (logFilter) {
+      case 'recent':
+        filtered = logEntries.filter(entry => {
+          const diffMs = new Date() - new Date(entry.timestamp);
+          return diffMs < 600000; // 10 phút
+        });
+        break;
+      case 'verified':
+        filtered = logEntries.filter(entry => entry.isVerified);
+        break;
+      case 'unverified':
+        filtered = logEntries.filter(entry => !entry.isVerified);
+        break;
+      default:
+        filtered = logEntries;
+    }
+    
+    return filtered;
+  };
+
   // Load dữ liệu cho dropdown search
   const loadSearchData = useCallback(async () => {
     try {
@@ -870,6 +921,68 @@ useEffect(() => {
   useEffect(() => {
     loadSearchData();
   }, [loadSearchData]);
+
+  // Tự động thêm log entries khi có detection mới (chỉ trong 10 phút gần đây)
+  useEffect(() => {
+    if (detectionResults.length > 0) {
+      const now = new Date();
+      const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000); // 10 phút trước
+      
+      // Lọc chỉ những detection trong 10 phút gần đây
+      const recentDetections = detectionResults.filter(detection => {
+        const detectionTime = new Date(detection.detected_at || detection.created_at || new Date());
+        return detectionTime >= tenMinutesAgo;
+      });
+      
+      const newLogEntries = recentDetections.map(detection => ({
+        id: `log-${detection.id}`,
+        timestamp: new Date(detection.detected_at || detection.created_at || new Date()),
+        cameraName: detection.camera_name || detection.camera?.name || 'Camera không xác định',
+        location: detection.location_name || detection.location?.name || 'Khu vực không xác định',
+        plateNumber: detection.plate_number || 'Không xác định',
+        isVerified: detection.is_verified || false,
+        confidence: detection.confidence || 0,
+        imageUrl: detection.image_url || null
+      }));
+
+      // Cập nhật log entries, loại bỏ trùng lặp và giữ tối đa 20 entries
+      setLogEntries(prev => {
+        const existingIds = new Set(prev.map(entry => entry.id));
+        const uniqueNewEntries = newLogEntries.filter(entry => !existingIds.has(entry.id));
+        
+        // Sắp xếp theo thời gian mới nhất
+        const allEntries = [...uniqueNewEntries, ...prev];
+        const sortedEntries = allEntries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        // Lọc lại để chỉ giữ những entries trong 10 phút gần đây
+        const filteredEntries = sortedEntries.filter(entry => {
+          const entryTime = new Date(entry.timestamp);
+          return entryTime >= tenMinutesAgo;
+        });
+        
+        return filteredEntries.slice(0, 20); // Giữ tối đa 20 entries
+      });
+    }
+  }, [detectionResults]);
+
+  // Tự động xóa log entries cũ hơn 10 phút mỗi 30 giây
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = new Date();
+      const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
+      
+      setLogEntries(prev => {
+        const filteredEntries = prev.filter(entry => {
+          const entryTime = new Date(entry.timestamp);
+          return entryTime >= tenMinutesAgo;
+        });
+        
+        return filteredEntries;
+      });
+    }, 30000); // Cleanup mỗi 30 giây
+
+    return () => clearInterval(cleanupInterval);
+  }, []);
 
   useEffect(() => {
     if (pendingCameraId && cameras.length > 0) {
@@ -1781,6 +1894,30 @@ useEffect(() => {
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
+    }
+    
+    /* Animation cho log entry mới */
+    @keyframes slideInFromRight {
+      0% {
+        opacity: 0;
+        transform: translateX(100%);
+      }
+      100% {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+    
+    /* Animation cho log panel */
+    @keyframes fadeInUp {
+      0% {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
   `}
 </style>
@@ -4140,6 +4277,325 @@ useEffect(() => {
             {alertBox.msg}
           </Alert>
         )}
+
+      {/* Log Panel - Hiển thị thông báo nhận diện */}
+      {showLogPanel && (
+        <Card sx={{ 
+          position: 'fixed',
+          bottom: 20,
+          right: 20,
+          width: 420,
+          maxHeight: 550,
+          borderRadius: 3,
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.15)',
+          border: '1px solid #e0e0e0',
+          zIndex: 1000,
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
+          animation: 'fadeInUp 0.5s ease-out'
+        }}>
+          {/* Header của Log Panel */}
+          <Box sx={{ 
+            background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+            color: 'white',
+            p: 1.5
+          }}>
+            {/* Dòng 1: Tiêu đề và số lượng */}
+            <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <NotificationIcon sx={{ fontSize: 18 }} />
+                <Typography variant="subtitle2" sx={{ 
+                  fontWeight: 600,
+                  fontSize: '0.875rem'
+                }}>
+                  Thông báo nhận diện
+                </Typography>
+                <Chip 
+                  label={getFilteredLogEntries().length} 
+                  size="small" 
+                  sx={{ 
+                    backgroundColor: 'rgba(255,255,255,0.2)', 
+                    color: 'white',
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    height: 20,
+                    '& .MuiChip-label': {
+                      px: 1
+                    }
+                  }} 
+                />
+              </Box>
+              <Box display="flex" alignItems="center" gap={0.5}>
+                <IconButton 
+                  onClick={() => loadDetectionResults()}
+                  sx={{ 
+                    color: 'white',
+                    p: 0.5,
+                    '&:hover': {
+                      backgroundColor: 'rgba(255,255,255,0.1)'
+                    }
+                  }}
+                  size="small"
+                  title="Làm mới log"
+                >
+                  <Refresh sx={{ fontSize: 16 }} />
+                </IconButton>
+                <IconButton 
+                  onClick={() => setLogEntries([])}
+                  sx={{ 
+                    color: 'white',
+                    p: 0.5,
+                    '&:hover': {
+                      backgroundColor: 'rgba(255,255,255,0.1)'
+                    }
+                  }}
+                  size="small"
+                  title="Xóa tất cả log"
+                >
+                  <ClearIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+                <IconButton 
+                  onClick={() => setShowLogPanel(false)}
+                  sx={{ 
+                    color: 'white',
+                    p: 0.5,
+                    '&:hover': {
+                      backgroundColor: 'rgba(255,255,255,0.1)'
+                    }
+                  }}
+                  size="small"
+                  title="Ẩn log panel"
+                >
+                  <HideIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Box>
+            </Box>
+            
+            {/* Dòng 2: Filter dropdown */}
+            <Box display="flex" alignItems="center" justifyContent="center">
+              <FormControl size="small" sx={{ minWidth: 120, width: '100%' }}>
+                <Select
+                  value={logFilter}
+                  onChange={(e) => setLogFilter(e.target.value)}
+                  sx={{ 
+                    color: 'white',
+                    fontSize: '0.75rem',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                    borderRadius: 1,
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'rgba(255,255,255,0.3)'
+                    },
+                    '& .MuiSvgIcon-root': {
+                      color: 'white',
+                      fontSize: 16
+                    },
+                    '& .MuiSelect-select': {
+                      py: 0.5,
+                      fontSize: '0.75rem',
+                      textAlign: 'center'
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'rgba(255,255,255,0.5)'
+                    }
+                  }}
+                >
+                  <MenuItem value="all" sx={{ fontSize: '0.75rem' }}>Tất cả</MenuItem>
+                  <MenuItem value="recent" sx={{ fontSize: '0.75rem' }}>10 phút gần đây</MenuItem>
+                  <MenuItem value="verified" sx={{ fontSize: '0.75rem' }}>Đã xác minh</MenuItem>
+                  <MenuItem value="unverified" sx={{ fontSize: '0.75rem' }}>Chưa xác minh</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          </Box>
+
+          {/* Nội dung Log Panel */}
+          <Box sx={{ 
+            maxHeight: 450,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            '&::-webkit-scrollbar': {
+              width: '8px'
+            },
+            '&::-webkit-scrollbar-track': {
+              background: '#f5f5f5',
+              borderRadius: '4px'
+            },
+            '&::-webkit-scrollbar-thumb': {
+              background: '#1976d2',
+              borderRadius: '4px',
+              '&:hover': {
+                background: '#1565c0'
+              }
+            },
+            '&::-webkit-scrollbar-thumb:hover': {
+              background: '#1565c0'
+            }
+          }}>
+            {getFilteredLogEntries().length === 0 ? (
+              <Box sx={{ 
+                p: 3, 
+                textAlign: 'center',
+                color: 'text.secondary'
+              }}>
+                <NotificationIcon sx={{ fontSize: 48, opacity: 0.3, mb: 1 }} />
+                <Typography variant="body2">
+                  {logFilter === 'all' ? 'Chưa có log nhận diện nào' : 
+                   logFilter === 'recent' ? 'Không có log gần đây' :
+                   logFilter === 'verified' ? 'Không có log đã xác minh' :
+                   'Không có log chưa xác minh'}
+                </Typography>
+              </Box>
+            ) : (
+              getFilteredLogEntries().map((entry, index) => (
+                <Box
+                  key={entry.id}
+                  sx={{
+                    p: 2,
+                    borderBottom: index < getFilteredLogEntries().length - 1 ? '1px solid #f0f0f0' : 'none',
+                    transition: 'background-color 0.2s ease',
+                    '&:hover': {
+                      backgroundColor: '#f8f9fa'
+                    },
+                    animation: index === 0 ? 'slideInFromRight 0.5s ease-out' : 'none'
+                  }}
+                >
+                  <Box display="flex" alignItems="flex-start" gap={2}>
+                    {/* Icon trạng thái */}
+                    <Tooltip 
+                      title={entry.isVerified ? "Đã xác minh" : "Chưa xác minh"} 
+                      placement="top"
+                    >
+                      <Box sx={{ 
+                        mt: 0.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 32,
+                        height: 32,
+                        borderRadius: '50%',
+                        backgroundColor: entry.isVerified ? '#e8f5e8' : '#fff3e0',
+                        border: `2px solid ${entry.isVerified ? '#4caf50' : '#ff9800'}`,
+                        cursor: 'help'
+                      }}>
+                        {entry.isVerified ? (
+                          <VerifiedIcon sx={{ fontSize: 18, color: '#4caf50' }} />
+                        ) : (
+                          <UnverifiedIcon sx={{ fontSize: 18, color: '#ff9800' }} />
+                        )}
+                      </Box>
+                    </Tooltip>
+
+                    {/* Nội dung log */}
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ 
+                        fontWeight: 600,
+                        color: '#1976d2',
+                        mb: 0.5,
+                        fontSize: '0.875rem'
+                      }}>
+                        Camera {entry.cameraName}
+                      </Typography>
+                      
+                      <Typography variant="body2" sx={{ 
+                        color: 'text.secondary',
+                        mb: 0.5,
+                        fontSize: '0.8rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5
+                      }}>
+                        <LocationIcon sx={{ fontSize: 14 }} />
+                        Tại {entry.location}
+                      </Typography>
+                      
+                      <Typography variant="body2" sx={{ 
+                        fontWeight: 500,
+                        mb: 0.5,
+                        fontSize: '0.875rem',
+                        color: '#2e7d32'
+                      }}>
+                        Đã phát hiện phương tiện có biển số <strong>{entry.plateNumber}</strong>
+                      </Typography>
+                      
+                      <Box display="flex" alignItems="center" justifyContent="space-between" mt={1}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <TimeIcon sx={{ fontSize: 14, color: '#1976d2' }} />
+                          <Typography variant="caption" sx={{ 
+                            color: '#1976d2',
+                            fontSize: '0.8rem',
+                            fontWeight: 500,
+                            fontFamily: 'monospace'
+                          }}>
+                            {formatLogTime(entry.timestamp)}
+                          </Typography>
+                        </Box>
+                        
+                        <Box display="flex" alignItems="center" gap={1}>
+                          {entry.confidence > 0 && (
+                            <Chip 
+                              label={`${Math.round(entry.confidence * 100)}%`}
+                              size="small"
+                              sx={{ 
+                                fontSize: '0.7rem',
+                                height: 22,
+                                backgroundColor: entry.confidence > 0.8 ? '#e8f5e8' : 
+                                              entry.confidence > 0.6 ? '#fff3e0' : '#ffebee',
+                                color: entry.confidence > 0.8 ? '#2e7d32' : 
+                                       entry.confidence > 0.6 ? '#f57c00' : '#c62828',
+                                fontWeight: 600
+                              }}
+                            />
+                          )}
+                          <Tooltip title="Xóa thông báo này" placement="top">
+                            <IconButton
+                              onClick={() => setLogEntries(prev => prev.filter(log => log.id !== entry.id))}
+                              size="small"
+                              sx={{
+                                p: 0.5,
+                                color: '#f44336',
+                                '&:hover': {
+                                  backgroundColor: '#ffebee',
+                                  color: '#d32f2f'
+                                }
+                              }}
+                            >
+                              <ClearIcon sx={{ fontSize: 14 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </Box>
+                    </Box>
+                  </Box>
+                </Box>
+              ))
+            )}
+          </Box>
+        </Card>
+      )}
+
+      {/* Nút hiển thị Log Panel khi đã ẩn */}
+      {!showLogPanel && (
+        <IconButton
+          onClick={() => setShowLogPanel(true)}
+          sx={{
+            position: 'fixed',
+            bottom: 20,
+            right: 20,
+            backgroundColor: '#1976d2',
+            color: 'white',
+            width: 56,
+            height: 56,
+            boxShadow: '0 4px 16px rgba(25, 118, 210, 0.3)',
+            '&:hover': {
+              backgroundColor: '#1565c0',
+              transform: 'scale(1.05)'
+            },
+            zIndex: 1000
+          }}
+        >
+          <ShowIcon />
+        </IconButton>
+      )}
 
       {/* Toast Notifications cho BlackList/WhiteList */}
       {toastNotifications.map((notification, index) => (
