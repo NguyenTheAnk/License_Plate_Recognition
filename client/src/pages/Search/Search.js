@@ -4,7 +4,7 @@ import {
   TablePagination
 } from '@mui/material';
 import { 
-  Search as SearchIcon, DirectionsCar, Person, Phone, Email, LocationOn, CheckCircle, Block, History, CameraAlt, Info, Event, Description, Close as CloseIcon, FilterList, Refresh, TuneRounded, Visibility, ArrowForward, Timeline, Security, LocationSearching, FirstPage, LastPage, ChevronLeft, ChevronRight, BarChart, Videocam, Code
+  Search as SearchIcon, DirectionsCar, Person, Phone, Email, LocationOn, CheckCircle, Block, History, CameraAlt, Info, Event, Description, Close as CloseIcon, FilterList, Refresh, TuneRounded, Visibility, ArrowForward, Security, LocationSearching, FirstPage, LastPage, ChevronLeft, ChevronRight, BarChart, Videocam, Code
 } from '@mui/icons-material';
 import { fetchDataFromAPI } from '../../utils/auth';
 import { InputBase, InputAdornment } from '@mui/material';
@@ -57,13 +57,6 @@ function SearchPage() {
       icon: <LocationOn />, 
       description: 'Quản lý khu vực',
       color: 'info'
-    },
-    { 
-      label: 'Lộ trình', 
-      value: 'journey', 
-      icon: <Timeline />, 
-      description: 'Theo dõi lộ trình',
-      color: 'primary'
     },
     { 
       label: 'Phát hiện', 
@@ -452,9 +445,6 @@ function SearchPage() {
         break;
       case 'location':
         setResults(newResults.location);
-        break;
-      case 'journey':
-        setResults(newResults.journey);
         break;
       case 'plate':
         setResults(newResults.plate);
@@ -971,197 +961,6 @@ function getPaginationItems(current, total) {
           </>
         );
 
-      case 'journey':
-        return (
-          <>
-            {/* Hàng 1 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-            <Grid item xs={12} md={3}>
-              <TextField
-                label="Biển số xe"
-                value={filters.plate_number}
-                onChange={e => handleFilterChange('plate_number', e.target.value)}
-                fullWidth
-                size="medium"
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon sx={{ color: '#9c27b0' }} />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-              />
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Khu vực bắt đầu</InputLabel>
-                <Select
-                  value={filters.start_location}
-                  label="Khu vực bắt đầu"
-                  onChange={e => handleFilterChange('start_location', e.target.value)}
-                  startAdornment={
-                    <InputAdornment position="start">
-                      <LocationOn sx={{ color: '#9c27b0', ml: 1 }} />
-                    </InputAdornment>
-                  }
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 300,
-                        overflowY: 'auto',
-                        borderRadius: 8,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                      }
-                    }
-                  }}
-                >
-                  <MenuItem value="">Tất cả</MenuItem>
-                  {locations.map(location => (
-                    <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Khu vực kết thúc</InputLabel>
-                <Select
-                  value={filters.end_location}
-                  label="Khu vực kết thúc"
-                  onChange={e => handleFilterChange('end_location', e.target.value)}
-                  startAdornment={
-                    <InputAdornment position="start">
-                      <LocationOn sx={{ color: '#9c27b0', ml: 1 }} />
-                    </InputAdornment>
-                  }
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 300,
-                        overflowY: 'auto',
-                        borderRadius: 8,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                      }
-                    }
-                  }}
-                >
-                  <MenuItem value="">Tất cả</MenuItem>
-                  {locations.map(location => (
-                    <MenuItem key={location.id} value={location.id}>{location.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Trạng thái lộ trình</InputLabel>
-                <Select
-                  value={filters.journey_status}
-                  label="Trạng thái lộ trình"
-                  onChange={e => handleFilterChange('journey_status', e.target.value)}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                  MenuProps={{
-                    PaperProps: {
-                      style: {
-                        maxHeight: 200,
-                        overflowY: 'auto',
-                        borderRadius: 8,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                      }
-                    }
-                  }}
-                >
-                  <MenuItem value="">Tất cả</MenuItem>
-                  <MenuItem value="completed">Hoàn thành</MenuItem>
-                  <MenuItem value="in_progress">Đang di chuyển</MenuItem>
-                  <MenuItem value="cancelled">Hủy bỏ</MenuItem>
-                  <MenuItem value="suspicious">Nghi ngờ</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            </Grid>
-
-            {/* Hàng 2 */}
-            <Grid container spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Grid item xs={12} md={3}>
-                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <InputLabel sx={{ fontWeight: 600, fontSize: 14 }}>Loại xe</InputLabel>
-                  <Select
-                    value={filters.vehicle_type}
-                    label="Loại xe"
-                    onChange={e => handleFilterChange('vehicle_type', e.target.value)}
-                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                    MenuProps={{
-                      PaperProps: {
-                        style: {
-                          maxHeight: 200,
-                          overflowY: 'auto',
-                          borderRadius: 8,
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
-                        }
-                      }
-                    }}
-                  >
-                    <MenuItem value="">Tất cả</MenuItem>
-                    <MenuItem value="car">Ô tô</MenuItem>
-                    <MenuItem value="motorcycle">Xe máy</MenuItem>
-                    <MenuItem value="truck">Xe tải</MenuItem>
-                    <MenuItem value="bus">Xe bus</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Từ ngày"
-                  type="date"
-                  value={filters.date_from}
-                  onChange={e => handleFilterChange('date_from', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <TextField
-                  label="Đến ngày"
-                  type="date"
-                  value={filters.date_to}
-                  onChange={e => handleFilterChange('date_to', e.target.value)}
-                  fullWidth
-                  size="medium"
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 500 }}
-                />
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Button
-                  variant="contained"
-                  onClick={handleSearch}
-                  startIcon={<SearchIcon />}
-                  sx={{ 
-                    borderRadius: 3, 
-                    textTransform: 'none', 
-                    fontWeight: 600, 
-                    fontSize: 15, 
-                    py: 1.5,
-                    background: 'linear-gradient(90deg, #7b1fa2 0%, #9c27b0 100%)',
-                    boxShadow: '0 4px 12px rgba(123,31,162,0.3)',
-                    '&:hover': {
-                      background: 'linear-gradient(90deg, #6a1b9a 0%, #7b1fa2 100%)',
-                      boxShadow: '0 6px 16px rgba(123,31,162,0.4)'
-                    }
-                  }}
-                >
-                  Tìm kiếm
-                </Button>
-              </Grid>
-            </Grid>
-          </>
-        );
 
       case 'plate':
         return (
@@ -1420,12 +1219,6 @@ useEffect(() => {
             totalPagesFromAPI = 1;
           }
           break;
-        case 'journey':
-          data = await fetchDataFromAPI(`/api/journey`, token, { params });
-          setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
-          break;
         case 'plate':
           data = await fetchDataFromAPI(`/api/plate-recognitions`, token, { params });
           setResults(data.data || []);
@@ -1599,12 +1392,6 @@ useEffect(() => {
             totalPagesFromAPI = 1;
           }
           break;
-        case 'journey':
-          data = await fetchDataFromAPI(`/api/journey`, token, { params });
-          setResults(data.data || []);
-          totalCountFromAPI = data.total || data.pagination?.total || 0;
-          totalPagesFromAPI = data.pagination?.total_pages || Math.ceil(totalCountFromAPI / itemsPerPage);
-          break;
         case 'plate':
           data = await fetchDataFromAPI(`/api/plate-recognitions`, token, { params });
           setResults(data.data || []);
@@ -1646,8 +1433,6 @@ useEffect(() => {
         return 'linear-gradient(90deg, #ff9800 0%, #ffc107 100%)';
       case 'location':
         return 'linear-gradient(90deg, #1976d2 0%, #2196f3 100%)';
-      case 'journey':
-        return 'linear-gradient(90deg, #7b1fa2 0%, #9c27b0 100%)';
       case 'plate':
         return 'linear-gradient(90deg, #5d4037 0%, #8d6e63 100%)';
       default:
