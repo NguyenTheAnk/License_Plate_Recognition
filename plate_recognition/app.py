@@ -88,7 +88,7 @@ from flask_sock import Sock
 from flask_cors import CORS
 import cv2
 import numpy as np
-from detector import detect_and_ocr_stable, enable_performance_optimizations, start_redis_server, is_redis_running
+from detector import detect_and_ocr_stable, detect_and_ocr_thread_safe, process_frame_async, get_thread_manager_stats, enable_performance_optimizations, start_redis_server, is_redis_running
 import json
 import logging
 import time
@@ -137,8 +137,8 @@ def recognize_ws(ws):
                     
                     if frame is not None:
                         logger.info(f"Received frame from frontend: {frame.shape}")
-                        # Xử lý frame với detect_and_ocr_stable
-                        result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
+                        # Xử lý frame với thread-safe detection
+                        result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                         
                         if isinstance(result, dict):
                             processed_frame_bytes = result.get('frame', b'')
@@ -147,13 +147,17 @@ def recognize_ws(ws):
                             # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
                             # Không cần xử lý queue ở đây nữa
                             
-                            # Send processed frame
-                            if processed_frame_bytes:
-                                ws.send(processed_frame_bytes)
-                            else:
-                                # Fallback: encode frame manually
-                                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                                ws.send(buffer.tobytes())
+                            # Send processed frame with error handling
+                            try:
+                                if processed_frame_bytes:
+                                    ws.send(processed_frame_bytes)
+                                else:
+                                    # Fallback: encode frame manually with optimized quality
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                                    ws.send(buffer.tobytes())
+                            except Exception as ws_error:
+                                logger.error(f"WebSocket send error: {ws_error}")
+                                break  # Exit the loop if WebSocket is closed
                                 
                         else:
                             # Legacy support: result is direct frame
@@ -222,8 +226,8 @@ def recognize_ws(ws):
                                 logger.warning("Không thể đọc frame từ RTSP stream")
                                 break
                             
-                            # Xử lý frame với detect_and_ocr_stable
-                            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
+                            # Xử lý frame với thread-safe detection
+                            result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                             
                             if isinstance(result, dict):
                                 processed_frame_bytes = result.get('frame', b'')
@@ -231,23 +235,18 @@ def recognize_ws(ws):
                                 detection_count = result.get('detection_count', 0)
                                 skipped = result.get('skipped', False)
                                 
-                                # Chỉ gửi frame khi có detection hoặc không bị skip
-                                should_send_frame = detection_count > 0 or not skipped
+                                # Always send frame for consistent 20 FPS - remove detection-based filtering
+                                logger.info(f"📤 Sending frame for camera {camera_id} - Detections: {detection_count}, Skipped: {skipped}")
                                 
-                                if should_send_frame:
-                                    logger.info(f"📤 Sending frame for camera {camera_id} - Detections: {detection_count}, Skipped: {skipped}")
-                                    
-                                    # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
-                                    
-                                    # Send processed frame only when needed
-                                    if processed_frame_bytes:
-                                        ws.send(processed_frame_bytes)
-                                    else:
-                                        # Fallback
-                                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                                        ws.send(buffer.tobytes())
+                                # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
+                                
+                                # Send processed frame for consistent FPS
+                                if processed_frame_bytes:
+                                    ws.send(processed_frame_bytes)
                                 else:
-                                    logger.debug(f"⏭️ Skipping frame send for camera {camera_id} - No detections")
+                                    # Fallback
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                    ws.send(buffer.tobytes())
                             else:
                                 # Legacy support
                                 if isinstance(result, np.ndarray):
@@ -357,9 +356,9 @@ def video_stream(video_id):
                 if not ret:
                     break
 
-                # Xử lý frame với detection/OCR
+                # Xử lý frame với thread-safe detection/OCR
                 try:
-                    result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
+                    result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
 
                     # Handle both dict and direct frame results
                     if isinstance(result, dict):
@@ -379,8 +378,8 @@ def video_stream(video_id):
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-                    # Giới hạn tốc độ frame (~30 FPS)
-                    time.sleep(0.033)
+                    # Giới hạn tốc độ frame (~20 FPS)
+                    time.sleep(0.05)
 
                 except Exception as e:
                     logger.error(f"Lỗi xử lý frame: {str(e)}")
@@ -505,6 +504,35 @@ def get_enhanced_plate_history_api():
         logger.error(f"Error getting enhanced plate history: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/thread-stats', methods=['GET'])
+def get_thread_stats_api():
+    """Get thread manager statistics"""
+    try:
+        stats = get_thread_manager_stats()
+        return jsonify({
+            "success": True,
+            "thread_stats": stats,
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error getting thread stats: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/thread-cleanup', methods=['POST'])
+def cleanup_threads_api():
+    """Manually cleanup inactive threads"""
+    try:
+        from detector import thread_manager
+        thread_manager.cleanup_inactive_threads()
+        return jsonify({
+            "success": True,
+            "message": "Thread cleanup completed",
+            "active_threads": thread_manager.get_active_thread_count()
+        })
+    except Exception as e:
+        logger.error(f"Error cleaning up threads: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # SIMPLIFIED: Removed queue-related endpoints
 # Detector.py now sends directly to Node.js API
 
@@ -559,7 +587,7 @@ def recognize():
         return jsonify({"error": "Cần cung cấp ảnh hoặc RTSP URL"}), 400
 
     detect_start = time.time()
-    result = detect_and_ocr_stable(img, source_type="http_request", camera_name="HTTP_Request")
+    result = detect_and_ocr_thread_safe(img, source_type="http_request", camera_name="HTTP_Request")
     
     # Handle both dict and direct frame results
     if isinstance(result, dict):
@@ -642,10 +670,10 @@ def processed_video_ws(ws, video_id):
             ws.close()
             return
 
-        # Lấy FPS của video gốc, nhưng giới hạn max 15fps để tránh overload
-        fps = min(cap.get(cv2.CAP_PROP_FPS), 15)
+        # Lấy FPS của video gốc, nhưng giới hạn max 20fps để đạt target FPS
+        fps = min(cap.get(cv2.CAP_PROP_FPS), 20)
         if fps <= 0:
-            fps = 15
+            fps = 20
         frame_delay = 1.0 / fps
 
         frame_count = 0
@@ -657,8 +685,8 @@ def processed_video_ws(ws, video_id):
             if not ret:
                 break
 
-            # Xử lý frame với detection/OCR
-            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
+            # Xử lý frame với thread-safe detection/OCR
+            result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
 
             # Handle both dict and direct frame results
             if isinstance(result, dict):
