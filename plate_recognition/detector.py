@@ -1050,9 +1050,9 @@ def get_thread_data_container():
             max_skip_frames = 0
         else:
             # CPU optimized for 20 FPS per stream
-            detection_cooldown = 0.1
-            motion_cooldown = 0.05
-            max_skip_frames = 1
+            detection_cooldown = 0.05  # Giảm cooldown
+            motion_cooldown = 0.03     # Giảm cooldown
+            max_skip_frames = 0        # Không skip frames
             
         thread_data_containers[thread_id] = {
             'tracked_objects': {},
@@ -1077,7 +1077,9 @@ def get_thread_data_container():
             'max_skip_frames': max_skip_frames,
             'skip_frame_count': 0,
             'last_detection_time': 0,
-            'last_motion_time': 0
+            'last_motion_time': 0,
+            # Thread-specific background subtractor
+            'bg_subtractor': None
         }
     return thread_data_containers[thread_id]
 
@@ -1734,14 +1736,21 @@ def get_enhanced_plate_history():
         return {'error': str(e)}
 
 def should_skip_frame(frame, roi):
-    """Kiểm tra xem có nên skip frame này không - Dựa trên chuyển động trong ROI"""
-    global skip_frame_count, last_detection_time, detection_cooldown, last_motion_time, motion_cooldown
+    """Kiểm tra xem có nên skip frame này không - THREAD-SAFE"""
+    # Get thread-specific data
+    thread_container = get_thread_data_container()
     
     current_time = time.time()
+    skip_frame_count = thread_container.get('skip_frame_count', 0)
+    last_detection_time = thread_container.get('last_detection_time', 0)
+    detection_cooldown = thread_container.get('detection_cooldown', 0.05)
+    last_motion_time = thread_container.get('last_motion_time', 0)
+    motion_cooldown = thread_container.get('motion_cooldown', 0.03)
+    max_skip_frames = thread_container.get('max_skip_frames', 0)
     
     # Nếu có detection gần đây, không skip
     if current_time - last_detection_time < detection_cooldown:
-        skip_frame_count = 0
+        thread_container['skip_frame_count'] = 0
         return False
     
     # Kiểm tra chuyển động trong ROI trước khi quyết định skip
@@ -1749,14 +1758,14 @@ def should_skip_frame(frame, roi):
     
     if has_motion:
         # Có chuyển động, reset skip counter và xử lý frame
-        skip_frame_count = 0
-        last_motion_time = current_time
+        thread_container['skip_frame_count'] = 0
+        thread_container['last_motion_time'] = current_time
         logger.debug(f"🔄 Motion detected in ROI - processing frame")
         return False
     
     # Nếu vừa có chuyển động gần đây, vẫn xử lý frame để phát hiện phương tiện mới
     if current_time - last_motion_time < motion_cooldown:
-        skip_frame_count = 0
+        thread_container['skip_frame_count'] = 0
         logger.debug(f"🔄 Recent motion - processing frame to detect new vehicles")
         return False
     
@@ -1764,19 +1773,17 @@ def should_skip_frame(frame, roi):
     # Nhưng vẫn phải xử lý định kỳ để phát hiện phương tiện mới
     if skip_frame_count >= max_skip_frames:
         # Đã skip quá nhiều frame, phải xử lý để phát hiện phương tiện mới
-        skip_frame_count = 0
+        thread_container['skip_frame_count'] = 0
         logger.debug(f"🔄 Max skip reached - processing frame to detect new vehicles")
         return False
     
     # Skip frame
-    skip_frame_count += 1
-    logger.debug(f"⏭️ Skipping frame - no motion in ROI (skip: {skip_frame_count}/{max_skip_frames})")
+    thread_container['skip_frame_count'] = skip_frame_count + 1
+    logger.debug(f"⏭️ Skipping frame - no motion in ROI (skip: {thread_container['skip_frame_count']}/{max_skip_frames})")
     return True
 
 def has_motion_in_roi(frame, roi):
-    """Kiểm tra xem có chuyển động trong ROI không - Cải thiện độ nhạy"""
-    global global_bg_subtractor
-    
+    """Kiểm tra xem có chuyển động trong ROI không - THREAD-SAFE"""
     try:
         roi_xmin, roi_ymin, roi_xmax, roi_ymax = roi
         roi_frame = frame[roi_ymin:roi_ymax, roi_xmin:roi_xmax]
@@ -1787,14 +1794,15 @@ def has_motion_in_roi(frame, roi):
         # Chuyển sang grayscale
         gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
         
-        # Sử dụng background subtraction toàn cục để phát hiện chuyển động
-        if global_bg_subtractor is None:
-            global_bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+        # Sử dụng thread-local background subtractor để tránh contention
+        thread_container = get_thread_data_container()
+        if 'bg_subtractor' not in thread_container or thread_container['bg_subtractor'] is None:
+            thread_container['bg_subtractor'] = cv2.createBackgroundSubtractorMOG2(
                 history=300, varThreshold=16, detectShadows=True
             )
         
         # Áp dụng background subtraction
-        fg_mask = global_bg_subtractor.apply(gray)
+        fg_mask = thread_container['bg_subtractor'].apply(gray)
         
         # Tính toán gradient để phát hiện chuyển động
         grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
@@ -3235,23 +3243,13 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # OPTIMIZED: Consistent frame skipping for stable FPS
     should_skip = False
     
-    # OPTIMIZED: Thread-specific frame skipping for multi-stream 20 FPS
+    # OPTIMIZED: Simple frame skipping for multi-stream 20 FPS
     if ENABLE_FPS_THROTTLING and thread_container.get('current_fps', 0) > 0:
-        # Get thread-specific settings
-        max_skip_frames = thread_container.get('max_skip_frames', 0)
-        skip_frame_count = thread_container.get('skip_frame_count', 0)
-        
-        # Only skip frames if FPS is significantly above target (25+ FPS)
-        if thread_container.get('current_fps', 0) > 25:  # Skip at high FPS
-            if skip_frame_count < max_skip_frames:
-                should_skip = True
-                thread_container['skip_frame_count'] = skip_frame_count + 1
-            else:
-                should_skip = False
-                thread_container['skip_frame_count'] = 0
+        # Only skip frames if FPS is very high (30+ FPS)
+        if thread_container.get('current_fps', 0) > 30:  # Skip only at very high FPS
+            should_skip = True
         else:
             should_skip = False  # Process every frame for 20 FPS target
-            thread_container['skip_frame_count'] = 0
     
     # Optimized: Remove logging for better FPS
     
@@ -3309,7 +3307,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     current_time = time.time()
                     
                     # OPTIMIZED: FastALPR with cooldown for 20 FPS - THREAD SAFE
-                    if current_time - thread_container.get('last_alpr_call_time', 0) >= 0.05:  # 50ms cooldown (20 FPS max)
+                    if current_time - thread_container.get('last_alpr_call_time', 0) >= 0.02:  # 20ms cooldown (50 FPS max)
                         try:
                             # OPTIMIZED: Gọi FastALPR trực tiếp (không enhancement) - 5 FPS
                             alpr_results = alpr.predict(roi_frame_rgb)
@@ -3649,10 +3647,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                     similar_object_id = obj_id
                         
                         if similar_object_id is not None:
-                            # Cập nhật object hiện có nếu confidence cao hơn đáng kể
+                            # Gộp biển số tương tự ngay lập tức (60% similarity)
                             existing_conf = roi_tracked_objects[similar_object_id].get('confidence', 0)
                             
-                            if confidence > existing_conf + 0.05:  # Cần cải thiện ít nhất 5%
+                            # Cập nhật nếu confidence cao hơn hoặc tương đương
+                            if confidence >= existing_conf:
                                 roi_tracked_objects[similar_object_id].update({
                                     'plate': processed_text,
                                     'bbox': [x1, y1, x2, y2],
@@ -3661,12 +3660,12 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                 })
                                 # Cập nhật active_roi_objects để hiển thị
                                 active_roi_objects[similar_object_id] = roi_tracked_objects[similar_object_id]
-                                logger.info(f"🔄 UPDATED Similar Object {similar_object_id}: '{roi_tracked_objects[similar_object_id].get('plate', '')}' -> '{processed_text}' (conf: {existing_conf:.3f} -> {confidence:.3f}, similarity: {best_similarity:.3f})")
+                                logger.info(f"🔄 GROUPED Similar Object {similar_object_id}: '{roi_tracked_objects[similar_object_id].get('plate', '')}' -> '{processed_text}' (conf: {existing_conf:.3f} -> {confidence:.3f}, similarity: {best_similarity:.3f})")
                             else:
-                                logger.debug(f"⏭️ Similar Object {similar_object_id} insufficient confidence improvement: '{processed_text}' ({confidence:.3f}) vs existing ({existing_conf:.3f}) - need +0.05")
                                 # Vẫn cập nhật last_seen để giữ object alive
                                 roi_tracked_objects[similar_object_id]['last_seen'] = time.time()
                                 active_roi_objects[similar_object_id] = roi_tracked_objects[similar_object_id]
+                                logger.debug(f"⏭️ Similar Object {similar_object_id} kept existing: '{processed_text}' ({confidence:.3f}) vs existing ({existing_conf:.3f})")
                         else:
                             # Tạo object mới chỉ khi không có biển số tương tự
                             if is_valid_vietnam_plate_format(processed_text):
