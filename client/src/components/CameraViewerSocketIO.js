@@ -238,6 +238,11 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
             console.log("Received JSON data:", data);
             
             if (data.metadata) {
+              // Update FPS from metadata
+              if (data.metadata.fps !== undefined) {
+                setFps(data.metadata.fps.toFixed(1));
+              }
+              
               setRecognitionResults((prev) => {
                 const newResult = {
                   timestamp: new Date().toLocaleTimeString(),
@@ -469,4 +474,3 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
 };
 
 export default CameraViewerSocketIO;
-
