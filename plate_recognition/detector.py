@@ -21,10 +21,101 @@ import requests
 import re
 import random
 import hashlib
+from threading import local
+import mysql.connector
+from mysql.connector import Error
 
 # Image enhancement functions for better OCR quality (from test2.py)
 ENHANCEMENT_AVAILABLE = True
 ENABLE_REALTIME_ENHANCEMENT = False  # Tắt enhancement để tăng tốc
+
+# Database configuration for Whitelist/Blacklist checking
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'root',
+    'database': 'license_plate_recognition',
+    'port': 3306,
+    'charset': 'utf8mb4',
+    'autocommit': True
+}
+
+def check_plate_against_lists(plate_number):
+    """
+    Check if plate number exists in BlackList or WhiteList database tables.
+    
+    Args:
+        plate_number (str): The plate number to check
+        
+    Returns:
+        tuple: (is_whitelist_match, is_blacklist_match)
+    """
+    is_whitelist_match = False
+    is_blacklist_match = False
+    
+    try:
+        # Connect to database
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor()
+        
+        # Check whitelist
+        whitelist_query = """
+            SELECT id FROM vehicle_whitelist 
+            WHERE plate_number = %s 
+            AND is_active = 1 
+            AND approval_status = 'approved'
+            AND (valid_from IS NULL OR valid_from <= CURDATE())
+            AND (valid_to IS NULL OR valid_to >= CURDATE())
+            LIMIT 1
+        """
+        cursor.execute(whitelist_query, (plate_number,))
+        whitelist_result = cursor.fetchall()
+        is_whitelist_match = len(whitelist_result) > 0
+        
+        # Check blacklist
+        blacklist_query = """
+            SELECT id FROM vehicle_blacklist 
+            WHERE plate_number = %s 
+            AND is_active = 1 
+            AND (valid_from IS NULL OR valid_from <= CURDATE())
+            AND (valid_to IS NULL OR valid_to >= CURDATE())
+            LIMIT 1
+        """
+        cursor.execute(blacklist_query, (plate_number,))
+        blacklist_result = cursor.fetchall()
+        is_blacklist_match = len(blacklist_result) > 0
+        
+        logger.info(f"🔍 BlackList/WhiteList check for '{plate_number}': WL={is_whitelist_match}, BL={is_blacklist_match}")
+        
+    except Error as e:
+        logger.error(f"❌ Database error checking lists: {e}")
+    except Exception as e:
+        logger.error(f"❌ Error checking BlackList/WhiteList: {e}")
+    finally:
+        if 'connection' in locals() and connection.is_connected():
+            cursor.close()
+            connection.close()
+    
+    return is_whitelist_match, is_blacklist_match
+
+def get_notification_message(plate_number, is_whitelist_match, is_blacklist_match):
+    """
+    Generate notification message based on whitelist/blacklist match results.
+    
+    Args:
+        plate_number (str): The detected plate number
+        is_whitelist_match (bool): Whether plate is in whitelist
+        is_blacklist_match (bool): Whether plate is in blacklist
+        
+    Returns:
+        str: Notification message
+    """
+    if is_blacklist_match:
+        return f"🚨 CẢNH BÁO: Phát hiện phương tiện có biển số {plate_number} trong danh sách đen!"
+    elif is_whitelist_match:
+        return f"✅ XÁC NHẬN: Phát hiện phương tiện có biển số {plate_number} trong danh sách trắng"
+    else:
+        return f"ℹ️ THÔNG BÁO: Phát hiện phương tiện có biển số {plate_number}"
 
 def crop_and_enhance_plate(frame, bbox, enhancement_level="minimal"):
     """
@@ -67,7 +158,7 @@ def crop_and_enhance_plate(frame, bbox, enhancement_level="minimal"):
 
         h, w = crop.shape[:2]
         
-        # Apply minimal enhancement để giữ chất lượng gốc
+        # Apply minimal enhancement để giữ chất lượng gốc và tăng tốc
         if enhancement_level == "minimal":
             # Chỉ resize nếu quá nhỏ, giữ nguyên chất lượng
             if h < 40 or w < 120:
@@ -655,7 +746,340 @@ DEFAULT_ROI_XMIN, DEFAULT_ROI_YMIN, DEFAULT_ROI_XMAX, DEFAULT_ROI_YMAX = 0.25, 0
 CROPS_FOLDER = 'static/crops'
 os.makedirs(CROPS_FOLDER, exist_ok=True)
 
-# Global variables for tracking and database saving
+# Thread-local storage for per-thread tracking
+thread_local = local()
+
+# Thread locks for shared resources
+tracked_objects_lock = threading.RLock()
+frame_count_lock = threading.RLock()
+duplicate_counter_lock = threading.RLock()
+last_cleanup_time_lock = threading.RLock()
+track_consistency_lock = threading.RLock()
+ocr_attempts_per_track_lock = threading.RLock()
+plate_history_lock = threading.RLock()
+track_saved_plates_lock = threading.RLock()
+session_saved_plate_lock = threading.RLock()
+persistent_displays_lock = threading.RLock()
+roi_tracked_objects_lock = threading.RLock()
+roi_object_counter_lock = threading.RLock()
+roi_saved_plates_lock = threading.RLock()
+global_saved_tracks_lock = threading.RLock()
+global_bg_subtractor_lock = threading.RLock()
+last_roi_frame_lock = threading.RLock()
+
+# Thread-safe helper functions
+def get_thread_local_data():
+    """Get thread-local data, initialize if not exists"""
+    if not hasattr(thread_local, 'data'):
+        thread_local.data = {
+            'tracked_objects': {},
+            'frame_count': 0,
+            'duplicate_counter': 0,
+            'last_cleanup_time': 0,
+            'track_consistency': {},
+            'ocr_attempts_per_track': {},
+            'plate_history': {},
+            'track_saved_plates': {},
+            'session_saved_plate': None,
+            'session_save_time': 0,
+            'persistent_displays': {},
+            'roi_tracked_objects': {},
+            'roi_object_counter': 0,
+            'roi_saved_plates': {},
+            'global_saved_tracks': {},
+            'global_bg_subtractor': None,
+            'last_roi_frame': None,
+            'camera_id': None,
+            'source_type': 'camera',
+            'video_filename': None,
+            'camera_location': None,
+            'camera_name': None,
+            # FPS tracking variables
+            'fps_counter': 0,
+            'last_fps_time': time.time(),
+            'current_fps': 0,
+            'last_detection_time': 0,
+            'last_alpr_call_time': 0,
+            'last_redis_update': 0,
+            'track_info': {},
+            'track_id_mapping': {},
+            'sent_plates': {}
+        }
+    return thread_local.data
+
+def safe_get_global(key, default=None):
+    """Thread-safe get from global variables"""
+    lock_map = {
+        'tracked_objects': tracked_objects_lock,
+        'frame_count': frame_count_lock,
+        'duplicate_counter': duplicate_counter_lock,
+        'last_cleanup_time': last_cleanup_time_lock,
+        'track_consistency': track_consistency_lock,
+        'ocr_attempts_per_track': ocr_attempts_per_track_lock,
+        'plate_history': plate_history_lock,
+        'track_saved_plates': track_saved_plates_lock,
+        'session_saved_plate': session_saved_plate_lock,
+        'session_save_time': session_saved_plate_lock,
+        'persistent_displays': persistent_displays_lock,
+        'roi_tracked_objects': roi_tracked_objects_lock,
+        'roi_object_counter': roi_object_counter_lock,
+        'roi_saved_plates': roi_saved_plates_lock,
+        'global_saved_tracks': global_saved_tracks_lock,
+        'global_bg_subtractor': global_bg_subtractor_lock,
+        'last_roi_frame': last_roi_frame_lock
+    }
+    
+    if key in lock_map:
+        with lock_map[key]:
+            return globals()[key] if key in globals() else default
+    return default
+
+def safe_set_global(key, value):
+    """Thread-safe set global variables"""
+    lock_map = {
+        'tracked_objects': tracked_objects_lock,
+        'frame_count': frame_count_lock,
+        'duplicate_counter': duplicate_counter_lock,
+        'last_cleanup_time': last_cleanup_time_lock,
+        'track_consistency': track_consistency_lock,
+        'ocr_attempts_per_track': ocr_attempts_per_track_lock,
+        'plate_history': plate_history_lock,
+        'track_saved_plates': track_saved_plates_lock,
+        'session_saved_plate': session_saved_plate_lock,
+        'session_save_time': session_saved_plate_lock,
+        'persistent_displays': persistent_displays_lock,
+        'roi_tracked_objects': roi_tracked_objects_lock,
+        'roi_object_counter': roi_object_counter_lock,
+        'roi_saved_plates': roi_saved_plates_lock,
+        'global_saved_tracks': global_saved_tracks_lock,
+        'global_bg_subtractor': global_bg_subtractor_lock,
+        'last_roi_frame': last_roi_frame_lock
+    }
+    
+    if key in lock_map:
+        with lock_map[key]:
+            globals()[key] = value
+
+def safe_update_global(key, update_func):
+    """Thread-safe update global variables using a function"""
+    lock_map = {
+        'tracked_objects': tracked_objects_lock,
+        'frame_count': frame_count_lock,
+        'duplicate_counter': duplicate_counter_lock,
+        'last_cleanup_time': last_cleanup_time_lock,
+        'track_consistency': track_consistency_lock,
+        'ocr_attempts_per_track': ocr_attempts_per_track_lock,
+        'plate_history': plate_history_lock,
+        'track_saved_plates': track_saved_plates_lock,
+        'session_saved_plate': session_saved_plate_lock,
+        'session_save_time': session_saved_plate_lock,
+        'persistent_displays': persistent_displays_lock,
+        'roi_tracked_objects': roi_tracked_objects_lock,
+        'roi_object_counter': roi_object_counter_lock,
+        'roi_saved_plates': roi_saved_plates_lock,
+        'global_saved_tracks': global_saved_tracks_lock,
+        'global_bg_subtractor': global_bg_subtractor_lock,
+        'last_roi_frame': last_roi_frame_lock
+    }
+    
+    if key in lock_map:
+        with lock_map[key]:
+            current_value = globals()[key] if key in globals() else {}
+            globals()[key] = update_func(current_value)
+
+# Thread Manager for Multi-Stream Processing
+class ThreadManager:
+    def __init__(self, max_workers=8):
+        self.max_workers = max_workers
+        self.active_threads = {}
+        self.thread_pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="detector")
+        self.thread_locks = {}
+        self.cleanup_interval = 30  # seconds
+        self.last_cleanup = time.time()
+        
+    def get_thread_id(self):
+        """Get current thread ID"""
+        return threading.get_ident()
+    
+    def get_thread_lock(self, thread_id):
+        """Get or create lock for specific thread"""
+        if thread_id not in self.thread_locks:
+            self.thread_locks[thread_id] = threading.RLock()
+        return self.thread_locks[thread_id]
+    
+    def register_thread(self, thread_id, camera_id, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
+        """Register a new thread with camera info"""
+        with self.get_thread_lock(thread_id):
+            self.active_threads[thread_id] = {
+                'camera_id': camera_id,
+                'source_type': source_type,
+                'video_filename': video_filename,
+                'camera_location': camera_location,
+                'camera_name': camera_name,
+                'start_time': time.time(),
+                'frame_count': 0,
+                'last_activity': time.time()
+            }
+            logger.info(f"Registered thread {thread_id} for camera {camera_id}")
+    
+    def unregister_thread(self, thread_id):
+        """Unregister a thread"""
+        with self.get_thread_lock(thread_id):
+            if thread_id in self.active_threads:
+                del self.active_threads[thread_id]
+                if thread_id in self.thread_locks:
+                    del self.thread_locks[thread_id]
+                logger.info(f"Unregistered thread {thread_id}")
+    
+    def update_thread_activity(self, thread_id):
+        """Update thread activity timestamp"""
+        if thread_id in self.active_threads:
+            self.active_threads[thread_id]['last_activity'] = time.time()
+            self.active_threads[thread_id]['frame_count'] += 1
+    
+    def get_thread_info(self, thread_id):
+        """Get thread information"""
+        return self.active_threads.get(thread_id, {})
+    
+    def cleanup_inactive_threads(self):
+        """Clean up inactive threads"""
+        current_time = time.time()
+        if current_time - self.last_cleanup < self.cleanup_interval:
+            return
+        
+        inactive_threads = []
+        for thread_id, info in self.active_threads.items():
+            if current_time - info['last_activity'] > 60:  # 1 minute timeout
+                inactive_threads.append(thread_id)
+        
+        for thread_id in inactive_threads:
+            self.unregister_thread(thread_id)
+            logger.info(f"Cleaned up inactive thread {thread_id}")
+        
+        self.last_cleanup = current_time
+    
+    def get_active_thread_count(self):
+        """Get number of active threads"""
+        return len(self.active_threads)
+    
+    def get_thread_stats(self):
+        """Get thread statistics"""
+        stats = {
+            'active_threads': len(self.active_threads),
+            'max_workers': self.max_workers,
+            'threads': {}
+        }
+        
+        for thread_id, info in self.active_threads.items():
+            stats['threads'][thread_id] = {
+                'camera_id': info['camera_id'],
+                'source_type': info['source_type'],
+                'frame_count': info['frame_count'],
+                'uptime': time.time() - info['start_time'],
+                'last_activity': info['last_activity']
+            }
+        
+        return stats
+
+# Global thread manager instance
+thread_manager = ThreadManager(max_workers=8)
+
+def detect_and_ocr_thread_safe(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
+    """Thread-safe wrapper for detect_and_ocr_stable"""
+    try:
+        # Clean up inactive threads periodically
+        thread_manager.cleanup_inactive_threads()
+        
+        # Get thread-specific data container to prevent cross-stream contamination
+        thread_container = get_thread_data_container()
+        
+        # Process frame with thread-safe detection
+        result = detect_and_ocr_stable(frame, camera_id, source_type, video_filename, camera_location, camera_name)
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error in thread-safe detection: {str(e)}")
+        # Return empty result on error
+        return {
+            'frame': b'',
+            'boxes': [],
+            'labels': [],
+            'ocr_results': [],
+            'tracked_objects': {},
+            'ids': [],
+            'frame_width': 0,
+            'frame_height': 0,
+            'roi': [0, 0, 0, 0],
+            'fps': 0,
+            'detection_count': 0,
+            'track_count': 0,
+            'skipped': True,
+            'error': str(e)
+        }
+
+def process_frame_async(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
+    """Process frame asynchronously using thread pool"""
+    try:
+        # Submit task to thread pool
+        future = thread_manager.thread_pool.submit(
+            detect_and_ocr_thread_safe,
+            frame, camera_id, source_type, video_filename, camera_location, camera_name
+        )
+        return future
+    except Exception as e:
+        logger.error(f"Error submitting frame to thread pool: {str(e)}")
+        return None
+
+def get_thread_manager_stats():
+    """Get thread manager statistics"""
+    return thread_manager.get_thread_stats()
+
+# THREAD-SAFE: Per-thread data structures to prevent cross-stream contamination
+# Each thread will have its own isolated data
+thread_data_containers = {}  # {thread_id: {data...}}
+
+def get_thread_data_container():
+    """Get thread-specific data container to prevent cross-stream contamination"""
+    thread_id = threading.get_ident()
+    if thread_id not in thread_data_containers:
+        thread_data_containers[thread_id] = {
+            'tracked_objects': {},
+            'frame_count': 0,
+            'duplicate_counter': 0,
+            'last_cleanup_time': 0,
+            'track_consistency': {},
+            'ocr_attempts_per_track': {},
+            'plate_history': {},
+            'track_saved_plates': {},
+            'session_saved_plate': None,
+            'session_save_time': 0,
+            'persistent_displays': {},
+            'display_timeout': 0.0,
+            'roi_tracked_objects': {},
+            'roi_object_counter': 0,
+            'roi_saved_plates': {},
+            'global_saved_tracks': {}
+        }
+    return thread_data_containers[thread_id]
+
+def get_thread_safe_data(key):
+    """Get thread-safe data by key to prevent cross-stream contamination"""
+    thread_container = get_thread_data_container()
+    return thread_container.get(key, {})
+
+def set_thread_safe_data(key, value):
+    """Set thread-safe data by key to prevent cross-stream contamination"""
+    thread_container = get_thread_data_container()
+    thread_container[key] = value
+
+def update_thread_safe_data(key, update_func):
+    """Update thread-safe data by key to prevent cross-stream contamination"""
+    thread_container = get_thread_data_container()
+    if key not in thread_container:
+        thread_container[key] = {}
+    thread_container[key] = update_func(thread_container[key])
+
+# Legacy global variables for backward compatibility (will be deprecated)
 tracked_objects = {}
 frame_count = 0
 duplicate_counter = 0
@@ -663,21 +1087,15 @@ last_cleanup_time = 0
 track_consistency = {}
 ocr_attempts_per_track = {}
 plate_history = {}
-# Track which plates have been saved to database per track_id
-track_saved_plates = {}  # {track_id: plate_text} - chỉ lưu 1 biển số mỗi track
-# STRICT: Chỉ cho phép lưu 1 biển số duy nhất cho mỗi session
-session_saved_plate = None  # Biển số đã lưu trong session hiện tại
-session_save_time = 0  # Thời gian lưu biển số cuối cùng
-
-# PERSISTENT DISPLAY SYSTEM - Hiển thị text ổn định - SIMPLIFIED
-persistent_displays = {}  # {track_id: {'plate': text, 'bbox': [x1,y1,x2,y2], 'confidence': conf, 'last_seen': time}}
-display_timeout = 0.0  # Hiển thị text ngay lập tức khi ra khỏi ROI - IMMEDIATE CLEANUP
-
-# OPTIMIZED TRACKING SYSTEM - Chỉ 1 track duy nhất cho mỗi đối tượng trong ROI
-roi_tracked_objects = {}  # {object_id: {'plate': text, 'bbox': [x1,y1,x2,y2], 'confidence': conf, 'last_seen': time, 'track_id': id}}
-roi_object_counter = 0  # Counter để tạo object_id duy nhất
-roi_saved_plates = {}  # {track_id: plate_text} - Chỉ lưu 1 biển số duy nhất cho mỗi track
-global_saved_tracks = {}  # {track_id: {'plate': text, 'timestamp': time}} - Global tracking để tránh trùng lặp
+track_saved_plates = {}
+session_saved_plate = None
+session_save_time = 0
+persistent_displays = {}
+display_timeout = 0.0
+roi_tracked_objects = {}
+roi_object_counter = 0
+roi_saved_plates = {}
+global_saved_tracks = {}
 
 # Global background subtractor for motion detection
 global_bg_subtractor = None
@@ -687,25 +1105,25 @@ last_roi_frame = None
 if GPU_INFO['cuda_available']:
     # GPU optimized for 20 FPS
     skip_frame_count = 0
-    max_skip_frames = 1  # Process almost every frame for 20 FPS
+    max_skip_frames = 0  # Process every frame for 20 FPS
     last_detection_time = 0
-    detection_cooldown = 0.1  # Very fast detection on GPU
+    detection_cooldown = 0.05  # Very fast detection on GPU
     last_motion_time = 0
-    motion_cooldown = 0.05  # Very fast motion detection on GPU
+    motion_cooldown = 0.03  # Very fast motion detection on GPU
     print("🎮 Using GPU-optimized settings for 20 FPS")
 else:
     # CPU optimized for 20 FPS
     skip_frame_count = 0
-    max_skip_frames = 2  # Process more frames for 20 FPS
+    max_skip_frames = 1  # Process almost every frame for 20 FPS
     last_detection_time = 0
-    detection_cooldown = 0.2  # Faster detection on CPU
+    detection_cooldown = 0.1  # Faster detection on CPU
     last_motion_time = 0
-    motion_cooldown = 0.1  # Faster motion detection on CPU
+    motion_cooldown = 0.05  # Faster motion detection on CPU
     print("💻 Using CPU-optimized settings for 20 FPS")
 
 # Anti-duplicate settings - GIẢM THRESHOLD ĐỂ LƯU DỮ LIỆU NHANH HƠN
 consistency_threshold = 2  # Giảm xuống 2 để lưu nhanh hơn
-max_ocr_attempts = 8       # Tăng số lần thử OCR
+max_ocr_attempts = 12      # Tăng số lần thử OCR để cải thiện accuracy
 consistency_window = 10    # Giảm cửa sổ consistency
 
 # Configuration - OPTIMIZED FOR VEHICLE AND LICENSE PLATE DETECTION
@@ -871,17 +1289,19 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
         current_time = time.time()
         plate_text = plate_data['plate']
         
-        # KIỂM TRA MỚI: Mỗi track chỉ lưu 1 biển số duy nhất
-        if track_id in track_saved_plates:
-            if track_saved_plates[track_id] == plate_text:
+        # KIỂM TRA MỚI: Mỗi track chỉ lưu 1 biển số duy nhất - THREAD SAFE
+        track_saved_plates_data = safe_get_global('track_saved_plates', {})
+        if track_id in track_saved_plates_data:
+            if track_saved_plates_data[track_id] == plate_text:
                 logger.info(f"⏭️ Track {track_id} đã lưu biển số '{plate_text}' rồi, bỏ qua")
                 return
             else:
-                logger.info(f"🔄 Track {track_id} thay đổi biển số từ '{track_saved_plates[track_id]}' sang '{plate_text}'")
+                logger.info(f"🔄 Track {track_id} thay đổi biển số từ '{track_saved_plates_data[track_id]}' sang '{plate_text}'")
         
-        # Kiểm tra nếu biển số đã được gửi trong vòng 5 phút (toàn hệ thống)
-        if plate_text in sent_plates:
-            last_sent_time = sent_plates[plate_text]
+        # Kiểm tra nếu biển số đã được gửi trong vòng 5 phút (toàn hệ thống) - THREAD SAFE
+        sent_plates_data = safe_get_global('sent_plates', {})
+        if plate_text in sent_plates_data:
+            last_sent_time = sent_plates_data[plate_text]
             if current_time - last_sent_time < plate_cooldown:
                 logger.info(f"⏭️ Biển số {plate_text} đã được gửi gần đây, bỏ qua")
                 return
@@ -910,25 +1330,75 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
         # Overall confidence: average of both
         overall_confidence = (ocr_confidence + detection_confidence) / 2
         
-        # Check BlackList and WhiteList matches - DISABLED for now
-        # In production, this should query the actual database
+        # Check BlackList and WhiteList matches - IMPLEMENTED
         is_whitelist_match = False
         is_blacklist_match = False
         
-        # TODO: Implement proper database query for BlackList/WhiteList
-        # For now, we'll set both to False to avoid false positives
-        # This should be replaced with actual database queries:
-        # - Query whitelist table for exact plate number match
-        # - Query blacklist table for exact plate number match
-        # - Set is_whitelist_match and is_blacklist_match accordingly
+        # Process plate text to ensure correct format
+        processed_plate = process_plate_text(plate_data['plate'])
+        
+        try:
+            # Query database for BlackList and WhiteList matches
+            is_whitelist_match, is_blacklist_match = check_plate_against_lists(processed_plate)
+            logger.info(f"🔍 BlackList/WhiteList check for '{processed_plate}': WL={is_whitelist_match}, BL={is_blacklist_match}")
+        except Exception as e:
+            logger.error(f"❌ Error checking BlackList/WhiteList: {e}")
+            # Keep default values if check fails
+            is_whitelist_match = False
+            is_blacklist_match = False
         
         # Tạo hash ngắn từ unique_string
         unique_hash = hashlib.md5(unique_string.encode()).hexdigest()[:8]
-        # Process plate text to ensure correct format
-        processed_plate = process_plate_text(plate_data['plate'])
+        
         if not processed_plate:
             logger.warning(f"⚠️ Plate text '{plate_data['plate']}' failed format validation, skipping...")
             return False
+        
+        # FIXED: Create actual crop image from bbox
+        crop_image_path = ""
+        if 'bbox' in plate_data and len(plate_data['bbox']) >= 4:
+            try:
+                # Get the current frame from thread data
+                thread_container = get_thread_data_container()
+                current_frame = thread_container.get('last_roi_frame')
+                
+                if current_frame is not None:
+                    # Validate bbox coordinates
+                    bbox = plate_data['bbox']
+                    x1, y1, x2, y2 = bbox[:4]
+                    
+                    # Ensure bbox is within frame bounds
+                    frame_height, frame_width = current_frame.shape[:2]
+                    x1 = max(0, min(x1, frame_width - 1))
+                    y1 = max(0, min(y1, frame_height - 1))
+                    x2 = max(x1 + 1, min(x2, frame_width))
+                    y2 = max(y1 + 1, min(y2, frame_height))
+                    
+                    # Check if bbox is valid
+                    if x2 > x1 and y2 > y1 and (x2 - x1) > 10 and (y2 - y1) > 10:
+                        # Create crop image with validated bbox
+                        crop = crop_and_enhance_plate(current_frame, [x1, y1, x2, y2], enhancement_level="minimal")
+                        
+                        if crop is not None and crop.size > 0:
+                            # Save crop image
+                            clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", processed_plate)
+                            crop_filename = f"plate_{camera_id}_{track_id}_{clean_plate_text}_{int(current_time)}.jpg"
+                            crop_path = os.path.join(CROPS_FOLDER, crop_filename)
+                            
+                            success = cv2.imwrite(crop_path, crop)
+                            if success:
+                                crop_image_path = f"static/crops/{crop_filename}"
+                                logger.info(f"✅ Crop image saved: {crop_image_path} (bbox: {x1},{y1}-{x2},{y2})")
+                            else:
+                                logger.warning(f"⚠️ Failed to save crop image: {crop_path}")
+                        else:
+                            logger.warning(f"⚠️ Invalid crop image for plate '{processed_plate}' (bbox: {x1},{y1}-{x2},{y2})")
+                    else:
+                        logger.warning(f"⚠️ Invalid bbox for plate '{processed_plate}': {bbox} -> ({x1},{y1}-{x2},{y2})")
+                else:
+                    logger.warning(f"⚠️ No current frame available for cropping")
+            except Exception as e:
+                logger.error(f"❌ Error creating crop image: {e}")
             
         data = {
             "detection_uuid": f"cam_{camera_id}_{unique_hash}",
@@ -942,7 +1412,7 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             "detection_confidence": detection_confidence,
             "bbox": plate_data['bbox'],
             "frame_path": frame_path or "",
-            "crop_image_path": frame_path or "",  # Add crop image path
+            "crop_image_path": crop_image_path,  # FIXED: Use actual crop image path
             "detected_vehicle_type": "other",
             "source_type": source_type,
             "video_filename": video_filename,
@@ -950,7 +1420,8 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             "camera_name": camera_name or (f"Camera_{camera_id}" if camera_id else "Camera_1"),
             "is_whitelist_match": is_whitelist_match,
             "is_blacklist_match": is_blacklist_match,
-            "alert_triggered": is_blacklist_match  # Trigger alert for blacklist matches
+            "alert_triggered": is_blacklist_match,  # Trigger alert for blacklist matches
+            "notification_message": get_notification_message(processed_plate, is_whitelist_match, is_blacklist_match)
         }
         
         # Gửi trực tiếp tới Node.js API (như test files)
@@ -978,10 +1449,10 @@ def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, 
             
             if response.status_code in [200, 201]:
                 logger.info(f"✅ Biển số {processed_plate} đã lưu vào database thành công!")
-                # Cập nhật thời gian gửi cuối cùng
-                sent_plates[processed_plate] = current_time
-                # Cập nhật track đã lưu biển số này
-                track_saved_plates[track_id] = processed_plate
+                # Cập nhật thời gian gửi cuối cùng - THREAD SAFE
+                safe_update_global('sent_plates', lambda x: {**x, processed_plate: current_time})
+                # Cập nhật track đã lưu biển số này - THREAD SAFE
+                safe_update_global('track_saved_plates', lambda x: {**x, track_id: processed_plate})
                 return True
             else:
                 logger.error(f"❌ Lỗi lưu biển số vào database: {response.status_code}")
@@ -1077,9 +1548,9 @@ def update_plate_if_better(plate_text, confidence, plate_history, track_id=None)
         existing = plate_history[clean_text]
         existing_conf = existing.get('confidence', 0.0)
         
-        # Update if significantly better (15% improvement threshold)
-        if confidence > existing_conf * 1.15:
-            logger.info(f"🔄 UPDATING plate '{clean_text}': {existing_conf:.3f} -> {confidence:.3f} (track: {track_id})")
+        # Update if significantly better (10% improvement threshold) - more sensitive
+        if confidence > existing_conf * 1.10:
+            # Optimized: Remove logging for better FPS
             plate_history[clean_text].update({
                 'confidence': confidence,
                 'timestamp': time.time(),
@@ -1103,7 +1574,7 @@ def update_plate_if_better(plate_text, confidence, plate_history, track_id=None)
         return True, "new"
 
 def group_similar_plates_at_end(plate_history, similarity_threshold=0.7):
-    """Nhóm các biển số tương tự ở cuối quá trình xử lý"""
+    """Nhóm các biển số tương tự ở cuối quá trình xử lý - OPTIMIZED"""
     try:
         current_time = time.time()
         grouped_plates = {}
@@ -1147,7 +1618,7 @@ def group_similar_plates_at_end(plate_history, similarity_threshold=0.7):
                 for p in group_plates:
                     processed_plates.add(p['plate'])
                 
-                logger.info(f"🔗 GROUPED similar plates: {[p['plate'] for p in group_plates]} -> '{best_text}' (conf: {best_data.get('confidence', 0.0):.3f})")
+                # Optimized: Remove logging for better FPS
             else:
                 # Biển số không có tương tự, giữ nguyên
                 grouped_plates[plate_text] = plate_data
@@ -1160,8 +1631,9 @@ def group_similar_plates_at_end(plate_history, similarity_threshold=0.7):
         return plate_history
 
 def update_tracking_display_with_confidence(track_id, plate_text, confidence, bbox, frame):
-    """Cập nhật hiển thị tracking với thông tin độ tin cậy mới"""
-    global persistent_displays
+    """Cập nhật hiển thị tracking với thông tin độ tin cậy mới - THREAD SAFE"""
+    # Get thread-safe data
+    persistent_displays = get_thread_safe_data('persistent_displays')
     
     try:
         current_time = time.time()
@@ -1188,14 +1660,18 @@ def update_tracking_display_with_confidence(track_id, plate_text, confidence, bb
                 if bbox and len(bbox) >= 4:
                     x1, y1, x2, y2 = bbox[:4]
                     display_text = f"ID: {track_id} {plate_text} ({confidence:.2f})"
-                    text_y = max(y1 - 20, 20)
+                    # Text nằm ở phía trên, giữa bounding box
+                    text_y = max(y1 - 15, 25)
+                    text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+                    # Tính toán vị trí x để text nằm giữa bounding box
+                    text_x = x1 + (x2 - x1 - text_size[0]) // 2
                     
-                    # Background cho text
-                    text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                    cv2.rectangle(frame, (x1, text_y - 20), (x1 + text_size[0] + 10, text_y + 5), (0, 0, 0), -1)
+                    # Background đen vừa với text
+                    cv2.rectangle(frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
                     
-                    cv2.putText(frame, display_text, (x1 + 5, text_y),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    # Text đậm hơn (thickness = 3)
+                    cv2.putText(frame, display_text, (text_x, text_y),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
                 
                 return True
         else:
@@ -1214,18 +1690,19 @@ def update_tracking_display_with_confidence(track_id, plate_text, confidence, bb
         return False
 
 def get_enhanced_plate_history():
-    """Lấy thông tin chi tiết về lịch sử biển số với thông tin similarity"""
-    global plate_history
-    
+    """Lấy thông tin chi tiết về lịch sử biển số với thông tin similarity - THREAD SAFE"""
     try:
+        # Use thread-safe access to plate_history
+        plate_history_data = safe_get_global('plate_history', {})
+        
         result = {
-            'total_plates': len(plate_history),
+            'total_plates': len(plate_history_data),
             'plates': {},
             'similarity_groups': []
         }
         
         # Thêm thông tin chi tiết cho mỗi biển số
-        for plate_text, plate_data in plate_history.items():
+        for plate_text, plate_data in plate_history_data.items():
             result['plates'][plate_text] = {
                 'confidence': plate_data.get('confidence', 0.0),
                 'timestamp': plate_data.get('timestamp', 0),
@@ -1239,11 +1716,11 @@ def get_enhanced_plate_history():
         
         # Tìm các nhóm tương tự
         processed_plates = set()
-        for plate_text in plate_history.keys():
+        for plate_text in plate_history_data.keys():
             if plate_text in processed_plates:
                 continue
                 
-            similar_plates = find_similar_plates(plate_text, plate_history, similarity_threshold=0.6)
+            similar_plates = find_similar_plates(plate_text, plate_history_data, similarity_threshold=0.6)
             if similar_plates:
                 group = [plate_text] + [p['plate'] for p in similar_plates]
                 result['similarity_groups'].append({
@@ -1484,9 +1961,7 @@ def is_valid_vietnam_plate_format(text):
     # FORMAT CHÍNH XÁC DỰA TRÊN HÌNH ẢNH: XXY-ZZZ.WW
     vietnam_plate_patterns = [
         r'^\d{2}[A-Z]-\d{3}\.\d{2}$',          # 30A-390.59, 68A-410.30
-        r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',        # 30A1-390.59
         r'^\d{2}[A-Z]-\d{3}\.\d{2}$',          # 24A-410.10 (xe máy)
-        r'^\d{2}[A-Z]\d-\d{3}\.\d{2}$',        # 24A1-410.10
     ]
     
     return any(re.match(pattern, text) for pattern in vietnam_plate_patterns)
@@ -1833,9 +2308,9 @@ def validate_ocr_result_strictly(plate_text, confidence, track_id, ocr_confidenc
     if len(clean_text) > MAX_PLATE_LENGTH:
         return False, f"Too long: {len(clean_text)} > {MAX_PLATE_LENGTH}"
     
-    # Detection confidence check - STRICT - TĂNG NGƯỠNG
-    if confidence < 0.6:  # Tăng từ MIN_CONFIDENCE lên 0.6
-        return False, f"Detection confidence too low: {confidence:.3f} < 0.6"
+    # Detection confidence check - BALANCED - Sử dụng MIN_CONFIDENCE
+    if confidence < MIN_CONFIDENCE:  # Sử dụng MIN_CONFIDENCE thay vì hardcode 0.6
+        return False, f"Detection confidence too low: {confidence:.3f} < {MIN_CONFIDENCE}"
     
     # OCR confidence check - STRICT (nếu có)
     if ocr_confidence is not None and ocr_confidence < MIN_OCR_CONFIDENCE:
@@ -1872,29 +2347,51 @@ def validate_ocr_result_strictly(plate_text, confidence, track_id, ocr_confidenc
     return True, "Strict validation passed"
 
 def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None, bbox=None):
-    """Enhanced save logic with STRICT consistency tracking and bbox validation"""
-    global duplicate_counter, plate_history, track_consistency, ocr_attempts_per_track
+    """OPTIMIZED save logic - simplified for 20 FPS performance - THREAD SAFE"""
+    # Get thread-safe data
+    plate_history = get_thread_safe_data('plate_history')
+    track_consistency = get_thread_safe_data('track_consistency')
+    ocr_attempts_per_track = get_thread_safe_data('ocr_attempts_per_track')
     
     if not plate_text or not isinstance(plate_text, str):
         return False
     
     clean_text = plate_text.upper().strip()
     
-    # STRICT validation - chỉ chấp nhận format chính xác
-    is_valid, reason = validate_ocr_result_strictly(plate_text, confidence, 0, ocr_confidence)
-    
-    if not is_valid:
-        logger.info(f"❌ Not saving '{clean_text}': {reason}")
+    # SIMPLIFIED validation - chỉ kiểm tra cơ bản để tăng tốc độ
+    if len(clean_text) < MIN_PLATE_LENGTH or len(clean_text) > MAX_PLATE_LENGTH:
+        logger.debug(f"❌ Invalid length '{clean_text}': {len(clean_text)}")
         return False
     
-    # BBOX SIMILARITY CHECK - Kiểm tra vị trí bbox để tránh trùng lặp
+    if confidence < MIN_CONFIDENCE:
+        logger.debug(f"❌ Low confidence '{clean_text}': {confidence:.3f} < {MIN_CONFIDENCE}")
+        return False
+    
+    # Basic format check - simplified
+    if not re.match(r'^\d{2}[A-Z]', clean_text):
+        logger.debug(f"❌ Invalid format '{clean_text}'")
+        return False
+    
+    # SIMPLIFIED duplicate check - chỉ kiểm tra trực tiếp để tăng tốc độ
+    current_time = time.time()
+    
+    # Kiểm tra trùng lặp đơn giản - chỉ trong 30 giây gần đây
+    if clean_text in plate_history:
+        existing_data = plate_history[clean_text]
+        if current_time - existing_data.get('timestamp', 0) < 30.0:  # 30 giây cooldown
+            if confidence <= existing_data.get('confidence', 0):
+                logger.debug(f"⏭️ Duplicate plate '{clean_text}' with lower/equal confidence")
+                return False
+            else:
+                logger.info(f"🔄 Updating plate '{clean_text}' with higher confidence: {confidence:.3f}")
+    
+    # SIMPLIFIED bbox check - chỉ kiểm tra cơ bản
     if bbox and len(bbox) >= 4:
         x1, y1, x2, y2 = bbox[:4]
-        bbox_center = ((x1 + x2) / 2, (y1 + y2) / 2)
         bbox_area = (x2 - x1) * (y2 - y1)
+        bbox_center = ((x1 + x2) / 2, (y1 + y2) / 2)  # FIXED: Define bbox_center
         
-        # Kiểm tra với các biển số đã lưu gần đây (trong 10 giây)
-        current_time = time.time()
+        # Chỉ kiểm tra với các biển số đã lưu gần đây (trong 5 giây) - giảm overhead
         for key, plate_data in plate_history.items():
             if current_time - plate_data.get('timestamp', 0) < 10.0:  # Chỉ kiểm tra trong 10 giây
                 saved_bbox = plate_data.get('bbox')
@@ -1987,15 +2484,15 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
         # 2. SỬ DỤNG LEVENSHTEIN ĐỂ ĐÁNH GIÁ ĐỘ TƯƠNG ĐỒNG VÀ CẬP NHẬT NẾU TỐT HƠN
         updated, reason = update_plate_if_better(clean_text, confidence, plate_history, track_id)
         if updated and reason == "updated":
-            logger.info(f"🔄 UPDATED existing plate '{clean_text}' with higher confidence: {confidence:.3f}")
+            # Optimized: Remove logging for better FPS
             return True
         else:
             duplicate_counter += 1
-            logger.debug(f"⏭️ Duplicate plate '{clean_text}' with lower/equal confidence: {confidence:.3f}")
+            # Optimized: Remove logging for better FPS
             return False
     
-    # 3. TÌM CÁC BIỂN SỐ TƯƠNG TỰ SỬ DỤNG LEVENSHTEIN
-    similar_plates = find_similar_plates(clean_text, plate_history, similarity_threshold=0.6)
+    # 3. TÌM CÁC BIỂN SỐ TƯƠNG TỰ SỬ DỤNG LEVENSHTEIN - OPTIMIZED
+    similar_plates = find_similar_plates(clean_text, plate_history, similarity_threshold=0.8)  # Higher threshold for better grouping
     
     if similar_plates:
         # Tìm biển số tương tự có độ tin cậy cao nhất
@@ -2004,11 +2501,11 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
         best_plate = best_similar['plate']
         similarity = best_similar['similarity']
         
-        logger.info(f"🔍 Found similar plate '{best_plate}' (similarity: {similarity:.3f}, conf: {best_confidence:.3f})")
+        # Optimized: Remove logging for better FPS
         
         # Nếu biển số mới có độ tin cậy cao hơn đáng kể, cập nhật
-        if confidence > best_confidence * 1.1:  # 10% improvement threshold
-            logger.info(f"🔄 UPDATING similar plate '{best_plate}' -> '{clean_text}' (conf: {best_confidence:.3f} -> {confidence:.3f})")
+        if confidence > best_confidence * 1.05:  # 5% improvement threshold - more sensitive
+            # Optimized: Remove logging for better FPS
             
             # Xóa biển số cũ và thêm biển số mới
             del plate_history[best_plate]
@@ -2036,14 +2533,22 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
         'track_id': track_id,
         'last_updated': time.time()
     }
+    
+    # Save back to thread-safe storage
+    set_thread_safe_data('plate_history', plate_history)
+    set_thread_safe_data('track_consistency', track_consistency)
+    set_thread_safe_data('ocr_attempts_per_track', ocr_attempts_per_track)
+    
     logger.info(f"✅ NEW PLATE SAVED: '{clean_text}' (conf: {confidence:.3f})")
     return True
 
 def update_persistent_displays(track_id, plate_text, bbox, confidence):
-    """Cập nhật persistent display cho track - SIMPLIFIED"""
-    global persistent_displays
+    """Cập nhật persistent display cho track - THREAD SAFE"""
     try:
         current_time = time.time()
+        
+        # Get thread-safe persistent displays
+        persistent_displays = get_thread_safe_data('persistent_displays')
         
         persistent_displays[track_id] = {
             'plate': plate_text,
@@ -2051,13 +2556,20 @@ def update_persistent_displays(track_id, plate_text, bbox, confidence):
             'confidence': confidence,
             'last_seen': current_time
         }
+        
+        # Save back to thread-safe storage
+        set_thread_safe_data('persistent_displays', persistent_displays)
+        
         logger.debug(f"📱 Updated persistent display for track {track_id}: '{plate_text}' (timeout=0)")
     except Exception as e:
         logger.error(f"Error updating persistent display: {e}")
 
 def find_or_create_roi_object_with_track_id(plate_text, bbox, confidence, roi, track_id):
-    """Tìm hoặc tạo object trong ROI với ByteTracker track_id - STABLE TRACKING"""
-    global roi_tracked_objects, roi_object_counter, roi_saved_plates
+    """Tìm hoặc tạo object trong ROI với ByteTracker track_id - THREAD SAFE"""
+    # Get thread-safe data
+    roi_tracked_objects = get_thread_safe_data('roi_tracked_objects')
+    roi_object_counter = get_thread_safe_data('roi_object_counter')
+    roi_saved_plates = get_thread_safe_data('roi_saved_plates')
     
     try:
         current_time = time.time()
@@ -2085,18 +2597,29 @@ def find_or_create_roi_object_with_track_id(plate_text, bbox, confidence, roi, t
                 return obj_id
         
         # Nếu không tìm thấy object với track_id này, tạo mới
-        roi_object_counter += 1
-        new_object_id = roi_object_counter  # ID cố định: 1, 2, 3, ...
-        
-        roi_tracked_objects[new_object_id] = {
-            'plate': plate_text,
-            'bbox': bbox,
-            'confidence': confidence,
-            'last_seen': current_time,
-            'track_id': track_id  # Lưu ByteTracker track_id
+        # CHỈ tạo object mới khi track_id thực sự mới (không phải fallback)
+        if track_id and track_id > 0:  # Chỉ tạo khi có ByteTracker track_id hợp lệ
+            roi_object_counter += 1
+            new_object_id = roi_object_counter  # ID cố định: 1, 2, 3, ...
+            
+            roi_tracked_objects[new_object_id] = {
+                'plate': plate_text,
+                'bbox': bbox,
+                'confidence': confidence,
+                'last_seen': current_time,
+                'track_id': track_id  # Lưu ByteTracker track_id
         }
         
-        logger.info(f"🆕 NEW ROI object {new_object_id} (Track {track_id}): '{plate_text}' (conf: {confidence:.3f})")
+            logger.info(f"🆕 NEW ROI object {new_object_id} (Track {track_id}): '{plate_text}' (conf: {confidence:.3f})")
+        else:
+            # Không tạo object cho fallback tracks
+            logger.debug(f"⏭️ Skipping fallback track creation for track_id: {track_id}")
+        
+        # Save back to thread-safe storage
+        set_thread_safe_data('roi_tracked_objects', roi_tracked_objects)
+        set_thread_safe_data('roi_object_counter', roi_object_counter)
+        set_thread_safe_data('roi_saved_plates', roi_saved_plates)
+        
         return new_object_id
         
     except Exception as e:
@@ -2104,8 +2627,11 @@ def find_or_create_roi_object_with_track_id(plate_text, bbox, confidence, roi, t
         return None
 
 def find_or_create_roi_object(plate_text, bbox, confidence, roi):
-    """Tìm hoặc tạo object trong ROI - OPTIMIZED TRACKING với ID cố định"""
-    global roi_tracked_objects, roi_object_counter, roi_saved_plates
+    """Tìm hoặc tạo object trong ROI - THREAD SAFE"""
+    # Get thread-safe data
+    roi_tracked_objects = get_thread_safe_data('roi_tracked_objects')
+    roi_object_counter = get_thread_safe_data('roi_object_counter')
+    roi_saved_plates = get_thread_safe_data('roi_saved_plates')
     
     try:
         current_time = time.time()
@@ -2152,18 +2678,29 @@ def find_or_create_roi_object(plate_text, bbox, confidence, roi):
             return best_object_id
         
         # Nếu không tìm thấy object phù hợp, tạo mới với ID cố định
-        roi_object_counter += 1
-        new_object_id = roi_object_counter  # ID cố định: 1, 2, 3, ...
-        
-        roi_tracked_objects[new_object_id] = {
-            'plate': plate_text,
-            'bbox': bbox,
-            'confidence': confidence,
-            'last_seen': current_time,
-            'track_id': new_object_id
+        # CHỈ tạo object mới khi thực sự cần thiết (không phải fallback)
+        if len(roi_tracked_objects) < 3:  # Giới hạn số lượng objects để tránh multiple tracking
+            roi_object_counter += 1
+            new_object_id = roi_object_counter  # ID cố định: 1, 2, 3, ...
+            
+            roi_tracked_objects[new_object_id] = {
+                'plate': plate_text,
+                'bbox': bbox,
+                'confidence': confidence,
+                'last_seen': current_time,
+                'track_id': new_object_id
         }
         
-        logger.info(f"🆕 NEW ROI object {new_object_id}: '{plate_text}' (conf: {confidence:.3f})")
+            logger.info(f"🆕 NEW ROI object {new_object_id}: '{plate_text}' (conf: {confidence:.3f})")
+        else:
+            # Không tạo object mới nếu đã có quá nhiều objects
+            logger.debug(f"⏭️ Skipping new object creation - too many objects: {len(roi_tracked_objects)}")
+        
+        # Save back to thread-safe storage
+        set_thread_safe_data('roi_tracked_objects', roi_tracked_objects)
+        set_thread_safe_data('roi_object_counter', roi_object_counter)
+        set_thread_safe_data('roi_saved_plates', roi_saved_plates)
+        
         return new_object_id
         
     except Exception as e:
@@ -2171,8 +2708,10 @@ def find_or_create_roi_object(plate_text, bbox, confidence, roi):
         return None
 
 def cleanup_roi_objects(roi):
-    """Xóa các object cũ khỏi ROI - IMMEDIATE CLEANUP với ByteTracker support"""
-    global roi_tracked_objects, roi_saved_plates
+    """Xóa các object cũ khỏi ROI - THREAD SAFE"""
+    # Get thread-safe data
+    roi_tracked_objects = get_thread_safe_data('roi_tracked_objects')
+    roi_saved_plates = get_thread_safe_data('roi_saved_plates')
     
     try:
         current_time = time.time()
@@ -2210,13 +2749,18 @@ def cleanup_roi_objects(roi):
             if track_id in roi_saved_plates:
                 del roi_saved_plates[track_id]
                 logger.debug(f"🗑️ Removed saved plate for Track {track_id}")
+        
+        # Save back to thread-safe storage
+        set_thread_safe_data('roi_tracked_objects', roi_tracked_objects)
+        set_thread_safe_data('roi_saved_plates', roi_saved_plates)
                 
     except Exception as e:
         logger.error(f"Error cleaning up ROI objects: {e}")
 
 def draw_roi_objects(frame, roi=None):
-    """Vẽ tất cả ROI objects lên frame - OPTIMIZED"""
-    global roi_tracked_objects
+    """Vẽ tất cả ROI objects lên frame - THREAD SAFE"""
+    # Get thread-safe data
+    roi_tracked_objects = get_thread_safe_data('roi_tracked_objects')
     
     try:
         current_time = time.time()
@@ -2252,16 +2796,20 @@ def draw_roi_objects(frame, roi=None):
             # Vẽ bounding box - màu xanh lá
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
-            # Vẽ text với background - CHỈ HIỂN THỊ TEXT NHẬN DIỆN
+            # Vẽ text - CHỈ HIỂN THỊ TEXT NHẬN DIỆN
             display_text = f"ID: {obj_id} {plate_text}"
-            text_y = max(y1 - 20, 20)
+            # Text nằm ở phía trên, giữa bounding box
+            text_y = max(y1 - 15, 25)
+            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+            # Tính toán vị trí x để text nằm giữa bounding box
+            text_x = x1 + (x2 - x1 - text_size[0]) // 2
             
-            # Background cho text
-            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-            cv2.rectangle(frame, (x1, text_y - 20), (x1 + text_size[0] + 10, text_y + 5), (0, 0, 0), -1)
+            # Background đen vừa với text
+            cv2.rectangle(frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
             
-            cv2.putText(frame, display_text, (x1 + 5, text_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            # Text đậm hơn (thickness = 3)
+            cv2.putText(frame, display_text, (text_x, text_y),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
             
     except Exception as e:
         logger.error(f"Error drawing ROI objects: {e}")
@@ -2270,10 +2818,12 @@ def draw_roi_objects(frame, roi=None):
 
 def cleanup_persistent_displays(roi=None):
     """Xóa các display cũ khỏi persistent_displays và kiểm tra ROI - IMMEDIATE CLEANUP"""
-    global persistent_displays
     try:
         current_time = time.time()
         old_tracks = []
+        
+        # Get thread-safe persistent displays
+        persistent_displays = get_thread_safe_data('persistent_displays')
         
         for track_id, display_data in persistent_displays.items():
             # IMMEDIATE: Kiểm tra vị trí bbox có còn trong ROI không TRƯỚC
@@ -2306,18 +2856,24 @@ def cleanup_persistent_displays(roi=None):
                     continue
         
         for track_id in old_tracks:
-            del persistent_displays[track_id]
-            logger.debug(f"🗑️ Removed persistent display for track {track_id}")
+            if track_id in persistent_displays:
+                del persistent_displays[track_id]
+                logger.debug(f"🗑️ Removed persistent display for track {track_id}")
+        
+        # Save back to thread-safe storage
+        set_thread_safe_data('persistent_displays', persistent_displays)
             
     except Exception as e:
         logger.error(f"Error cleaning up persistent displays: {e}")
 
 def draw_persistent_displays(frame, roi=None):
     """Vẽ tất cả persistent displays lên frame - SIMPLIFIED"""
-    global persistent_displays
     try:
         current_time = time.time()
         tracks_to_remove = []  # Danh sách track cần xóa
+        
+        # Get thread-safe persistent displays
+        persistent_displays = get_thread_safe_data('persistent_displays')
         
         for track_id, display_data in persistent_displays.items():
             # IMMEDIATE: Kiểm tra timeout với logic mới
@@ -2365,14 +2921,18 @@ def draw_persistent_displays(frame, roi=None):
             
             # Vẽ text với background - CHỈ HIỂN THỊ TEXT NHẬN DIỆN
             display_text = f"ID: {track_id} {plate_text}"
-            text_y = max(y1 - 20, 20)
+            # Text nằm ở phía trên, giữa bounding box
+            text_y = max(y1 - 15, 25)
+            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+            # Tính toán vị trí x để text nằm giữa bounding box
+            text_x = x1 + (x2 - x1 - text_size[0]) // 2
             
-            # Background cho text
-            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-            cv2.rectangle(frame, (x1, text_y - 20), (x1 + text_size[0] + 10, text_y + 5), (0, 0, 0), -1)
+            # Background đen vừa với text
+            cv2.rectangle(frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
             
-            cv2.putText(frame, display_text, (x1 + 5, text_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            # Text đậm hơn (thickness = 3)
+            cv2.putText(frame, display_text, (text_x, text_y),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
             
             # REMOVED: Vẽ confidence - chỉ hiển thị text nhận diện
         
@@ -2381,16 +2941,21 @@ def draw_persistent_displays(frame, roi=None):
             if track_id in persistent_displays:
                 del persistent_displays[track_id]
                 logger.debug(f"🗑️ Removed track {track_id} from persistent displays")
+        
+        # Save back to thread-safe storage
+        set_thread_safe_data('persistent_displays', persistent_displays)
             
     except Exception as e:
         logger.error(f"Error drawing persistent displays: {e}")
 
 def get_persistent_displays():
     """Get current persistent displays"""
-    global persistent_displays
     try:
         current_time = time.time()
         active_displays = {}
+        
+        # Get thread-safe persistent displays
+        persistent_displays = get_thread_safe_data('persistent_displays')
         
         for track_id, display_data in persistent_displays.items():
             if display_timeout == 0.0:
@@ -2414,10 +2979,15 @@ def get_persistent_displays():
 
 def clear_persistent_displays():
     """Clear all persistent displays"""
-    global persistent_displays
     try:
+        # Get thread-safe persistent displays
+        persistent_displays = get_thread_safe_data('persistent_displays')
         old_count = len(persistent_displays)
         persistent_displays.clear()
+        
+        # Save back to thread-safe storage
+        set_thread_safe_data('persistent_displays', persistent_displays)
+        
         logger.info(f"✅ Cleared {old_count} persistent displays")
         return {"success": True, "message": f"Cleared {old_count} persistent displays"}
     except Exception as e:
@@ -2425,20 +2995,20 @@ def clear_persistent_displays():
         return {"success": False, "message": f"Error clearing persistent displays: {e}"}
 
 def reset_anti_duplicate_system():
-    """Reset the anti-duplicate system"""
-    global plate_history, track_consistency, ocr_attempts_per_track, track_saved_plates, session_saved_plate, session_save_time, persistent_displays, roi_tracked_objects, roi_object_counter, roi_saved_plates, global_saved_tracks
+    """Reset the anti-duplicate system - THREAD SAFE"""
     try:
-        plate_history.clear()
-        track_consistency.clear()
-        ocr_attempts_per_track.clear()
-        track_saved_plates.clear()
-        persistent_displays.clear()
-        roi_tracked_objects.clear()  # Reset ROI objects
-        roi_saved_plates.clear()  # Reset saved plates
-        global_saved_tracks.clear()  # Reset global tracking
-        roi_object_counter = 0  # Reset counter
-        session_saved_plate = None
-        session_save_time = 0
+        # Use thread-safe operations
+        safe_set_global('plate_history', {})
+        safe_set_global('track_consistency', {})
+        safe_set_global('ocr_attempts_per_track', {})
+        safe_set_global('track_saved_plates', {})
+        safe_set_global('persistent_displays', {})
+        safe_set_global('roi_tracked_objects', {})  # Reset ROI objects
+        safe_set_global('roi_saved_plates', {})  # Reset saved plates
+        safe_set_global('global_saved_tracks', {})  # Reset global tracking
+        safe_set_global('roi_object_counter', 0)  # Reset counter
+        safe_set_global('session_saved_plate', None)
+        safe_set_global('session_save_time', 0)
         logger.info("✅ Anti-duplicate system and ROI tracking reset successfully")
         return {"success": True, "message": "Anti-duplicate system and ROI tracking reset successfully"}
     except Exception as e:
@@ -2446,33 +3016,46 @@ def reset_anti_duplicate_system():
         return {"success": False, "message": f"Error resetting anti-duplicate system: {e}"}
 
 def cleanup_tracked_objects():
-    """Enhanced cleanup with consistency tracking"""
-    global tracked_objects, plate_history, last_cleanup_time, track_consistency, ocr_attempts_per_track, track_saved_plates
+    """Enhanced cleanup with consistency tracking - THREAD SAFE"""
     
     try:
         current_time = time.time()
         
-        # Don't cleanup too frequently (every 5 seconds max)
-        if current_time - last_cleanup_time < 5:
+        # Don't cleanup too frequently (every 5 seconds max) - THREAD SAFE
+        last_cleanup_time_data = safe_get_global('last_cleanup_time', 0)
+        if current_time - last_cleanup_time_data < 5:
             return
         
-        last_cleanup_time = current_time
+        safe_set_global('last_cleanup_time', current_time)
         
-        if not tracked_objects:
+        tracked_objects_data = safe_get_global('tracked_objects', {})
+        if not tracked_objects_data:
             return
         
-        logger.info(f"🧹 ENHANCED cleanup of {len(tracked_objects)} tracked objects...")
+        logger.info(f"🧹 ENHANCED cleanup of {len(tracked_objects_data)} tracked objects...")
         
-        # Clean up old consistency data
-        old_tracks = set(track_consistency.keys()) - set(tracked_objects.keys())
+        # Clean up old consistency data - THREAD SAFE
+        track_consistency_data = safe_get_global('track_consistency', {})
+        ocr_attempts_data = safe_get_global('ocr_attempts_per_track', {})
+        track_saved_plates_data = safe_get_global('track_saved_plates', {})
+        plate_history_data = safe_get_global('plate_history', {})
+        
+        old_tracks = set(track_consistency_data.keys()) - set(tracked_objects_data.keys())
         for old_track in old_tracks:
-            del track_consistency[old_track]
-            if old_track in ocr_attempts_per_track:
-                del ocr_attempts_per_track[old_track]
-            if old_track in track_saved_plates:
-                del track_saved_plates[old_track]
-            if old_track in plate_history:
-                del plate_history[old_track]
+            if old_track in track_consistency_data:
+                del track_consistency_data[old_track]
+            if old_track in ocr_attempts_data:
+                del ocr_attempts_data[old_track]
+            if old_track in track_saved_plates_data:
+                del track_saved_plates_data[old_track]
+            if old_track in plate_history_data:
+                del plate_history_data[old_track]
+        
+        # Update global data
+        safe_set_global('track_consistency', track_consistency_data)
+        safe_set_global('ocr_attempts_per_track', ocr_attempts_data)
+        safe_set_global('track_saved_plates', track_saved_plates_data)
+        safe_set_global('plate_history', plate_history_data)
         
         if old_tracks:
             logger.info(f"🧹 Cleaned up {len(old_tracks)} old consistency records")
@@ -2598,11 +3181,26 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
         logger.error(f"Redis error: {str(e)}")
 
 def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
-    """Main detection function with enhanced plate detection and CENTERED ROI - OPTIMIZED FOR 20 FPS"""
-    global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
-    global frame_count, tracked_objects, skip_frame_count, last_detection_time, last_alpr_call_time
+    """Main detection function with enhanced plate detection and CENTERED ROI - OPTIMIZED FOR 20 FPS - THREAD SAFE"""
+    # Ensure camera_id is unique for each thread
+    if camera_id is None:
+        camera_id = threading.get_ident() % 1000 + 1  # Generate unique camera_id based on thread ID
     
-    frame_count += 1
+    thread_id = thread_manager.get_thread_id()
+    
+    # Register thread if not already registered
+    if thread_id not in thread_manager.active_threads:
+        thread_manager.register_thread(thread_id, camera_id, source_type, video_filename, camera_location, camera_name)
+    
+    # Update thread activity
+    thread_manager.update_thread_activity(thread_id)
+    
+    # Get thread-specific data container to prevent cross-stream contamination
+    thread_container = get_thread_data_container()
+    
+    # Use thread-safe data instead of thread-local
+    thread_container['frame_count'] = thread_container.get('frame_count', 0) + 1
+    frame_count = thread_container['frame_count']
     
     # Early return for invalid frames
     if frame is None or frame.size == 0:
@@ -2622,19 +3220,21 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             'skipped': True
         }
     
-    # Tính FPS với smoothing để giảm fluctuation
+    # Tính FPS với smoothing để giảm fluctuation - THREAD SAFE - OPTIMIZED FOR 20 FPS
     current_time = time.time()
-    fps_counter += 1
-    if current_time - last_fps_time >= 1.0:  # Cập nhật FPS mỗi 1 giây để ổn định hơn
-        raw_fps = fps_counter / (current_time - last_fps_time)
+    thread_container['fps_counter'] = thread_container.get('fps_counter', 0) + 1
+    if current_time - thread_container.get('last_fps_time', current_time) >= 1.0:  # Cập nhật FPS mỗi 1 giây để ổn định hơn
+        raw_fps = thread_container['fps_counter'] / (current_time - thread_container.get('last_fps_time', current_time))
         # Smooth FPS calculation để giảm fluctuation
-        if current_fps == 0:
-            current_fps = raw_fps
+        if thread_container.get('current_fps', 0) == 0:
+            thread_container['current_fps'] = raw_fps
         else:
-            current_fps = 0.8 * current_fps + 0.2 * raw_fps  # Less aggressive smoothing
-        fps_counter = 0
-        last_fps_time = current_time
-        logger.info(f"📊 Current FPS: {current_fps:.1f} (raw: {raw_fps:.1f})")
+            thread_container['current_fps'] = 0.8 * thread_container.get('current_fps', 0) + 0.2 * raw_fps  # More stable smoothing
+        thread_container['fps_counter'] = 0
+        thread_container['last_fps_time'] = current_time
+        # Reduced logging for performance
+        if thread_container.get('current_fps', 0) < 3:  # Only log if FPS is low
+            logger.info(f"📊 Current FPS: {thread_container.get('current_fps', 0):.1f} (raw: {raw_fps:.1f})")
     
     curr_time = time.time()
     original_height, original_width = frame.shape[:2]
@@ -2648,19 +3248,26 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     
     # Vẽ ROI trước khi kiểm tra skip
     cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 2)  # Vàng, nét dày hơn
-    cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    # Điều chỉnh vị trí ROI text để tránh che khuất - di chuyển xuống dưới
+    cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
     
     # OPTIMIZED: Consistent frame skipping for stable FPS
     should_skip = False
     
-    # Kiểm tra motion trong ROI trước
-    has_motion = has_motion_in_roi(frame, roi)
+    # OPTIMIZED: Minimal frame skipping for 20 FPS - only skip if FPS is very high
+    if ENABLE_FPS_THROTTLING and thread_container.get('current_fps', 0) > 0:
+        # Only skip frames if FPS is significantly above target (50+ FPS)
+        if thread_container.get('current_fps', 0) > 50:  # Much less aggressive - only skip at very high FPS
+            should_skip = True
+        elif thread_container.get('current_fps', 0) < 25:  # If FPS is reasonable, process every frame
+            should_skip = False
+        else:
+            # Check motion only when FPS is very high (25-50 FPS)
+            has_motion = has_motion_in_roi(frame, roi)
+            if not has_motion:
+                should_skip = True
     
-    # IMMEDIATE DISPLAY MODE - Process every frame for instant detection
-    should_skip = False  # Never skip frames for immediate display
-    
-    # REMOVED: Frame skipping - Process every frame for immediate display
-    logger.debug(f"🔄 Processing frame {frame_count} - IMMEDIATE DISPLAY MODE")
+    # Optimized: Remove logging for better FPS
     
     # Ensure ROI is valid
     if roi_xmax <= roi_xmin or roi_ymax <= roi_ymin:
@@ -2673,12 +3280,15 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         roi_ymax = center_y + roi_height // 2
         logger.warning("ROI không hợp lệ, sử dụng nửa khung hình ở giữa")
     
-    # Extract ROI frame
+    # Extract ROI frame - optimized single extraction
     roi_frame = frame[roi_ymin:roi_ymax, roi_xmin:roi_xmax]
     
-    # Ensure ROI frame has valid size
+    # FIXED: Save ROI frame to thread data for cropping
+    thread_container['last_roi_frame'] = frame.copy()  # Save original frame for cropping
+    
+    # Ensure ROI frame has valid size - optimized check
     if roi_frame.shape[0] < 50 or roi_frame.shape[1] < 50:
-        logger.warning(f"ROI frame too small: {roi_frame.shape}, using centered half frame")
+        # Use centered half frame as fallback
         center_x, center_y = original_width // 2, original_height // 2
         roi_width, roi_height = max(original_width // 2, 100), max(original_height // 2, 100)
         roi_xmin = max(0, center_x - roi_width // 2)
@@ -2697,8 +3307,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             else:
                 roi_frame_rgb = roi_frame
                 
-            logger.info(f"🔍 ROI frame shape: {roi_frame_rgb.shape}, size: {roi_frame_rgb.size}")
-            logger.info(f"🔍 ROI coordinates: ({roi_xmin}, {roi_ymin}) to ({roi_xmax}, {roi_ymax})")
+            # Optimized: Remove logging for better FPS
             
             # Ensure frame has minimum size
             if roi_frame_rgb.shape[0] >= 50 and roi_frame_rgb.shape[1] >= 50:
@@ -2708,16 +3317,15 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 
                 if cached_result and 'alpr_results' in cached_result:
                     alpr_results = cached_result['alpr_results']
-                    logger.info(f"🚀 Using cached detection result: {len(alpr_results)} objects")
+                    # Optimized: Remove logging for better FPS
                 else:
                     # OPTIMIZED: Throttle FastALPR calls to prevent video pause
                     current_time = time.time()
                     
-                    # OPTIMIZED: FastALPR with minimal cooldown for 20 FPS
-                    if current_time - last_alpr_call_time >= 0.01:  # 10ms cooldown (50 FPS max)
+                    # OPTIMIZED: FastALPR with minimal cooldown for 20 FPS - THREAD SAFE
+                    if current_time - thread_container.get('last_alpr_call_time', 0) >= 0.005:  # 5ms cooldown (200 FPS max)
                         try:
-                            logger.info(f"🔍 Calling FastALPR on ROI frame...")
-                            # OPTIMIZED: Gọi FastALPR trực tiếp (không enhancement)
+                            # OPTIMIZED: Gọi FastALPR trực tiếp (không enhancement) - 5 FPS
                             alpr_results = alpr.predict(roi_frame_rgb)
                             
                             # Convert to list if needed
@@ -2726,8 +3334,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             else:
                                 alpr_results = []
                             
-                            logger.info(f"🔍 FastALPR detected {len(alpr_results)} objects in ROI")
-                            last_alpr_call_time = current_time
+                            # Optimized: Remove logging for better FPS
+                            if len(alpr_results) > 0:
+                                thread_container['last_alpr_call_time'] = current_time
                             
                             # Cache result
                             if ENABLE_CACHING:
@@ -2744,13 +3353,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         logger.debug(f"⏱️ FastALPR throttled - using previous results")
                         alpr_results = []
                 
-                # Cập nhật thời gian detection nếu có kết quả
+                # Cập nhật thời gian detection nếu có kết quả - THREAD SAFE
                 if len(alpr_results) > 0:
-                    last_detection_time = curr_time
-                    skip_frame_count = 0  # Reset skip counter khi có detection
-                    logger.info(f"✅ Detection successful - {len(alpr_results)} objects found")
-                else:
-                    logger.info(f"❌ No detections found in ROI")
+                    thread_container['last_detection_time'] = curr_time
+                    # skip_frame_count = 0  # Reset skip counter khi có detection
+                    # Optimized: Remove logging for better FPS
             else:
                 logger.warning(f"ROI frame too small for detection: {roi_frame_rgb.shape}")
                 
@@ -2818,15 +3425,33 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
 
     # SỬ DỤNG BYTETRACKER ĐỂ TRACK ỔN ĐỊNH TRONG ROI
     # Update ByteTracker với detections
+    tracks = []
     try:
         if len(detections_np) > 0:
-            logger.info(f"🔍 ByteTracker input: {len(detections_np)} detections")
-            tracks = byte_tracker.update(
-                output_results=detections_np,
+            # FIXED: ByteTracker cần detections với format [x1, y1, x2, y2, conf, class_id]
+            # Thêm class_id = 0 cho tất cả detections
+            detections_with_class = np.column_stack([detections_np, np.zeros(len(detections_np))])
+            
+            # FIXED: Convert to tensor format for ByteTracker
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    detections_tensor = torch.from_numpy(detections_with_class).cuda()
+                else:
+                    detections_tensor = torch.from_numpy(detections_with_class)
+                
+                tracks = byte_tracker.update(
+                    output_results=detections_tensor,
                 img_info=(original_height, original_width),
                 img_size=(original_height, original_width)
             )
-            logger.info(f"🔍 ByteTracker output: {len(tracks)} tracks")
+            except ImportError:
+                # Fallback to numpy if torch not available
+                    tracks = byte_tracker.update(
+                    output_results=detections_with_class,
+                    img_info=(original_height, original_width),
+                    img_size=(original_height, original_width)
+                )
             
             # Lọc tracks chỉ trong ROI và giới hạn số lượng
             roi_tracks = []
@@ -2860,12 +3485,15 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     logger.debug(f"❌ Track {track_id} ngoài ROI: ({x1:.0f},{y1:.0f})-({x2:.0f},{y2:.0f})")
             
             tracks = roi_tracks
-            logger.info(f"🔍 ROI-filtered tracks: {len(tracks)} tracks (max 5)")
+            # Optimized: Remove logging for better FPS
         else:
             tracks = []
-            logger.info(f"🔍 No detections for ByteTracker")
     except Exception as e:
         logger.error(f"ByteTracker update failed: {e}")
+        tracks = []
+        
+        # DISABLED FALLBACK: Không tạo fallback tracks để tránh multiple tracking
+        # Chỉ sử dụng ByteTracker tracks để đảm bảo consistency
         tracks = []
 
     # OPTIMIZED TRACKING SYSTEM - Chỉ 1 track duy nhất cho mỗi đối tượng trong ROI
@@ -2873,24 +3501,23 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     cleanup_roi_objects(roi)  # Cleanup ROI objects trước
     cleanup_persistent_displays(roi)  # Cleanup persistent displays
 
-    # Display FPS and detections only
-    fps_text = f"FPS: {current_fps:.1f}"
-    cv2.putText(display_frame, fps_text, (original_width - 150, 35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    # Display FPS and detections only - THREAD SAFE - FIXED POSITION
+    fps_text = f"FPS: {thread_container.get('current_fps', 0):.1f}"
+    # FIXED: Di chuyển FPS sang trái để tránh bị che khuất ở góc phải
+    cv2.putText(display_frame, fps_text, (original_width - 350, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 0), 3)
     
     detections_text = f"Detections: {len(detections)}"
-    cv2.putText(display_frame, detections_text, (10, 35),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+    # FIXED: Di chuyển Detections lên trên cùng bên trái - tăng khoảng cách
+    cv2.putText(display_frame, detections_text, (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 0), 3)
 
     # FIXED: Sử dụng ByteTracker tracks thay vì tạo object mới
     boxes = []
     labels = []
     ocr_results = []
     
-    logger.info(f"🔍 Processing {len(plate_detections)} plate detections")
-    logger.info(f"🔍 Current time: {current_time}")
-    logger.info(f"🔍 Plate history keys: {list(plate_history.keys())}")
-    logger.info(f"🔍 ByteTracker tracks: {len(tracks)} tracks")
+    # Optimized: Remove logging for better FPS
     
     # FIXED: Sử dụng ByteTracker tracks để mapping với detections
     processed_plates = set()  # Tránh xử lý trùng lặp
@@ -2932,7 +3559,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         confidence = detection['confidence']
         bbox = detection['bbox']
         
-        logger.debug(f"🔍 Detection {i}: plate='{plate_text}', conf={confidence:.3f}, bbox={bbox}")
+        # Optimized: Remove logging for better FPS
         
         if plate_text and len(plate_text.strip()) >= 4 and confidence > 0.2:
             # Xử lý text và thêm dấu - và . nếu cần
@@ -2942,8 +3569,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             # THÊM DẤU - VÀ . VÀO BIỂN SỐ NẾU THIẾU
             original_text = processed_text
             processed_text = add_vietnam_plate_formatting(processed_text)
-            if original_text != processed_text:
-                logger.info(f"🔄 Formatted plate: '{original_text}' -> '{processed_text}'")
+            # Optimized: Remove logging for better FPS
             
             if len(processed_text) >= 4:
                 x1, y1, x2, y2 = bbox[:4]
@@ -2966,8 +3592,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             # Tính similarity giữa 2 biển số
                             similarity = calculate_plate_similarity(processed_text, existing_plate)
                             
-                            # FIXED: CHỈ CẬP NHẬT NẾU CONFIDENCE CAO HƠN ĐÁNG KỂ (ít nhất 15%) VÀ FORMAT ĐÚNG
-                            if similarity > 0.7 and confidence > existing_conf + 0.15:
+                            # FIXED: CHỈ CẬP NHẬT NẾU CONFIDENCE CAO HƠN ĐÁNG KỂ (ít nhất 5%) VÀ FORMAT ĐÚNG
+                            if similarity >= 0.6 and confidence > existing_conf + 0.05:
                                 # FIXED: Kiểm tra format biển số Việt Nam trước khi cập nhật
                                 if is_valid_vietnam_plate_format(processed_text):
                                     active_roi_objects[track_id].update({
@@ -2979,12 +3605,12 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                     logger.info(f"🔄 UPDATED Track {track_id}: '{existing_plate}' -> '{processed_text}' (conf: {existing_conf:.3f} -> {confidence:.3f}, similarity: {similarity:.3f})")
                                 else:
                                     logger.debug(f"⏭️ Track {track_id} invalid format, keeping existing: '{processed_text}' vs '{existing_plate}'")
-                            elif similarity > 0.7:
-                                logger.debug(f"⏭️ Track {track_id} similar plate with insufficient confidence improvement: '{processed_text}' ({confidence:.3f}) vs '{existing_plate}' ({existing_conf:.3f}) - need +0.15")
+                            elif similarity >= 0.6:
+                                logger.debug(f"⏭️ Track {track_id} similar plate with insufficient confidence improvement: '{processed_text}' ({confidence:.3f}) vs '{existing_plate}' ({existing_conf:.3f}) - need +0.05")
                             else:
                                 logger.debug(f"⏭️ Track {track_id} different plate, keeping existing: '{processed_text}' vs '{existing_plate}' (similarity: {similarity:.3f})")
                         else:
-                            # FIXED: Tạo object mới với track_id từ ByteTracker - chỉ nếu format hợp lệ
+                            # FIXED: Tạo object mới với ByteTracker track_id - chỉ nếu format hợp lệ
                             if is_valid_vietnam_plate_format(processed_text):
                                 active_roi_objects[track_id] = {
                                     'plate': processed_text,
@@ -2993,51 +3619,156 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                     'last_seen': time.time(),
                                     'track_id': track_id
                                 }
+                                
+                                # Thêm vào response arrays
+                                boxes.append([x1, y1, x2, y2])
+                                labels.append(f"Plate: {processed_text}")
+                                ocr_results.append([processed_text, confidence])
+                                
+                                logger.info(f"✅ NEW ByteTracker Track {track_id}: '{processed_text}' (conf: {confidence:.3f})")
                             else:
                                 logger.debug(f"❌ Track {track_id} invalid format, skipping: '{processed_text}'")
                                 continue
                             
-                            # FIXED: Thêm vào response arrays chỉ khi tạo object mới thành công
-                            boxes.append([x1, y1, x2, y2])
-                            labels.append(f"Plate: {processed_text}")
-                            ocr_results.append([processed_text, confidence])
+                            # Vẽ bounding box và text ngay lập tức
+                            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            
+                            # FIXED: Vẽ text với background - format ID: 1,2,3... (sử dụng detection index)
+                            display_text = f"ID: {i+1} {processed_text}"
+                            # Text nằm ở phía trên, giữa bounding box
+                            text_y = max(y1 - 15, 25)
+                            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+                            # Tính toán vị trí x để text nằm giữa bounding box
+                            text_x = x1 + (x2 - x1 - text_size[0]) // 2
+                            
+                            # Background đen vừa với text
+                            cv2.rectangle(display_frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
+                            
+                            # Text đậm hơn (thickness = 3)
+                            cv2.putText(display_frame, display_text, (text_x, text_y),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                    else:
+                        # FIXED: Sử dụng logic grouping để tránh tạo nhiều biển số cho cùng 1 đối tượng
+                        # Tìm biển số tương tự trong roi_tracked_objects (persistent tracking)
+                        similar_object_id = None
+                        best_similarity = 0
+                        
+                        for obj_id, obj_data in roi_tracked_objects.items():
+                            existing_plate = obj_data.get('plate', '')
+                            if existing_plate:
+                                # Tính similarity giữa 2 biển số
+                                similarity = calculate_plate_similarity(processed_text, existing_plate)
+                                if similarity > best_similarity and similarity >= 0.6:  # Threshold 60%
+                                    best_similarity = similarity
+                                    similar_object_id = obj_id
+                        
+                        if similar_object_id is not None:
+                            # Cập nhật object hiện có nếu confidence cao hơn đáng kể
+                            existing_conf = roi_tracked_objects[similar_object_id].get('confidence', 0)
+                            
+                            if confidence > existing_conf + 0.05:  # Cần cải thiện ít nhất 5%
+                                roi_tracked_objects[similar_object_id].update({
+                                    'plate': processed_text,
+                                    'bbox': [x1, y1, x2, y2],
+                                    'confidence': confidence,
+                                    'last_seen': time.time()
+                                })
+                                # Cập nhật active_roi_objects để hiển thị
+                                active_roi_objects[similar_object_id] = roi_tracked_objects[similar_object_id]
+                                logger.info(f"🔄 UPDATED Similar Object {similar_object_id}: '{roi_tracked_objects[similar_object_id].get('plate', '')}' -> '{processed_text}' (conf: {existing_conf:.3f} -> {confidence:.3f}, similarity: {best_similarity:.3f})")
+                            else:
+                                logger.debug(f"⏭️ Similar Object {similar_object_id} insufficient confidence improvement: '{processed_text}' ({confidence:.3f}) vs existing ({existing_conf:.3f}) - need +0.05")
+                                # Vẫn cập nhật last_seen để giữ object alive
+                                roi_tracked_objects[similar_object_id]['last_seen'] = time.time()
+                                active_roi_objects[similar_object_id] = roi_tracked_objects[similar_object_id]
+                        else:
+                            # Tạo object mới chỉ khi không có biển số tương tự
+                            if is_valid_vietnam_plate_format(processed_text):
+                                # FIXED: Sử dụng persistent ID để tránh tạo nhiều object cho cùng 1 biển số
+                                # Tìm ID trống hoặc tạo ID mới
+                                new_track_id = None
+                                for test_id in range(10001, 20000):  # ID range: 10001-19999
+                                    if test_id not in roi_tracked_objects:
+                                        new_track_id = test_id
+                                        break
+                                
+                                if new_track_id is None:
+                                    # Nếu không tìm được ID trống, sử dụng timestamp
+                                    new_track_id = int(time.time() * 1000) % 10000 + 10000
+                                
+                                # Tạo object mới với persistent ID
+                                roi_tracked_objects[new_track_id] = {
+                                    'plate': processed_text,
+                                    'bbox': [x1, y1, x2, y2],
+                                    'confidence': confidence,
+                                    'last_seen': time.time(),
+                                    'track_id': new_track_id,
+                                    'display_id': len(roi_tracked_objects) + 1  # ID hiển thị: 1, 2, 3...
+                                }
+                                
+                                # Cập nhật active_roi_objects để hiển thị
+                                active_roi_objects[new_track_id] = roi_tracked_objects[new_track_id]
+                                
+                                # Thêm vào response arrays
+                                boxes.append([x1, y1, x2, y2])
+                                labels.append(f"Plate: {processed_text}")
+                                ocr_results.append([processed_text, confidence])
+                                
+                                logger.info(f"✅ NEW Object {roi_tracked_objects[new_track_id]['display_id']}: '{processed_text}' (conf: {confidence:.3f})")
+                            else:
+                                logger.debug(f"❌ Invalid format, skipping: '{processed_text}'")
+                                continue
                             
                             # Vẽ bounding box và text ngay lập tức
                             cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                             
-                            # FIXED: Vẽ text với background - format ID: 1, 2, 3...
-                            display_text = f"ID: {track_id} {processed_text}"
-                            text_y = max(y1 - 20, 20)
-                            
-                            # Background cho text
-                            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                            cv2.rectangle(display_frame, (x1, text_y - 20), (x1 + text_size[0] + 10, text_y + 5), (0, 0, 0), -1)
-                            
-                            cv2.putText(display_frame, display_text, (x1 + 5, text_y),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                            
-                            logger.info(f"✅ NEW Track {track_id}: '{processed_text}' (conf: {confidence:.3f})")
-                    else:
-                        logger.debug(f"❌ Detection {i} không có track_id tương ứng, bỏ qua")
+                        # Vẽ text với background - sử dụng display_id từ roi_tracked_objects
+                        if similar_object_id is not None:
+                            display_id = roi_tracked_objects[similar_object_id].get('display_id', i + 1)
+                        else:
+                            # Tìm display_id từ active_roi_objects
+                            display_id = i + 1
+                            for obj_id, obj_data in active_roi_objects.items():
+                                if obj_data.get('plate') == processed_text:
+                                    display_id = obj_data.get('display_id', i + 1)
+                                    break
+                        
+                        display_text = f"ID: {display_id} {processed_text}"
+                        # Text nằm ở phía trên, giữa bounding box
+                        text_y = max(y1 - 15, 25)
+                        text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+                        # Tính toán vị trí x để text nằm giữa bounding box
+                        text_x = x1 + (x2 - x1 - text_size[0]) // 2
+                        
+                        # Background đen vừa với text
+                        cv2.rectangle(display_frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
+                        
+                        # Text đậm hơn (thickness = 3)
+                        cv2.putText(display_frame, display_text, (text_x, text_y),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
     
-    # Cập nhật roi_tracked_objects từ active_roi_objects
-    roi_tracked_objects.clear()
-    roi_tracked_objects.update(active_roi_objects)
-    
-    # Cleanup: Xóa các object cũ khỏi ROI (không được cập nhật trong 5 giây)
+    # FIXED: Persistent tracking - không clear roi_tracked_objects mỗi frame
+    # Chỉ cập nhật objects mới và xóa objects cũ
     current_time = time.time()
+    
+    # Cập nhật roi_tracked_objects với active_roi_objects
+    for obj_id, obj_data in active_roi_objects.items():
+        roi_tracked_objects[obj_id] = obj_data
+    
+    # Xóa objects cũ (không được cập nhật trong 3 giây)
     objects_to_remove = []
     for obj_id, obj_data in roi_tracked_objects.items():
         time_since_last_seen = current_time - obj_data.get('last_seen', 0)
-        if time_since_last_seen > 5.0:  # Xóa sau 5 giây không hoạt động
+        if time_since_last_seen > 3.0:  # Xóa sau 3 giây không hoạt động
             objects_to_remove.append(obj_id)
     
     for obj_id in objects_to_remove:
         del roi_tracked_objects[obj_id]
-        logger.debug(f"🗑️ Removed old ROI object {obj_id}")
+    
+    # Cleanup đã được xử lý ở trên
     
     # REMOVED: ByteTracker processing để tránh hiển thị trùng lặp
-    logger.info(f"🔍 Skipping {len(tracks)} ByteTracker tracks to avoid duplicate display")
+    # Optimized: Remove logging for better FPS
     # REMOVED: ByteTracker loop để tránh hiển thị trùng lặp
     
     # REMOVED: Vẽ ROI objects để tránh hiển thị trùng lặp
@@ -3067,77 +3798,68 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     
     # FIXED: DATABASE SAVING với track_id ổn định từ ByteTracker
     logger.info(f"🔍 Processing {len(roi_tracked_objects)} ROI tracked objects for database saving")
+    logger.info(f"🔍 ROI tracked objects details: {list(roi_tracked_objects.keys())}")
     
-    # FIXED: Chỉ lưu object có confidence cao nhất cho mỗi track_id
+    # FIXED: Chỉ lưu object có ByteTracker track_id (không lưu temp tracks)
     best_objects = {}
     for obj_id, obj_data in roi_tracked_objects.items():
         track_id = obj_data.get('track_id')
         confidence = obj_data.get('confidence', 0)
+        plate_text = obj_data.get('plate', '')
         
-        if track_id not in best_objects or confidence > best_objects[track_id]['confidence']:
-            best_objects[track_id] = obj_data
+        # FIXED: Lưu tất cả objects có track_id hợp lệ (cả ByteTracker và temp tracks)
+        if track_id:  # Lưu tất cả tracks có ID
+            if track_id not in best_objects or confidence > best_objects[track_id]['confidence']:
+                best_objects[track_id] = obj_data
+                        # Optimized: Remove logging for better FPS
+        else:
+            logger.debug(f"⏭️ Skipping object without track_id")
     
     # FIXED: Lưu chỉ các object tốt nhất với track_id ổn định
+    # Optimized: Remove logging for better FPS
+    
+    # FIXED: Thêm logic kiểm tra cooldown để tránh crop nhiều lần
     for track_id, obj_data in best_objects.items():
         plate_text = obj_data.get('plate', '')
         confidence = obj_data.get('confidence', 0)
         bbox = obj_data.get('bbox', [])
         last_seen = obj_data.get('last_seen', 0)
         
+        # FIXED: Kiểm tra cooldown để tránh crop nhiều lần cho cùng 1 biển số
+        plate_key = f"plate_{plate_text}"
+        if plate_key in plate_history:
+            time_since_last_save = current_time - plate_history[plate_key]
+            if time_since_last_save < 30.0:  # Cooldown 30 giây cho cùng 1 biển số
+                logger.debug(f"⏭️ Plate '{plate_text}' in cooldown ({30.0 - time_since_last_save:.1f}s remaining), skipping crop")
+                continue
+        
         # Xử lý object trong vòng 5 giây
         time_since_last_seen = current_time - last_seen
-        logger.info(f"🔍 BEST ROI Object (Track {track_id}): plate='{plate_text}', conf={confidence:.3f}, time_since_last_seen={time_since_last_seen:.3f}s")
         
         if time_since_last_seen > 5.0:  # Tăng timeout lên 5 giây
-            logger.debug(f"⏭️ ROI Object (Track {track_id}) too old, skipping")
             continue
             
-        # FIXED: TĂNG NGƯỠNG CONFIDENCE VÀ KIỂM TRA FORMAT BIỂN SỐ VIỆT NAM
-        if plate_text and len(plate_text) >= 4 and confidence > 0.95:  # Tăng lên 0.95 để chỉ lưu biển số chính xác nhất
-            # FIXED: Sử dụng hàm validation chung
+        # FIXED: SỬ DỤNG CONFIDENCE THRESHOLD 0.7 VÀ VALIDATION BIỂN SỐ VIỆT NAM
+        if plate_text and len(plate_text) >= 4 and confidence >= 0.7:  # Set confidence >= 0.7
+            # SỬ DỤNG HÀM VALIDATION BIỂN SỐ VIỆT NAM CÓ SẴN
             if not is_valid_vietnam_plate_format(plate_text):
-                logger.debug(f"⏭️ Invalid Vietnamese plate format: '{plate_text}' - skipping")
                 continue
                 
             # FIXED: CẬP NHẬT HIỂN THỊ TRACKING VỚI ĐỘ TIN CẬY MỚI
             update_tracking_display_with_confidence(track_id, plate_text, confidence, bbox, display_frame)
             
-            # FIXED: KIỂM TRA NGHIÊM NGẶT với track_id ổn định
-            track_key = f"track_{track_id}_{plate_text}"
+            # FIXED: KIỂM TRA NGHIÊM NGẶT với biển số (không phụ thuộc track_id)
+            plate_key = f"plate_{plate_text}"
             
-            # FIXED: Kiểm tra cooldown dựa trên track_id (180 giây - 3 phút) để tránh spam
-            if track_key in plate_history and current_time - plate_history[track_key] < 180.0:
-                cooldown_remaining = 180.0 - (current_time - plate_history[track_key])
-                logger.debug(f"⏭️ Track {track_id} plate '{plate_text}' đang trong cooldown ({cooldown_remaining:.1f}s remaining), bỏ qua")
+            # FIXED: Kiểm tra cooldown dựa trên biển số (240 giây) để tránh spam
+            if plate_key in plate_history and current_time - plate_history[plate_key] < 300.0:
                 continue
-            
-            # FIXED: Kiểm tra xem track_id này đã lưu biển số chưa (GLOBAL CHECK)
-            logger.debug(f"🔍 Checking global tracking for Track {track_id}: {track_id in global_saved_tracks}")
-            if track_id in global_saved_tracks:
-                saved_data = global_saved_tracks[track_id]
-                saved_plate = saved_data.get('plate', '')
-                saved_time = saved_data.get('timestamp', 0)
-                saved_conf = saved_data.get('confidence', 0)
-                
-                # FIXED: Nếu đã lưu biển số này trong vòng 120 giây, bỏ qua
-                if saved_plate == plate_text and current_time - saved_time < 120.0:
-                    logger.debug(f"⏭️ Track {track_id} đã lưu biển số '{plate_text}' gần đây, bỏ qua")
-                    continue
-                elif saved_plate != plate_text:
-                    # FIXED: Chỉ thay đổi biển số nếu confidence cao hơn đáng kể (ít nhất 15%)
-                    if confidence > saved_conf + 0.15:
-                        logger.info(f"🔄 Track {track_id} thay đổi biển số từ '{saved_plate}' (conf: {saved_conf:.3f}) sang '{plate_text}' (conf: {confidence:.3f})")
-                    else:
-                        logger.debug(f"⏭️ Track {track_id} biển số mới không đủ tốt: '{plate_text}' (conf: {confidence:.3f}) vs '{saved_plate}' (conf: {saved_conf:.3f}) - need +0.15")
-                        continue
-            
-            logger.info(f"🎯 TRACK {track_id}: '{plate_text}' (conf: {confidence:.3f}) - SENDING TO DATABASE")
-            logger.info(f"🔍 Track {track_id} details: bbox={bbox}, camera_id={camera_id}, source_type={source_type}")
             logger.info(f"🔍 BEST ROI Object (Track {track_id}) will be saved to database")
+            logger.info(f"🚀 DATABASE SAVING: Starting database save process for plate '{plate_text}'")
             
             # FIXED: Lưu crop image với track_id ổn định
             clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
-            crop_filename = f"plate_track_{track_id}_{clean_plate_text}_{int(curr_time)}.jpg"
+            crop_filename = f"plate_track_{track_id}_{clean_plate_text}_{int(current_time)}.jpg"
             
             try:
                 crop = crop_and_enhance_plate(frame, bbox, enhancement_level="minimal")
@@ -3174,8 +3896,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             except Exception as e:
                 logger.error(f"Error saving Track {track_id} crop image: {e}")
             
-            # FIXED: Ghi nhận đã gửi để tránh spam (180 giây cooldown)
-            plate_history[track_key] = current_time
+            # FIXED: Ghi nhận đã gửi để tránh spam (240 giây cooldown cho biển số)
+            plate_history[plate_key] = current_time
             roi_saved_plates[track_id] = plate_text  # Lưu biển số đã gửi cho track này
             global_saved_tracks[track_id] = {  # FIXED: GLOBAL TRACKING với confidence
                 'plate': plate_text,
@@ -3183,23 +3905,27 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 'timestamp': current_time
             }
             
-            # FIXED: Xóa tất cả biển số khác của track_id này khỏi plate_history
+            # FIXED: Xóa tất cả biển số cũ khỏi plate_history (giữ lại biển số hiện tại)
             keys_to_remove = []
+            current_plate_key = f"plate_{plate_text}"
             for key in plate_history.keys():
-                if key.startswith(f"track_{track_id}_") and key != track_key:
-                    keys_to_remove.append(key)
+                # Xóa các biển số cũ khác (không phải biển số hiện tại)
+                if key.startswith("plate_") and key != current_plate_key:
+                    # Kiểm tra thời gian - chỉ xóa biển số cũ hơn 5 phút
+                    if current_time - plate_history[key] > 300:  # 5 phút
+                        keys_to_remove.append(key)
             
             for key in keys_to_remove:
                 del plate_history[key]
                 logger.debug(f"🗑️ Xóa biển số cũ khỏi history: {key}")
             
-            logger.info(f"✅ Đã lưu biển số '{plate_text}' cho Track {track_id} - cooldown 180 giây")
+            logger.info(f"✅ Đã lưu biển số '{plate_text}' cho Track {track_id} - plate cooldown 240 giây")
 
     # REMOVED: Fallback để tránh lưu trùng lặp
 
-    # FIXED: HỢP NHẤT CÁC BIỂN SỐ TƯƠNG TỰ TRONG ROI OBJECTS
+    # FIXED: HỢP NHẤT CÁC BIỂN SỐ TƯƠNG TỰ TRONG ROI OBJECTS - THREAD SAFE
     # Chỉ thực hiện grouping mỗi 10 giây để tránh overhead
-    if current_time - last_fps_time >= 10.0:
+    if current_time - thread_container.get('last_fps_time', current_time) >= 10.0:
         try:
             logger.info("🔗 Merging similar plates in ROI objects...")
             
@@ -3251,8 +3977,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     # Ưu tiên biển số có format hợp lệ và confidence cao nhất
                     best_plate = max(valid_plates, key=lambda x: x['confidence'])
                     
-                    # FIXED: Chỉ giữ biển số có confidence > 0.95
-                    if best_plate['confidence'] > 0.95:
+                    # FIXED: Chỉ giữ biển số có confidence >= 0.85
+                    if best_plate['confidence'] >= 0.7:
                         best_obj_id = best_plate['obj_id']
                         best_track_id = best_plate['track_id']
                         
@@ -3265,14 +3991,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'track_id': best_track_id  # FIXED: Giữ track_id ổn định
                         })
                     else:
-                        logger.debug(f"⏭️ Group '{group_key}' không có biển số đủ chính xác (conf: {best_plate['confidence']:.3f} < 0.95)")
+                        logger.debug(f"⏭️ Group '{group_key}' không có biển số đủ chính xác (conf: {best_plate['confidence']:.3f} < 0.85)")
                         continue
                 else:
                     # Nếu không có format hợp lệ, chọn confidence cao nhất
                     best_plate = max(plates, key=lambda x: x['confidence'])
                     
-                    # FIXED: Chỉ giữ biển số có confidence > 0.95
-                    if best_plate['confidence'] > 0.95:
+                    # FIXED: Chỉ giữ biển số có confidence >= 0.85
+                    if best_plate['confidence'] >= 0.7:
                         best_obj_id = best_plate['obj_id']
                         best_track_id = best_plate['track_id']
                         
@@ -3285,7 +4011,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             'track_id': best_track_id  # FIXED: Giữ track_id ổn định
                         })
                     else:
-                        logger.debug(f"⏭️ Group '{group_key}' không có biển số đủ chính xác (conf: {best_plate['confidence']:.3f} < 0.95)")
+                        logger.debug(f"⏭️ Group '{group_key}' không có biển số đủ chính xác (conf: {best_plate['confidence']:.3f} < 0.7)")
                         continue
                 
                 # FIXED: Xóa các object khác trong group và cập nhật global tracking
@@ -3311,16 +4037,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         except Exception as e:
             logger.error(f"Error merging similar plates: {e}")
 
-    # Update FPS counter
-    if current_time - last_fps_time >= 1.0:
-        current_fps = fps_counter / (current_time - last_fps_time)
-        fps_counter = 0
-        last_fps_time = current_time
+    # Optimized: Remove duplicate FPS calculation - already calculated above
+
+    # FIXED: Draw ROI objects and persistent displays on the frame
+    draw_roi_objects(display_frame, roi)
+    draw_persistent_displays(display_frame, roi)
 
     # Return results - với error handling
     try:
-        # Encode frame với error handling
-        encode_result = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
+        # Encode frame với error handling và tối ưu quality cho 20 FPS
+        encode_result = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         if encode_result[0]:  # Nếu encode thành công
             frame_bytes = encode_result[1].tobytes()
         else:
@@ -3337,7 +4063,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             'frame_width': original_width,
             'frame_height': original_height,
             'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
-            'fps': current_fps,
+            'fps': thread_container.get('current_fps', 0),
             'detection_count': len(boxes),
             'track_count': len(roi_tracked_objects),  # Số lượng ROI objects
             'skipped': should_skip
@@ -3354,7 +4080,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             'frame_width': original_width,
             'frame_height': original_height,
             'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
-            'fps': current_fps,
+            'fps': thread_container.get('current_fps', 0),
             'detection_count': 0,
             'track_count': 0,
             'skipped': True
