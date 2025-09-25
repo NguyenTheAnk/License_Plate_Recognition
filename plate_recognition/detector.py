@@ -949,7 +949,16 @@ class ThreadManager:
         
         inactive_threads = []
         for thread_id, info in self.active_threads.items():
-            if current_time - info['last_activity'] > 60:  # 1 minute timeout
+            last_activity = info.get('last_activity', 0)
+            # FIXED: Kiểm tra kiểu dữ liệu của last_activity
+            if isinstance(last_activity, dict):
+                logger.error(f"❌ ERROR: last_activity is dict for thread_id {thread_id}: {last_activity}")
+                last_activity = 0  # Fallback
+            elif not isinstance(last_activity, (int, float)):
+                logger.error(f"❌ ERROR: last_activity is not number for thread_id {thread_id}: {type(last_activity)} = {last_activity}")
+                last_activity = 0  # Fallback
+            
+            if current_time - last_activity > 60:  # 1 minute timeout
                 inactive_threads.append(thread_id)
         
         for thread_id in inactive_threads:
@@ -1182,7 +1191,7 @@ ENABLE_THREADING = True
 ENABLE_CACHING = True   # Bật caching để tăng hiệu suất
 ENABLE_LIGHTWEIGHT_MODE = True
 ENABLE_FPS_THROTTLING = True  # Bật FPS throttling để ổn định
-TARGET_FPS = 20  # Mục tiêu FPS ổn định
+TARGET_FPS = 20  # Mục tiêu FPS ổn định (15-25 FPS per thread)
 
 # Database throttling - OPTIMIZED FOR STABLE FPS
 last_db_send_time = 0
@@ -1520,22 +1529,46 @@ def calculate_plate_similarity(plate1, plate2):
     similarity = 1.0 - (distance / max_len)
     return max(0.0, similarity)
 
-def find_similar_plates(target_plate, plate_dict, similarity_threshold=0.6):
-    """Tìm các biển số tương tự trong dictionary"""
+def get_adaptive_similarity_threshold(confidence1=0.0, confidence2=0.0, base_threshold=0.6):
+    """Tính threshold similarity động dựa trên confidence của biển số"""
+    # Nếu cả hai biển số đều có confidence cao, giảm threshold để dễ gộp hơn
+    if confidence1 > 0.8 and confidence2 > 0.8:
+        return base_threshold - 0.1  # 0.5
+    
+    # Nếu một trong hai có confidence thấp, tăng threshold để tránh gộp nhầm
+    if confidence1 < 0.5 or confidence2 < 0.5:
+        return base_threshold + 0.1  # 0.7
+    
+    # Trường hợp bình thường
+    return base_threshold  # 0.6
+
+def find_similar_plates(target_plate, plate_dict, similarity_threshold=0.6, target_confidence=0.0):
+    """Tìm các biển số tương tự trong dictionary với threshold động"""
     similar_plates = []
     target_plate_clean = target_plate.upper().strip()
     
+    logger.info(f"🔍 DEBUG: find_similar_plates - Target: '{target_plate_clean}', checking {len(plate_dict)} existing plates")
+    
     for plate_text, plate_data in plate_dict.items():
         if plate_text == target_plate_clean:
+            logger.info(f"🔍 DEBUG: find_similar_plates - Skipping exact match: '{plate_text}'")
             continue
+        
+        # Sử dụng threshold động dựa trên confidence
+        existing_confidence = plate_data.get('confidence', 0.0)
+        adaptive_threshold = get_adaptive_similarity_threshold(target_confidence, existing_confidence, similarity_threshold)
             
         similarity = calculate_plate_similarity(target_plate_clean, plate_text)
-        if similarity >= similarity_threshold:
+        logger.info(f"🔍 DEBUG: find_similar_plates - Comparing '{target_plate_clean}' vs '{plate_text}': similarity={similarity:.3f}, threshold={adaptive_threshold:.3f}")
+        
+        if similarity >= adaptive_threshold:
             similar_plates.append({
                 'plate': plate_text,
                 'similarity': similarity,
-                'data': plate_data
+                'data': plate_data,
+                'adaptive_threshold': adaptive_threshold
             })
+            logger.info(f"🔍 DEBUG: find_similar_plates - MATCH! '{plate_text}' (similarity: {similarity:.3f})")
     
     # Sort by similarity (highest first)
     similar_plates.sort(key=lambda x: x['similarity'], reverse=True)
@@ -1594,7 +1627,8 @@ def group_similar_plates_at_end(plate_history, similarity_threshold=0.6):
                 continue
                 
             # Tìm tất cả biển số tương tự
-            similar_plates = find_similar_plates(plate_text, plate_history, similarity_threshold)
+            plate_confidence = plate_data.get('confidence', 0.0)
+            similar_plates = find_similar_plates(plate_text, plate_history, similarity_threshold, plate_confidence)
             
             if similar_plates:
                 # Tạo nhóm với biển số có độ tin cậy cao nhất
@@ -1712,7 +1746,7 @@ def get_enhanced_plate_history():
             if plate_text in processed_plates:
                 continue
                 
-            similar_plates = find_similar_plates(plate_text, plate_history_data, similarity_threshold=0.6)
+            similar_plates = find_similar_plates(plate_text, plate_history_data, similarity_threshold=0.6, target_confidence=0.0)
             if similar_plates:
                 group = [plate_text] + [p['plate'] for p in similar_plates]
                 result['similarity_groups'].append({
@@ -1769,18 +1803,26 @@ def should_skip_frame(frame, roi):
         logger.debug(f"🔄 Recent motion - processing frame to detect new vehicles")
         return False
     
-    # Không có chuyển động, có thể skip
-    # Nhưng vẫn phải xử lý định kỳ để phát hiện phương tiện mới
-    if skip_frame_count >= max_skip_frames:
-        # Đã skip quá nhiều frame, phải xử lý để phát hiện phương tiện mới
+    # FIXED: Skip frame logic để duy trì 15-25 FPS per thread
+    # Chỉ skip frame nếu FPS quá cao (>25 FPS)
+    current_fps = thread_container.get('current_fps', 0)
+    if current_fps > 25:
+        # FPS quá cao, có thể skip frame
+        if skip_frame_count >= max_skip_frames:
+            # Đã skip quá nhiều frame, phải xử lý để phát hiện phương tiện mới
+            thread_container['skip_frame_count'] = 0
+            logger.debug(f"🔄 Max skip reached - processing frame to detect new vehicles")
+            return False
+        
+        # Skip frame
+        thread_container['skip_frame_count'] = skip_frame_count + 1
+        logger.debug(f"⏭️ Skipping frame - FPS too high ({current_fps:.1f}) (skip: {thread_container['skip_frame_count']}/{max_skip_frames})")
+        return True
+    else:
+        # FPS trong khoảng 15-25, không skip frame
         thread_container['skip_frame_count'] = 0
-        logger.debug(f"🔄 Max skip reached - processing frame to detect new vehicles")
+        logger.debug(f"🔄 Processing frame - FPS in target range ({current_fps:.1f})")
         return False
-    
-    # Skip frame
-    thread_container['skip_frame_count'] = skip_frame_count + 1
-    logger.debug(f"⏭️ Skipping frame - no motion in ROI (skip: {thread_container['skip_frame_count']}/{max_skip_frames})")
-    return True
 
 def has_motion_in_roi(frame, roi):
     """Kiểm tra xem có chuyển động trong ROI không - THREAD-SAFE"""
@@ -2070,6 +2112,7 @@ def process_plate_text(text):
         ]
         
         for pattern in patterns:
+            logger.info(f"🔍 DEBUG: process_plate_text - Testing pattern '{pattern}' against '{text}'")
             if re.match(pattern, text):
                 logger.info(f"✅ ENHANCED Pattern match: '{original}' -> '{text}'")
                 return text
@@ -2346,10 +2389,10 @@ def validate_ocr_result_strictly(plate_text, confidence, track_id, ocr_confidenc
 
 def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None, bbox=None):
     """OPTIMIZED save logic - simplified for 20 FPS performance - THREAD SAFE"""
-    # Get thread-safe data
-    plate_history = get_thread_safe_data('plate_history')
-    track_consistency = get_thread_safe_data('track_consistency')
-    ocr_attempts_per_track = get_thread_safe_data('ocr_attempts_per_track')
+    # Get thread-safe data with default values
+    plate_history = get_thread_safe_data('plate_history') or {}
+    track_consistency = get_thread_safe_data('track_consistency') or {}
+    ocr_attempts_per_track = get_thread_safe_data('ocr_attempts_per_track') or {}
     
     if not plate_text or not isinstance(plate_text, str):
         return False
@@ -2365,29 +2408,35 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
         logger.debug(f"❌ Low confidence '{clean_text}': {confidence:.3f} < {MIN_CONFIDENCE}")
         return False
     
-    # Basic format check - simplified
-    if not re.match(r'^\d{2}[A-Z]', clean_text):
-        logger.debug(f"❌ Invalid format '{clean_text}'")
+    # Basic format check - simplified (cho phép dấu - và .)
+    logger.info(f"🔍 DEBUG: should_save_plate - Testing pattern for '{clean_text}'")
+    if not re.match(r'^\d{2}[A-Z]-\d{3}\.\d{2}$', clean_text):
+        logger.info(f"🔍 DEBUG: should_save_plate - Invalid basic format '{clean_text}'")
         return False
+    logger.info(f"🔍 DEBUG: should_save_plate - Pattern matched for '{clean_text}'")
     
     # SIMPLIFIED duplicate check - chỉ kiểm tra trực tiếp để tăng tốc độ
     current_time = time.time()
     
     # Kiểm tra trùng lặp đơn giản - chỉ trong 30 giây gần đây
+    logger.info(f"🔍 DEBUG: should_save_plate - Checking duplicates for '{clean_text}'")
     if clean_text in plate_history:
         existing_data = plate_history[clean_text]
         if current_time - existing_data.get('timestamp', 0) < 30.0:  # 30 giây cooldown
             if confidence <= existing_data.get('confidence', 0):
-                logger.debug(f"⏭️ Duplicate plate '{clean_text}' with lower/equal confidence")
+                logger.info(f"🔍 DEBUG: should_save_plate - Duplicate plate '{clean_text}' with lower/equal confidence")
                 return False
             else:
                 logger.info(f"🔄 Updating plate '{clean_text}' with higher confidence: {confidence:.3f}")
+    logger.info(f"🔍 DEBUG: should_save_plate - No duplicates found for '{clean_text}'")
     
     # SIMPLIFIED bbox check - chỉ kiểm tra cơ bản
+    logger.info(f"🔍 DEBUG: should_save_plate - Checking bbox for '{clean_text}'")
     if bbox and len(bbox) >= 4:
         x1, y1, x2, y2 = bbox[:4]
         bbox_area = (x2 - x1) * (y2 - y1)
         bbox_center = ((x1 + x2) / 2, (y1 + y2) / 2)  # FIXED: Define bbox_center
+        logger.info(f"🔍 DEBUG: should_save_plate - Bbox valid for '{clean_text}': {bbox}")
         
         # Chỉ kiểm tra với các biển số đã lưu gần đây (trong 5 giây) - giảm overhead
         for key, plate_data in plate_history.items():
@@ -2410,13 +2459,21 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
                         return False
     
     # THÊM KIỂM TRA FORMAT CHÍNH XÁC
+    logger.info(f"🔍 DEBUG: should_save_plate - Processing plate text for '{clean_text}'")
     processed_text = process_plate_text(plate_text)
+    logger.info(f"🔍 DEBUG: should_save_plate - Processed text result: '{processed_text}'")
     if not processed_text:
         logger.info(f"❌ Not saving '{clean_text}': Invalid format")
         return False
     
-    # Consistency tracking
-    if track_id is not None:
+    # Consistency tracking - CHỈ ÁP DỤNG CHO BYTETRACKER TRACKS, KHÔNG ÁP DỤNG CHO FALLBACK
+    logger.info(f"🔍 DEBUG: should_save_plate - Checking consistency for track_id: {track_id}")
+    if track_id is not None and track_id < 10000:  # Chỉ áp dụng cho ByteTracker tracks (< 10000)
+        logger.info(f"🔍 DEBUG: should_save_plate - ByteTracker track, applying consistency check")
+    else:
+        logger.info(f"🔍 DEBUG: should_save_plate - Fallback track (track_id >= 10000), skipping consistency check")
+    
+    if track_id is not None and track_id < 10000:  # Chỉ áp dụng cho ByteTracker tracks (< 10000)
         if track_id not in track_consistency:
             track_consistency[track_id] = {
                 'results': [],
@@ -2425,6 +2482,7 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
                 'consistent_count': 0,
                 'last_result': None
             }
+            logger.info(f"🔍 DEBUG: should_save_plate - Created new consistency data for track_id: {track_id}")
         
         consistency_data = track_consistency[track_id]
         
@@ -2440,6 +2498,7 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
             consistency_data['results'] = consistency_data['results'][-consistency_window:]
         
         # Check for consistency
+        logger.info(f"🔍 DEBUG: should_save_plate - Results count: {len(consistency_data['results'])}, threshold: {consistency_threshold}")
         if len(consistency_data['results']) >= consistency_threshold:
             # Count how many times the same text appears
             text_counts = {}
@@ -2447,9 +2506,11 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
                 text = result['text']
                 text_counts[text] = text_counts.get(text, 0) + 1
             
+            logger.info(f"🔍 DEBUG: should_save_plate - Text counts: {text_counts}")
             # Find most common text
             most_common_text = max(text_counts.items(), key=lambda x: x[1])
             most_common_count = most_common_text[1]
+            logger.info(f"🔍 DEBUG: should_save_plate - Most common: {most_common_text}, count: {most_common_count}")
             
             if most_common_count >= consistency_threshold:
                 # We have consistency!
@@ -2469,10 +2530,10 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
                     logger.info(f"🔄 Consistent but not better: '{consistent_text}'")
                     return True
             else:
-                logger.debug(f"📊 No consistency yet for track {track_id}: {text_counts}")
+                logger.info(f"🔍 DEBUG: should_save_plate - No consistency yet for track {track_id}: {text_counts}")
                 return False
         else:
-            logger.debug(f"📈 Building consistency for track {track_id}: {len(consistency_data['results'])}/{consistency_threshold}")
+            logger.info(f"🔍 DEBUG: should_save_plate - Building consistency for track {track_id}: {len(consistency_data['results'])}/{consistency_threshold}")
             return False
     
     # 1. KIỂM TRA TRÙNG LẶP TRỰC TIẾP QUA KEY plate:{text}
@@ -2490,7 +2551,9 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
             return False
     
     # 3. TÌM CÁC BIỂN SỐ TƯƠNG TỰ SỬ DỤNG LEVENSHTEIN - OPTIMIZED
-    similar_plates = find_similar_plates(clean_text, plate_history, similarity_threshold=0.6)  # 60% similarity threshold
+    logger.info(f"🔍 DEBUG: should_save_plate - Looking for similar plates to '{clean_text}' in plate_history (size: {len(plate_history)})")
+    similar_plates = find_similar_plates(clean_text, plate_history, similarity_threshold=0.6, target_confidence=confidence)  # 60% similarity threshold với threshold động
+    logger.info(f"🔍 DEBUG: should_save_plate - Found {len(similar_plates)} similar plates: {[p['plate'] for p in similar_plates]}")
     
     if similar_plates:
         # Tìm biển số tương tự có độ tin cậy cao nhất
@@ -2499,30 +2562,44 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
         best_plate = best_similar['plate']
         similarity = best_similar['similarity']
         
-        # Optimized: Remove logging for better FPS
+        # FIXED: Chỉ gộp biển số khi giống nhau >=60% ký tự, không dựa vào confidence
+        # Tạo danh sách tất cả biển số tương tự để gộp
+        all_similar_plates = [{'plate': clean_text, 'confidence': confidence, 'track_id': track_id}] + similar_plates
         
-        # Nếu biển số mới có độ tin cậy cao hơn đáng kể, cập nhật
-        if confidence > best_confidence * 1.05:  # 5% improvement threshold - more sensitive
-            # Optimized: Remove logging for better FPS
-            
-            # Xóa biển số cũ và thêm biển số mới
-            del plate_history[best_plate]
-            plate_history[clean_text] = {
-                'confidence': confidence,
-                'timestamp': time.time(),
-                'updated_count': 1,
-                'saved_once': True,
-                'track_id': track_id,
-                'last_updated': time.time(),
-                'replaced_plate': best_plate
-            }
-            return True
-        else:
-            duplicate_counter += 1
-            logger.debug(f"⏭️ Similar plate exists with higher/equal confidence: '{best_plate}' ({best_confidence:.3f})")
-            return False
+        # Sắp xếp theo độ tin cậy (cao nhất trước)
+        all_similar_plates.sort(key=lambda x: x.get('confidence', x['data'].get('confidence', 0.0)), reverse=True)
+        
+        # Lấy biển số tốt nhất làm đại diện
+        best_plate_data = all_similar_plates[0]
+        best_plate_text = best_plate_data['plate']
+        best_plate_conf = best_plate_data.get('confidence', best_plate_data['data'].get('confidence', 0.0))
+        
+        # Xóa tất cả biển số tương tự cũ
+        for similar_plate in similar_plates:
+            if similar_plate['plate'] in plate_history:
+                del plate_history[similar_plate['plate']]
+        
+        # Tạo biển số mới với thông tin nhóm
+        grouped_plates = [p['plate'] for p in all_similar_plates]
+        similarity_scores = [p.get('similarity', 1.0) for p in all_similar_plates]
+        
+        plate_history[best_plate_text] = {
+            'confidence': best_plate_conf,
+            'timestamp': time.time(),
+            'updated_count': 1,
+            'saved_once': True,
+            'track_id': best_plate_data.get('track_id', track_id),
+            'last_updated': time.time(),
+            'grouped_plates': grouped_plates,
+            'similarity_scores': similarity_scores,
+            'grouped_count': len(grouped_plates)
+        }
+        
+        logger.info(f"🔄 GROUPED similar plates: {grouped_plates} -> keeping '{best_plate_text}' (conf: {best_plate_conf:.3f})")
+        return True
     
     # New plate - always save if valid
+    logger.info(f"🔍 DEBUG: should_save_plate - Saving new plate '{clean_text}' (conf: {confidence:.3f})")
     plate_history[clean_text] = {
         'confidence': confidence,
         'timestamp': time.time(),
@@ -2828,15 +2905,24 @@ def cleanup_persistent_displays(roi=None):
                         continue
             
             # IMMEDIATE: Với timeout=0, xóa ngay lập tức khi không còn trong ROI
+            last_seen = display_data.get('last_seen', 0)
+            # FIXED: Kiểm tra kiểu dữ liệu của last_seen
+            if isinstance(last_seen, dict):
+                logger.error(f"❌ ERROR: persistent_displays last_seen is dict for track_id {track_id}: {last_seen}")
+                last_seen = 0  # Fallback
+            elif not isinstance(last_seen, (int, float)):
+                logger.error(f"❌ ERROR: persistent_displays last_seen is not number for track_id {track_id}: {type(last_seen)} = {last_seen}")
+                last_seen = 0  # Fallback
+            
             if display_timeout == 0.0:
                 # Chỉ giữ lại nếu vừa được cập nhật (trong cùng frame)
-                if current_time - display_data['last_seen'] > 0.1:  # 100ms tolerance
+                if current_time - last_seen > 0.1:  # 100ms tolerance
                     old_tracks.append(track_id)
                     logger.debug(f"🗑️ IMMEDIATE REMOVAL: Track {track_id} - timeout=0")
                     continue
             else:
                 # Kiểm tra timeout bình thường
-                if current_time - display_data['last_seen'] > display_timeout:
+                if current_time - last_seen > display_timeout:
                     old_tracks.append(track_id)
                     logger.debug(f"🗑️ Removed display for track {track_id} - timeout")
                     continue
@@ -2863,14 +2949,23 @@ def draw_persistent_displays(frame, roi=None):
         
         for track_id, display_data in persistent_displays.items():
             # IMMEDIATE: Kiểm tra timeout với logic mới
+            last_seen = display_data.get('last_seen', 0)
+            # FIXED: Kiểm tra kiểu dữ liệu của last_seen
+            if isinstance(last_seen, dict):
+                logger.error(f"❌ ERROR: persistent_displays last_seen is dict for track_id {track_id}: {last_seen}")
+                last_seen = 0  # Fallback
+            elif not isinstance(last_seen, (int, float)):
+                logger.error(f"❌ ERROR: persistent_displays last_seen is not number for track_id {track_id}: {type(last_seen)} = {last_seen}")
+                last_seen = 0  # Fallback
+            
             if display_timeout == 0.0:
                 # Với timeout=0, chỉ hiển thị nếu vừa được cập nhật
-                if current_time - display_data['last_seen'] > 0.1:  # 100ms tolerance
+                if current_time - last_seen > 0.1:  # 100ms tolerance
                     tracks_to_remove.append(track_id)
                     continue
             else:
                 # Kiểm tra timeout bình thường
-                if current_time - display_data['last_seen'] > display_timeout:
+                if current_time - last_seen > display_timeout:
                     tracks_to_remove.append(track_id)
                     continue
                 
@@ -2932,13 +3027,22 @@ def get_persistent_displays():
         persistent_displays = get_thread_safe_data('persistent_displays')
         
         for track_id, display_data in persistent_displays.items():
+            last_seen = display_data.get('last_seen', 0)
+            # FIXED: Kiểm tra kiểu dữ liệu của last_seen
+            if isinstance(last_seen, dict):
+                logger.error(f"❌ ERROR: persistent_displays last_seen is dict for track_id {track_id}: {last_seen}")
+                last_seen = 0  # Fallback
+            elif not isinstance(last_seen, (int, float)):
+                logger.error(f"❌ ERROR: persistent_displays last_seen is not number for track_id {track_id}: {type(last_seen)} = {last_seen}")
+                last_seen = 0  # Fallback
+            
             if display_timeout == 0.0:
                 # Với timeout=0, chỉ hiển thị nếu vừa được cập nhật
-                if current_time - display_data['last_seen'] <= 0.1:  # 100ms tolerance
+                if current_time - last_seen <= 0.1:  # 100ms tolerance
                     active_displays[track_id] = display_data
             else:
                 # Kiểm tra timeout bình thường
-                if current_time - display_data['last_seen'] <= display_timeout:
+                if current_time - last_seen <= display_timeout:
                     active_displays[track_id] = display_data
         
         return {
@@ -3085,10 +3189,8 @@ def cleanup_tracked_objects():
         # Add back vehicles without plates
         valid_objects.update(vehicles_without_plates)
         
-        # Clean up plate_history for removed tracks
-        for track_id in removed_track_ids:
-            if track_id in plate_history:
-                del plate_history[track_id]
+        # Clean up plate_history for removed tracks - FIXED: plate_history contains plate_text, not track_id
+        # No need to clean plate_history here as it stores plate_text as keys, not track_id
         
         old_count = len(tracked_objects)
         tracked_objects = valid_objects
@@ -3208,7 +3310,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     thread_container['fps_counter'] += 1
     
     # Calculate FPS every 1 second
-    time_diff = current_time - thread_container['last_fps_time']
+    last_fps_time = thread_container.get('last_fps_time', 0)
+    # FIXED: Kiểm tra kiểu dữ liệu của last_fps_time
+    if isinstance(last_fps_time, dict):
+        logger.error(f"❌ ERROR: last_fps_time is dict: {last_fps_time}")
+        last_fps_time = 0  # Fallback
+    elif not isinstance(last_fps_time, (int, float)):
+        logger.error(f"❌ ERROR: last_fps_time is not number: {type(last_fps_time)} = {last_fps_time}")
+        last_fps_time = 0  # Fallback
+    
+    time_diff = current_time - last_fps_time
     if time_diff >= 1.0:
         raw_fps = thread_container['fps_counter'] / time_diff
         
@@ -3243,13 +3354,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # OPTIMIZED: Consistent frame skipping for stable FPS
     should_skip = False
     
-    # OPTIMIZED: Simple frame skipping for multi-stream 20 FPS
+    # FIXED: FPS throttling per thread - mỗi thread đạt 15-25 FPS
     if ENABLE_FPS_THROTTLING and thread_container.get('current_fps', 0) > 0:
-        # Only skip frames if FPS is very high (30+ FPS)
-        if thread_container.get('current_fps', 0) > 30:  # Skip only at very high FPS
+        current_fps = thread_container.get('current_fps', 0)
+        # Chỉ skip frame nếu FPS quá cao (>25 FPS) để duy trì 15-25 FPS
+        if current_fps > 25:  # Skip only if FPS > 25
             should_skip = True
         else:
-            should_skip = False  # Process every frame for 20 FPS target
+            should_skip = False  # Process every frame for 15-25 FPS target
     
     # Optimized: Remove logging for better FPS
     
@@ -3507,6 +3619,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     processed_plates = set()  # Tránh xử lý trùng lặp
     active_roi_objects = {}  # Lưu trữ các object đang active trong ROI
     
+    # FIXED: Lấy roi_tracked_objects hiện tại để cập nhật
+    roi_tracked_objects = get_thread_safe_data('roi_tracked_objects') or {}
+    
     # FIXED: Map detections với ByteTracker tracks dựa trên vị trí
     detection_track_mapping = {}
     for i, detection in enumerate(plate_detections):
@@ -3553,14 +3668,15 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             # THÊM DẤU - VÀ . VÀO BIỂN SỐ NẾU THIẾU
             original_text = processed_text
             processed_text = add_vietnam_plate_formatting(processed_text)
-            # Optimized: Remove logging for better FPS
+            
+            logger.info(f"🔍 DEBUG: Processing plate '{processed_text}' (conf: {confidence:.3f})")
             
             if len(processed_text) >= 4:
                 x1, y1, x2, y2 = bbox[:4]
                 
                 # Kiểm tra xem có trong ROI không
                 bbox_in_roi = is_bbox_in_roi(bbox, roi)
-                logger.debug(f"🔍 Detection {i}: bbox_in_roi={bbox_in_roi}, roi={roi}")
+                logger.info(f"🔍 DEBUG: Detection {i} bbox_in_roi={bbox_in_roi}, roi={roi}, bbox={bbox}")
                 
                 if bbox_in_roi:
                     # FIXED: Sử dụng track_id từ ByteTracker thay vì tạo mới
@@ -3576,40 +3692,55 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             # Tính similarity giữa 2 biển số
                             similarity = calculate_plate_similarity(processed_text, existing_plate)
                             
-                            # FIXED: CHỈ CẬP NHẬT NẾU CONFIDENCE CAO HƠN ĐÁNG KỂ (ít nhất 5%) VÀ FORMAT ĐÚNG
-                            if similarity >= 0.6 and confidence > existing_conf + 0.05:
+                            # FIXED: CHỈ GỘP KHI GIỐNG NHAU >=60% KÝ TỰ, CHỌN CONFIDENCE CAO NHẤT
+                            if similarity >= 0.6:
                                 # FIXED: Kiểm tra format biển số Việt Nam trước khi cập nhật
                                 if is_valid_vietnam_plate_format(processed_text):
-                                    active_roi_objects[track_id].update({
-                                        'plate': processed_text,
-                                        'bbox': [x1, y1, x2, y2],
-                                        'confidence': confidence,
-                                        'last_seen': time.time()
-                                    })
-                                    logger.info(f"🔄 UPDATED Track {track_id}: '{existing_plate}' -> '{processed_text}' (conf: {existing_conf:.3f} -> {confidence:.3f}, similarity: {similarity:.3f})")
+                                    # Chỉ cập nhật nếu confidence cao hơn
+                                    if confidence > existing_conf:
+                                        active_roi_objects[track_id].update({
+                                            'plate': processed_text,
+                                            'bbox': [x1, y1, x2, y2],
+                                            'confidence': confidence,
+                                            'last_seen': time.time()
+                                        })
+                                        logger.info(f"🔄 UPDATED Track {track_id}: '{existing_plate}' -> '{processed_text}' (conf: {existing_conf:.3f} -> {confidence:.3f}, similarity: {similarity:.3f})")
+                                    else:
+                                        logger.debug(f"⏭️ Track {track_id} similar plate with lower confidence: '{processed_text}' ({confidence:.3f}) vs '{existing_plate}' ({existing_conf:.3f})")
                                 else:
                                     logger.debug(f"⏭️ Track {track_id} invalid format, keeping existing: '{processed_text}' vs '{existing_plate}'")
-                            elif similarity >= 0.6:
-                                logger.debug(f"⏭️ Track {track_id} similar plate with insufficient confidence improvement: '{processed_text}' ({confidence:.3f}) vs '{existing_plate}' ({existing_conf:.3f}) - need +0.05")
                             else:
                                 logger.debug(f"⏭️ Track {track_id} different plate, keeping existing: '{processed_text}' vs '{existing_plate}' (similarity: {similarity:.3f})")
                         else:
                             # FIXED: Tạo object mới với ByteTracker track_id - chỉ nếu format hợp lệ
+                            logger.info(f"🔍 DEBUG: Checking format for '{processed_text}'")
                             if is_valid_vietnam_plate_format(processed_text):
-                                active_roi_objects[track_id] = {
-                                    'plate': processed_text,
-                                    'bbox': [x1, y1, x2, y2],
-                                    'confidence': confidence,
-                                    'last_seen': time.time(),
-                                    'track_id': track_id
-                                }
+                                logger.info(f"🔍 DEBUG: Format valid, calling should_save_plate for '{processed_text}'")
+                                # FIXED: Sử dụng should_save_plate để gộp biển số tương tự
+                                saved = should_save_plate(processed_text, confidence, track_id, None, [x1, y1, x2, y2])
+                                logger.info(f"🔍 DEBUG: should_save_plate returned {saved} for '{processed_text}'")
                                 
-                                # Thêm vào response arrays
-                                boxes.append([x1, y1, x2, y2])
-                                labels.append(f"Plate: {processed_text}")
-                                ocr_results.append([processed_text, confidence])
-                                
-                                logger.info(f"✅ NEW ByteTracker Track {track_id}: '{processed_text}' (conf: {confidence:.3f})")
+                                if saved:
+                                    # FIXED: Thêm vào cả active_roi_objects và roi_tracked_objects
+                                    obj_data = {
+                                        'plate': processed_text,
+                                        'bbox': [x1, y1, x2, y2],
+                                        'confidence': confidence,
+                                        'last_seen': time.time(),
+                                        'track_id': track_id
+                                    }
+                                    
+                                    active_roi_objects[track_id] = obj_data
+                                    roi_tracked_objects[track_id] = obj_data
+                                    
+                                    # Thêm vào response arrays
+                                    boxes.append([x1, y1, x2, y2])
+                                    labels.append(f"Plate: {processed_text}")
+                                    ocr_results.append([processed_text, confidence])
+                                    
+                                    logger.info(f"✅ NEW ByteTracker Track {track_id}: '{processed_text}' (conf: {confidence:.3f})")
+                                else:
+                                    logger.debug(f"⏭️ Track {track_id} plate not saved due to grouping: '{processed_text}'")
                             else:
                                 logger.debug(f"❌ Track {track_id} invalid format, skipping: '{processed_text}'")
                                 continue
@@ -3632,6 +3763,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             cv2.putText(display_frame, display_text, (text_x, text_y),
                                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
                     else:
+                        logger.info(f"🔍 DEBUG: No track_id for detection {i}, using fallback logic")
                         # FIXED: Sử dụng logic grouping để tránh tạo nhiều biển số cho cùng 1 đối tượng
                         # Tìm biển số tương tự trong roi_tracked_objects (persistent tracking)
                         similar_object_id = None
@@ -3642,16 +3774,19 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             if existing_plate:
                                 # Tính similarity giữa 2 biển số
                                 similarity = calculate_plate_similarity(processed_text, existing_plate)
-                                if similarity > best_similarity and similarity >= 0.6:  # Threshold 60%
-                                    best_similarity = similarity
-                                    similar_object_id = obj_id
+                                if similarity >= 0.6:  # Threshold 60%
+                                    existing_conf = obj_data.get('confidence', 0)
+                                    # Chọn biển số có confidence cao nhất
+                                    if existing_conf > best_similarity:
+                                        best_similarity = existing_conf
+                                        similar_object_id = obj_id
                         
                         if similar_object_id is not None:
                             # Gộp biển số tương tự ngay lập tức (60% similarity)
                             existing_conf = roi_tracked_objects[similar_object_id].get('confidence', 0)
                             
-                            # Cập nhật nếu confidence cao hơn hoặc tương đương
-                            if confidence >= existing_conf:
+                            # Chỉ cập nhật nếu confidence cao hơn
+                            if confidence > existing_conf:
                                 roi_tracked_objects[similar_object_id].update({
                                     'plate': processed_text,
                                     'bbox': [x1, y1, x2, y2],
@@ -3668,7 +3803,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                 logger.debug(f"⏭️ Similar Object {similar_object_id} kept existing: '{processed_text}' ({confidence:.3f}) vs existing ({existing_conf:.3f})")
                         else:
                             # Tạo object mới chỉ khi không có biển số tương tự
+                            logger.info(f"🔍 DEBUG: No similar object found, creating new object for '{processed_text}'")
                             if is_valid_vietnam_plate_format(processed_text):
+                                logger.info(f"🔍 DEBUG: Format valid for fallback, creating new object")
                                 # FIXED: Sử dụng persistent ID để tránh tạo nhiều object cho cùng 1 biển số
                                 # Tìm ID trống hoặc tạo ID mới
                                 new_track_id = None
@@ -3681,69 +3818,91 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                                     # Nếu không tìm được ID trống, sử dụng timestamp
                                     new_track_id = int(time.time() * 1000) % 10000 + 10000
                                 
-                                # Tạo object mới với persistent ID
-                                roi_tracked_objects[new_track_id] = {
-                                    'plate': processed_text,
-                                    'bbox': [x1, y1, x2, y2],
-                                    'confidence': confidence,
-                                    'last_seen': time.time(),
-                                    'track_id': new_track_id,
-                                    'display_id': len(roi_tracked_objects) + 1  # ID hiển thị: 1, 2, 3...
-                                }
+                                logger.info(f"🔍 DEBUG: Created new_track_id={new_track_id} for '{processed_text}'")
+                                # FIXED: Sử dụng should_save_plate để gộp biển số tương tự
+                                saved = should_save_plate(processed_text, confidence, new_track_id, None, [x1, y1, x2, y2])
+                                logger.info(f"🔍 DEBUG: should_save_plate returned {saved} for fallback '{processed_text}'")
                                 
-                                # Cập nhật active_roi_objects để hiển thị
-                                active_roi_objects[new_track_id] = roi_tracked_objects[new_track_id]
-                                
-                                # Thêm vào response arrays
-                                boxes.append([x1, y1, x2, y2])
-                                labels.append(f"Plate: {processed_text}")
-                                ocr_results.append([processed_text, confidence])
-                                
-                                logger.info(f"✅ NEW Object {roi_tracked_objects[new_track_id]['display_id']}: '{processed_text}' (conf: {confidence:.3f})")
+                                if saved:
+                                    # FIXED: Tạo object mới với persistent ID
+                                    obj_data = {
+                                        'plate': processed_text,
+                                        'bbox': [x1, y1, x2, y2],
+                                        'confidence': confidence,
+                                        'last_seen': time.time(),
+                                        'track_id': new_track_id,
+                                        'display_id': len(roi_tracked_objects) + 1  # ID hiển thị: 1, 2, 3...
+                                    }
+                                    
+                                    roi_tracked_objects[new_track_id] = obj_data
+                                    active_roi_objects[new_track_id] = obj_data
+                                    
+                                    # Thêm vào response arrays
+                                    boxes.append([x1, y1, x2, y2])
+                                    labels.append(f"Plate: {processed_text}")
+                                    ocr_results.append([processed_text, confidence])
+                                    
+                                    logger.info(f"✅ NEW Object {obj_data['display_id']}: '{processed_text}' (conf: {confidence:.3f})")
+                                else:
+                                    logger.debug(f"⏭️ Object not created due to grouping: '{processed_text}'")
                             else:
                                 logger.debug(f"❌ Invalid format, skipping: '{processed_text}'")
                                 continue
                             
+                        # FIXED: Vẽ bounding box và text cho tất cả biển số được xử lý
+                        if processed_text and len(processed_text) >= 4:
                             # Vẽ bounding box và text ngay lập tức
                             cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                             
-                        # Vẽ text với background - sử dụng display_id từ roi_tracked_objects
-                        if similar_object_id is not None:
-                            display_id = roi_tracked_objects[similar_object_id].get('display_id', i + 1)
-                        else:
-                            # Tìm display_id từ active_roi_objects
-                            display_id = i + 1
-                            for obj_id, obj_data in active_roi_objects.items():
-                                if obj_data.get('plate') == processed_text:
-                                    display_id = obj_data.get('display_id', i + 1)
-                                    break
-                        
-                        display_text = f"ID: {display_id} {processed_text}"
-                        # Text nằm ở phía trên, giữa bounding box
-                        text_y = max(y1 - 15, 25)
-                        text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
-                        # Tính toán vị trí x để text nằm giữa bounding box
-                        text_x = x1 + (x2 - x1 - text_size[0]) // 2
-                        
-                        # Background đen vừa với text
-                        cv2.rectangle(display_frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
-                        
-                        # Text đậm hơn (thickness = 3)
-                        cv2.putText(display_frame, display_text, (text_x, text_y),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                            # Vẽ text với background - sử dụng display_id từ roi_tracked_objects
+                            if similar_object_id is not None:
+                                display_id = roi_tracked_objects[similar_object_id].get('display_id', i + 1)
+                            else:
+                                # Tìm display_id từ active_roi_objects
+                                display_id = i + 1
+                                for obj_id, obj_data in active_roi_objects.items():
+                                    if obj_data.get('plate') == processed_text:
+                                        display_id = obj_data.get('display_id', i + 1)
+                                        break
+                            
+                            display_text = f"ID: {display_id} {processed_text}"
+                            # Text nằm ở phía trên, giữa bounding box
+                            text_y = max(y1 - 15, 25)
+                            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+                            # Tính toán vị trí x để text nằm giữa bounding box
+                            text_x = x1 + (x2 - x1 - text_size[0]) // 2
+                            
+                            # Background đen vừa với text
+                            cv2.rectangle(display_frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
+                            
+                            # Text đậm hơn (thickness = 3)
+                            cv2.putText(display_frame, display_text, (text_x, text_y),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
     
     # FIXED: Persistent tracking - không clear roi_tracked_objects mỗi frame
     # Chỉ cập nhật objects mới và xóa objects cũ
     current_time = time.time()
     
-    # Cập nhật roi_tracked_objects với active_roi_objects
+    # FIXED: Cập nhật roi_tracked_objects với active_roi_objects
     for obj_id, obj_data in active_roi_objects.items():
         roi_tracked_objects[obj_id] = obj_data
+    
+    # FIXED: Lưu roi_tracked_objects vào thread-safe storage
+    set_thread_safe_data('roi_tracked_objects', roi_tracked_objects)
     
     # Xóa objects cũ (không được cập nhật trong 3 giây)
     objects_to_remove = []
     for obj_id, obj_data in roi_tracked_objects.items():
-        time_since_last_seen = current_time - obj_data.get('last_seen', 0)
+        last_seen = obj_data.get('last_seen', 0)
+        # FIXED: Kiểm tra kiểu dữ liệu của last_seen
+        if isinstance(last_seen, dict):
+            logger.error(f"❌ ERROR: last_seen is dict for obj_id {obj_id}: {last_seen}")
+            last_seen = 0  # Fallback
+        elif not isinstance(last_seen, (int, float)):
+            logger.error(f"❌ ERROR: last_seen is not number for obj_id {obj_id}: {type(last_seen)} = {last_seen}")
+            last_seen = 0  # Fallback
+        
+        time_since_last_seen = current_time - last_seen
         if time_since_last_seen > 3.0:  # Xóa sau 3 giây không hoạt động
             objects_to_remove.append(obj_id)
     
@@ -3761,15 +3920,27 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # OPTIMIZED DATABASE SAVING - Chỉ lưu 1 biển số duy nhất cho mỗi ROI object
     current_time = time.time()
     
+    # Get thread-safe data
+    plate_history = get_thread_safe_data('plate_history') or {}
+    
     # Xóa các biển số cũ khỏi plate_history (hơn 60 giây)
     old_plates = []
-    for saved_plate, save_time in plate_history.items():
+    for saved_plate, save_data in plate_history.items():
+        # FIXED: Kiểm tra kiểu dữ liệu của save_data
+        if isinstance(save_data, dict):
+            save_time = save_data.get('timestamp', 0)
+        else:
+            save_time = save_data  # Fallback cho trường hợp cũ
+        
         if current_time - save_time > 60.0:  # Xóa sau 60 giây
             old_plates.append(saved_plate)
     
     for old_plate in old_plates:
         del plate_history[old_plate]
         logger.debug(f"🗑️ Xóa biển số cũ khỏi history: '{old_plate}'")
+    
+    # Save back to thread-safe storage
+    set_thread_safe_data('plate_history', plate_history)
     
     # Xóa các track cũ khỏi global_saved_tracks (hơn 120 giây)
     old_tracks = []
@@ -3813,7 +3984,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         # FIXED: Kiểm tra cooldown để tránh crop nhiều lần cho cùng 1 biển số
         plate_key = f"plate_{plate_text}"
         if plate_key in plate_history:
-            time_since_last_save = current_time - plate_history[plate_key]
+            # FIXED: plate_history[plate_key] là dictionary, cần lấy timestamp
+            plate_data = plate_history[plate_key]
+            if isinstance(plate_data, dict):
+                last_save_time = plate_data.get('timestamp', 0)
+            else:
+                last_save_time = plate_data  # Fallback cho trường hợp cũ
+            
+            time_since_last_save = current_time - last_save_time
             if time_since_last_save < 30.0:  # Cooldown 30 giây cho cùng 1 biển số
                 logger.debug(f"⏭️ Plate '{plate_text}' in cooldown ({30.0 - time_since_last_save:.1f}s remaining), skipping crop")
                 continue
@@ -3837,8 +4015,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             plate_key = f"plate_{plate_text}"
             
             # FIXED: Kiểm tra cooldown dựa trên biển số (240 giây) để tránh spam
-            if plate_key in plate_history and current_time - plate_history[plate_key] < 300.0:
-                continue
+            if plate_key in plate_history:
+                # FIXED: plate_history[plate_key] là dictionary, cần lấy timestamp
+                plate_data = plate_history[plate_key]
+                if isinstance(plate_data, dict):
+                    last_save_time = plate_data.get('timestamp', 0)
+                else:
+                    last_save_time = plate_data  # Fallback cho trường hợp cũ
+                
+                if current_time - last_save_time < 300.0:
+                    continue
             logger.info(f"🔍 BEST ROI Object (Track {track_id}) will be saved to database")
             logger.info(f"🚀 DATABASE SAVING: Starting database save process for plate '{plate_text}'")
             
@@ -3882,7 +4068,12 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 logger.error(f"Error saving Track {track_id} crop image: {e}")
             
             # FIXED: Ghi nhận đã gửi để tránh spam (240 giây cooldown cho biển số)
-            plate_history[plate_key] = current_time
+            plate_history[plate_key] = {
+                'timestamp': current_time,
+                'confidence': confidence,
+                'plate': plate_text,
+                'track_id': track_id
+            }
             roi_saved_plates[track_id] = plate_text  # Lưu biển số đã gửi cho track này
             global_saved_tracks[track_id] = {  # FIXED: GLOBAL TRACKING với confidence
                 'plate': plate_text,
@@ -3897,12 +4088,21 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 # Xóa các biển số cũ khác (không phải biển số hiện tại)
                 if key.startswith("plate_") and key != current_plate_key:
                     # Kiểm tra thời gian - chỉ xóa biển số cũ hơn 5 phút
-                    if current_time - plate_history[key] > 300:  # 5 phút
+                    plate_data = plate_history[key]
+                    if isinstance(plate_data, dict):
+                        last_save_time = plate_data.get('timestamp', 0)
+                    else:
+                        last_save_time = plate_data  # Fallback cho trường hợp cũ
+                    
+                    if current_time - last_save_time > 300:  # 5 phút
                         keys_to_remove.append(key)
             
             for key in keys_to_remove:
                 del plate_history[key]
                 logger.debug(f"🗑️ Xóa biển số cũ khỏi history: {key}")
+            
+            # Save back to thread-safe storage
+            set_thread_safe_data('plate_history', plate_history)
             
             logger.info(f"✅ Đã lưu biển số '{plate_text}' cho Track {track_id} - plate cooldown 240 giây")
 
@@ -4021,6 +4221,29 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             
         except Exception as e:
             logger.error(f"Error merging similar plates: {e}")
+
+    # FIXED: GỘP CÁC BIỂN SỐ TƯƠNG TỰ TRONG PLATE_HISTORY - THREAD SAFE
+    # Chỉ thực hiện grouping mỗi 15 giây để tránh overhead
+    if current_time - thread_container.get('last_plate_grouping_time', 0) >= 15.0:
+        try:
+            thread_container['last_plate_grouping_time'] = current_time
+            logger.info("🔗 Merging similar plates in plate_history...")
+            
+            # Lấy plate_history hiện tại
+            plate_history = safe_get_global('plate_history', {})
+            if len(plate_history) > 1:  # Chỉ gộp nếu có nhiều hơn 1 biển số
+                # Sử dụng hàm group_similar_plates_at_end đã có sẵn
+                grouped_plates = group_similar_plates_at_end(plate_history, similarity_threshold=0.6)
+                
+                # Cập nhật plate_history với kết quả đã gộp
+                if len(grouped_plates) < len(plate_history):
+                    safe_set_global('plate_history', grouped_plates)
+                    logger.info(f"✅ Merged similar plates in history: {len(plate_history)} -> {len(grouped_plates)} unique plates")
+                else:
+                    logger.debug("No similar plates found in history to merge")
+            
+        except Exception as e:
+            logger.error(f"Error merging similar plates in history: {e}")
 
     # Optimized: Remove duplicate FPS calculation - already calculated above
 
