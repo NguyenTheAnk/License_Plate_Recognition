@@ -1042,6 +1042,18 @@ def get_thread_data_container():
     """Get thread-specific data container to prevent cross-stream contamination"""
     thread_id = threading.get_ident()
     if thread_id not in thread_data_containers:
+        # Thread-specific configuration for multi-stream optimization
+        if GPU_INFO['cuda_available']:
+            # GPU optimized for 20 FPS per stream
+            detection_cooldown = 0.05
+            motion_cooldown = 0.03
+            max_skip_frames = 0
+        else:
+            # CPU optimized for 20 FPS per stream
+            detection_cooldown = 0.1
+            motion_cooldown = 0.05
+            max_skip_frames = 1
+            
         thread_data_containers[thread_id] = {
             'tracked_objects': {},
             'frame_count': 0,
@@ -1058,7 +1070,14 @@ def get_thread_data_container():
             'roi_tracked_objects': {},
             'roi_object_counter': 0,
             'roi_saved_plates': {},
-            'global_saved_tracks': {}
+            'global_saved_tracks': {},
+            # Thread-specific performance settings
+            'detection_cooldown': detection_cooldown,
+            'motion_cooldown': motion_cooldown,
+            'max_skip_frames': max_skip_frames,
+            'skip_frame_count': 0,
+            'last_detection_time': 0,
+            'last_motion_time': 0
         }
     return thread_data_containers[thread_id]
 
@@ -1101,25 +1120,12 @@ global_saved_tracks = {}
 global_bg_subtractor = None
 last_roi_frame = None
 
-# Frame skipping variables - OPTIMIZED FOR 20 FPS
+# Frame skipping variables - THREAD-SPECIFIC FOR MULTI-STREAM OPTIMIZATION
+# Note: These are now thread-local variables to prevent contention between streams
 if GPU_INFO['cuda_available']:
-    # GPU optimized for 20 FPS
-    skip_frame_count = 0
-    max_skip_frames = 0  # Process every frame for 20 FPS
-    last_detection_time = 0
-    detection_cooldown = 0.05  # Very fast detection on GPU
-    last_motion_time = 0
-    motion_cooldown = 0.03  # Very fast motion detection on GPU
-    print("🎮 Using GPU-optimized settings for 20 FPS")
+    print("🎮 Using GPU-optimized settings for multi-stream 20 FPS")
 else:
-    # CPU optimized for 20 FPS
-    skip_frame_count = 0
-    max_skip_frames = 1  # Process almost every frame for 20 FPS
-    last_detection_time = 0
-    detection_cooldown = 0.1  # Faster detection on CPU
-    last_motion_time = 0
-    motion_cooldown = 0.05  # Faster motion detection on CPU
-    print("💻 Using CPU-optimized settings for 20 FPS")
+    print("💻 Using CPU-optimized settings for multi-stream 20 FPS")
 
 # Anti-duplicate settings - GIẢM THRESHOLD ĐỂ LƯU DỮ LIỆU NHANH HƠN
 consistency_threshold = 2  # Giảm xuống 2 để lưu nhanh hơn
@@ -1179,9 +1185,7 @@ TARGET_FPS = 20  # Mục tiêu FPS ổn định
 # Database throttling - OPTIMIZED FOR STABLE FPS
 last_db_send_time = 0
 db_send_interval = 0.05  # Giảm interval để responsive hơn
-last_detection_time = 0
-detection_cooldown = 0.05  # Giảm cooldown để responsive hơn
-last_alpr_call_time = 0  # Cooldown cho FastALPR calls
+# Note: detection_cooldown and last_detection_time are now thread-local
 
 # Khởi tạo Redis với auto-start
 redis_available = False
@@ -1514,7 +1518,7 @@ def calculate_plate_similarity(plate1, plate2):
     similarity = 1.0 - (distance / max_len)
     return max(0.0, similarity)
 
-def find_similar_plates(target_plate, plate_dict, similarity_threshold=0.7):
+def find_similar_plates(target_plate, plate_dict, similarity_threshold=0.6):
     """Tìm các biển số tương tự trong dictionary"""
     similar_plates = []
     target_plate_clean = target_plate.upper().strip()
@@ -1573,7 +1577,7 @@ def update_plate_if_better(plate_text, confidence, plate_history, track_id=None)
         }
         return True, "new"
 
-def group_similar_plates_at_end(plate_history, similarity_threshold=0.7):
+def group_similar_plates_at_end(plate_history, similarity_threshold=0.6):
     """Nhóm các biển số tương tự ở cuối quá trình xử lý - OPTIMIZED"""
     try:
         current_time = time.time()
@@ -1656,22 +1660,8 @@ def update_tracking_display_with_confidence(track_id, plate_text, confidence, bb
                     'updated_count': existing.get('updated_count', 0) + 1
                 })
                 
-                # Cập nhật hiển thị trên frame
-                if bbox and len(bbox) >= 4:
-                    x1, y1, x2, y2 = bbox[:4]
-                    display_text = f"ID: {track_id} {plate_text} ({confidence:.2f})"
-                    # Text nằm ở phía trên, giữa bounding box
-                    text_y = max(y1 - 15, 25)
-                    text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
-                    # Tính toán vị trí x để text nằm giữa bounding box
-                    text_x = x1 + (x2 - x1 - text_size[0]) // 2
-                    
-                    # Background đen vừa với text
-                    cv2.rectangle(frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
-                    
-                    # Text đậm hơn (thickness = 3)
-                    cv2.putText(frame, display_text, (text_x, text_y),
-                               cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                # REMOVED: Không vẽ text nhận diện trong update_tracking_display_with_confidence
+                # Chỉ cập nhật data, text sẽ được vẽ trong detect_and_ocr_stable
                 
                 return True
         else:
@@ -2492,7 +2482,7 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
             return False
     
     # 3. TÌM CÁC BIỂN SỐ TƯƠNG TỰ SỬ DỤNG LEVENSHTEIN - OPTIMIZED
-    similar_plates = find_similar_plates(clean_text, plate_history, similarity_threshold=0.8)  # Higher threshold for better grouping
+    similar_plates = find_similar_plates(clean_text, plate_history, similarity_threshold=0.6)  # 60% similarity threshold
     
     if similar_plates:
         # Tìm biển số tương tự có độ tin cậy cao nhất
@@ -2796,20 +2786,8 @@ def draw_roi_objects(frame, roi=None):
             # Vẽ bounding box - màu xanh lá
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
-            # Vẽ text - CHỈ HIỂN THỊ TEXT NHẬN DIỆN
-            display_text = f"ID: {obj_id} {plate_text}"
-            # Text nằm ở phía trên, giữa bounding box
-            text_y = max(y1 - 15, 25)
-            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
-            # Tính toán vị trí x để text nằm giữa bounding box
-            text_x = x1 + (x2 - x1 - text_size[0]) // 2
-            
-            # Background đen vừa với text
-            cv2.rectangle(frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
-            
-            # Text đậm hơn (thickness = 3)
-            cv2.putText(frame, display_text, (text_x, text_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+            # REMOVED: Không vẽ text nhận diện trong draw_roi_objects
+            # Chỉ vẽ bounding box, text sẽ được vẽ trong detect_and_ocr_stable
             
     except Exception as e:
         logger.error(f"Error drawing ROI objects: {e}")
@@ -2919,20 +2897,8 @@ def draw_persistent_displays(frame, roi=None):
             # Vẽ bounding box - màu xanh lá đơn giản
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
-            # Vẽ text với background - CHỈ HIỂN THỊ TEXT NHẬN DIỆN
-            display_text = f"ID: {track_id} {plate_text}"
-            # Text nằm ở phía trên, giữa bounding box
-            text_y = max(y1 - 15, 25)
-            text_size = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
-            # Tính toán vị trí x để text nằm giữa bounding box
-            text_x = x1 + (x2 - x1 - text_size[0]) // 2
-            
-            # Background đen vừa với text
-            cv2.rectangle(frame, (text_x - 5, text_y - text_size[1] - 5), (text_x + text_size[0] + 5, text_y + 5), (0, 0, 0), -1)
-            
-            # Text đậm hơn (thickness = 3)
-            cv2.putText(frame, display_text, (text_x, text_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+            # REMOVED: Không vẽ text nhận diện trong draw_persistent_displays
+            # Chỉ vẽ bounding box, text sẽ được vẽ trong detect_and_ocr_stable
             
             # REMOVED: Vẽ confidence - chỉ hiển thị text nhận diện
         
@@ -3222,19 +3188,34 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     
     # Tính FPS với smoothing để giảm fluctuation - THREAD SAFE - OPTIMIZED FOR 20 FPS
     current_time = time.time()
-    thread_container['fps_counter'] = thread_container.get('fps_counter', 0) + 1
-    if current_time - thread_container.get('last_fps_time', current_time) >= 1.0:  # Cập nhật FPS mỗi 1 giây để ổn định hơn
-        raw_fps = thread_container['fps_counter'] / (current_time - thread_container.get('last_fps_time', current_time))
+    
+    # Initialize FPS tracking variables if not exists
+    if 'fps_counter' not in thread_container:
+        thread_container['fps_counter'] = 0
+    if 'last_fps_time' not in thread_container:
+        thread_container['last_fps_time'] = current_time
+    if 'current_fps' not in thread_container:
+        thread_container['current_fps'] = 0
+    
+    thread_container['fps_counter'] += 1
+    
+    # Calculate FPS every 1 second
+    time_diff = current_time - thread_container['last_fps_time']
+    if time_diff >= 1.0:
+        raw_fps = thread_container['fps_counter'] / time_diff
+        
         # Smooth FPS calculation để giảm fluctuation
-        if thread_container.get('current_fps', 0) == 0:
+        if thread_container['current_fps'] == 0:
             thread_container['current_fps'] = raw_fps
         else:
-            thread_container['current_fps'] = 0.8 * thread_container.get('current_fps', 0) + 0.2 * raw_fps  # More stable smoothing
+            thread_container['current_fps'] = 0.8 * thread_container['current_fps'] + 0.2 * raw_fps  # More stable smoothing
+        
+        # Reset counters
         thread_container['fps_counter'] = 0
         thread_container['last_fps_time'] = current_time
-        # Reduced logging for performance
-        if thread_container.get('current_fps', 0) < 3:  # Only log if FPS is low
-            logger.info(f"📊 Current FPS: {thread_container.get('current_fps', 0):.1f} (raw: {raw_fps:.1f})")
+        
+        # Log FPS for debugging
+        logger.info(f"📊 Current FPS: {thread_container['current_fps']:.1f} (raw: {raw_fps:.1f})")
     
     curr_time = time.time()
     original_height, original_width = frame.shape[:2]
@@ -3254,18 +3235,23 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # OPTIMIZED: Consistent frame skipping for stable FPS
     should_skip = False
     
-    # OPTIMIZED: Minimal frame skipping for 20 FPS - only skip if FPS is very high
+    # OPTIMIZED: Thread-specific frame skipping for multi-stream 20 FPS
     if ENABLE_FPS_THROTTLING and thread_container.get('current_fps', 0) > 0:
-        # Only skip frames if FPS is significantly above target (50+ FPS)
-        if thread_container.get('current_fps', 0) > 50:  # Much less aggressive - only skip at very high FPS
-            should_skip = True
-        elif thread_container.get('current_fps', 0) < 25:  # If FPS is reasonable, process every frame
-            should_skip = False
-        else:
-            # Check motion only when FPS is very high (25-50 FPS)
-            has_motion = has_motion_in_roi(frame, roi)
-            if not has_motion:
+        # Get thread-specific settings
+        max_skip_frames = thread_container.get('max_skip_frames', 0)
+        skip_frame_count = thread_container.get('skip_frame_count', 0)
+        
+        # Only skip frames if FPS is significantly above target (25+ FPS)
+        if thread_container.get('current_fps', 0) > 25:  # Skip at high FPS
+            if skip_frame_count < max_skip_frames:
                 should_skip = True
+                thread_container['skip_frame_count'] = skip_frame_count + 1
+            else:
+                should_skip = False
+                thread_container['skip_frame_count'] = 0
+        else:
+            should_skip = False  # Process every frame for 20 FPS target
+            thread_container['skip_frame_count'] = 0
     
     # Optimized: Remove logging for better FPS
     
@@ -3322,8 +3308,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     # OPTIMIZED: Throttle FastALPR calls to prevent video pause
                     current_time = time.time()
                     
-                    # OPTIMIZED: FastALPR with minimal cooldown for 20 FPS - THREAD SAFE
-                    if current_time - thread_container.get('last_alpr_call_time', 0) >= 0.005:  # 5ms cooldown (200 FPS max)
+                    # OPTIMIZED: FastALPR with cooldown for 20 FPS - THREAD SAFE
+                    if current_time - thread_container.get('last_alpr_call_time', 0) >= 0.05:  # 50ms cooldown (20 FPS max)
                         try:
                             # OPTIMIZED: Gọi FastALPR trực tiếp (không enhancement) - 5 FPS
                             alpr_results = alpr.predict(roi_frame_rgb)
@@ -3941,7 +3927,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                     found_group = False
                     for group_key, group_data in plate_groups.items():
                         similarity = calculate_plate_similarity(plate_text, group_key)
-                        if similarity > 0.7:  # Tương tự
+                        if similarity > 0.6:  # 60% similarity threshold
                             # Thêm vào group hiện có
                             group_data['plates'].append({
                                 'plate': plate_text,
