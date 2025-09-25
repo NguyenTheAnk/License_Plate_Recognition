@@ -1247,12 +1247,12 @@ try:
     # Khởi tạo ByteTracker với tham số tối ưu cho ROI tracking ổn định
     try:
         byte_tracker = BYTETracker(
-            track_thresh=0.5,    # Tăng threshold để track ổn định hơn
-            track_buffer=500,     # Giảm buffer để track nhanh hơn trong ROI
-            match_thresh=0.8,    # Tăng threshold để match chính xác hơn
+            track_thresh=0.05,   # Giảm threshold để track dễ hơn
+            track_buffer=5,      # Giảm buffer để track nhanh hơn
+            match_thresh=0.3,    # Giảm threshold để match dễ hơn
             frame_rate=20        # Giảm frame rate để ổn định hơn
         )
-        logger.info("ByteTracker initialized successfully - STABLE ROI TRACKING MODE")
+        logger.info("ByteTracker initialized successfully - OPTIMIZED TRACKING MODE")
     except Exception as e:
         logger.error(f"Failed to initialize ByteTracker: {e}")
         raise
@@ -1271,12 +1271,12 @@ except Exception as e:
     logger.warning("Running without FastALPR - detection will be disabled")
     alpr = None
 
-# Khởi tạo ByteTrack với tham số tối ưu cho ROI tracking ổn định - STABLE MODE
+# Khởi tạo ByteTrack với tham số tối ưu cho ROI tracking ổn định - OPTIMIZED MODE
 tracker = BYTETracker(
-    track_thresh=0.5,  # Tăng threshold để track ổn định hơn
-    track_buffer=500,   # Giảm buffer để track nhanh hơn trong ROI
-    match_thresh=0.8,  # Tăng threshold để match chính xác hơn
-    frame_rate=20      # Giảm frame rate để ổn định hơn
+    track_thresh=0.05,  # Giảm threshold để track dễ hơn
+    track_buffer=5,     # Giảm buffer để track nhanh hơn
+    match_thresh=0.3,   # Giảm threshold để match dễ hơn
+    frame_rate=20       # Giảm frame rate để ổn định hơn
 )
 
 # Lưu lịch sử biển số và ánh xạ track_id - THEO LOGIC TEST.PY
@@ -2741,12 +2741,12 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
         all_similar_plates = [{'plate': clean_text, 'confidence': confidence, 'track_id': track_id}] + similar_plates
         
         # Sắp xếp theo độ tin cậy (cao nhất trước)
-        all_similar_plates.sort(key=lambda x: x.get('confidence', x['data'].get('confidence', 0.0)), reverse=True)
+        all_similar_plates.sort(key=lambda x: x.get('confidence', 0.0), reverse=True)
         
         # Lấy biển số tốt nhất làm đại diện
         best_plate_data = all_similar_plates[0]
         best_plate_text = best_plate_data['plate']
-        best_plate_conf = best_plate_data.get('confidence', best_plate_data['data'].get('confidence', 0.0))
+        best_plate_conf = best_plate_data.get('confidence', 0.0)
         
         # Xóa tất cả biển số tương tự cũ
         for similar_plate in similar_plates:
@@ -3483,7 +3483,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     roi = (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
     
     # FIXED: Vẽ ROI LUÔN LUÔN - không bị ảnh hưởng bởi frame skipping
-    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 2)  # Vàng, nét dày hơn
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 3)  # Vàng, nét dày hơn
     # Điều chỉnh vị trí ROI text để tránh che khuất - di chuyển xuống dưới
     cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
     
@@ -3689,7 +3689,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             roi_tracks = []
             active_track_ids = set()
             
-            for track in tracks:
+            logger.info(f"🔍 DEBUG: ByteTracker returned {len(tracks)} tracks")
+            for i, track in enumerate(tracks):
+                logger.info(f"🔍 DEBUG: Track {i}: {track}")
                 # Xử lý STrack objects từ ByteTracker
                 if hasattr(track, 'tlwh') and hasattr(track, 'track_id'):
                     # STrack object
@@ -3760,6 +3762,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     
     # FIXED: Map detections với ByteTracker tracks dựa trên vị trí
     detection_track_mapping = {}
+    logger.info(f"🔍 DEBUG: Processing {len(plate_detections)} detections with {len(tracks)} tracks")
     for i, detection in enumerate(plate_detections):
         detection_bbox = detection['bbox']
         detection_center = ((detection_bbox[0] + detection_bbox[2]) / 2, 
@@ -3784,9 +3787,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         
         if closest_track_id is not None:
             detection_track_mapping[i] = closest_track_id
-            logger.debug(f"🔗 Detection {i} mapped to track {closest_track_id} (distance: {closest_distance:.1f})")
+            logger.info(f"🔗 Detection {i} mapped to track {closest_track_id} (distance: {closest_distance:.1f})")
         else:
-            logger.debug(f"❌ Detection {i} không có track tương ứng")
+            logger.info(f"❌ Detection {i} không có track tương ứng")
     
     # FIXED: Xử lý detections với ByteTracker track_id
     for i, detection in enumerate(plate_detections):
@@ -3794,7 +3797,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         confidence = detection['confidence']
         bbox = detection['bbox']
         
-        # Optimized: Remove logging for better FPS
+        # Get track_id from mapping
+        track_id = detection_track_mapping.get(i)
+        logger.info(f"🔍 DEBUG: Detection {i} track_id: {track_id}")
         
         if plate_text and len(plate_text.strip()) >= 4 and confidence > 0.2:
             # Xử lý text và thêm dấu - và . nếu cần
@@ -4199,12 +4204,25 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             plate_data = plate_history[plate_key]
             if isinstance(plate_data, dict):
                 last_save_time = plate_data.get('timestamp', 0)
+                last_camera_id = plate_data.get('camera_id', None)
+                logger.info(f"🔍 DEBUG: Found plate '{plate_text}' in history - last_camera_id: {last_camera_id}, current_camera_id: {camera_id}")
             else:
                 last_save_time = plate_data  # Fallback cho trường hợp cũ
-            
+                last_camera_id = None
+                logger.info(f"🔍 DEBUG: Found plate '{plate_text}' in history (old format) - current_camera_id: {camera_id}")
+        else:
+            logger.info(f"🔍 DEBUG: Plate '{plate_text}' not in history - current_camera_id: {camera_id}")
+            last_camera_id = None
+            last_save_time = 0
+        
+        # FIXED: Kiểm tra camera khác nhau - nếu khác camera thì lưu ngay
+        if last_camera_id is not None and last_camera_id != camera_id:
+            logger.info(f"🔄 Camera changed: {last_camera_id} -> {camera_id}, saving plate '{plate_text}'")
+            # Không skip, tiếp tục lưu
+        else:
             time_since_last_save = current_time - last_save_time
             if time_since_last_save < 30.0:  # Cooldown 30 giây cho cùng 1 biển số
-                logger.debug(f"⏭️ Plate '{plate_text}' in cooldown ({30.0 - time_since_last_save:.1f}s remaining), skipping crop")
+                logger.info(f"⏭️ Plate '{plate_text}' in cooldown ({30.0 - time_since_last_save:.1f}s remaining), skipping crop")
                 continue
         
         # Xử lý object trong vòng 5 giây
@@ -4215,6 +4233,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             
         # FIXED: SỬ DỤNG CONFIDENCE THRESHOLD 0.7 VÀ VALIDATION BIỂN SỐ VIỆT NAM
         if plate_text and len(plate_text) >= 4 and confidence >= 0.7:  # Set confidence >= 0.7
+            logger.info(f"🔍 DEBUG: Processing plate '{plate_text}' for camera_id: {camera_id}")
             # SỬ DỤNG HÀM VALIDATION BIỂN SỐ VIỆT NAM CÓ SẴN
             if not is_valid_vietnam_plate_format(plate_text):
                 continue
@@ -4283,7 +4302,12 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 'timestamp': current_time,
                 'confidence': confidence,
                 'plate': plate_text,
-                'track_id': track_id
+                'track_id': track_id,
+                'camera_id': camera_id,
+                'source_type': source_type,
+                'video_filename': video_filename,
+                'camera_location': camera_location,
+                'camera_name': camera_name
             }
             roi_saved_plates[track_id] = plate_text  # Lưu biển số đã gửi cho track này
             global_saved_tracks[track_id] = {  # FIXED: GLOBAL TRACKING với confidence
@@ -4459,15 +4483,21 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # Optimized: Remove duplicate FPS calculation - already calculated above
 
     # FIXED: Draw ROI objects and persistent displays on the frame
-    draw_roi_objects(display_frame, roi)
-    draw_persistent_displays(display_frame, roi)
+    try:
+        draw_roi_objects(display_frame, roi)
+        draw_persistent_displays(display_frame, roi)
+    except Exception as e:
+        logger.error(f"Error drawing ROI objects: {e}")
+        # Vẽ ROI cơ bản nếu có lỗi
+        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 3)
+        cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
 
     # Return results - với error handling
     try:
         # Encode frame với error handling và tối ưu quality cho 20 FPS
         encode_result = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
         # FIXED: Đảm bảo ROI luôn được vẽ ở cuối để không bị ẩn
-        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 2)  # Vàng, nét dày hơn
+        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 3)  # Vàng, nét dày hơn
         cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
         
         if encode_result[0]:  # Nếu encode thành công
