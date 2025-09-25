@@ -1573,6 +1573,7 @@ def find_similar_plates(target_plate, plate_dict, similarity_threshold=0.6, targ
             similar_plates.append({
                 'plate': plate_text,
                 'similarity': similarity,
+                'confidence': plate_data.get('confidence', 0.0),
                 'data': plate_data,
                 'adaptive_threshold': adaptive_threshold
             })
@@ -2731,8 +2732,8 @@ def should_save_plate(plate_text, confidence, track_id=None, ocr_confidence=None
     
     if similar_plates:
         # Tìm biển số tương tự có độ tin cậy cao nhất
-        best_similar = max(similar_plates, key=lambda x: x['data'].get('confidence', 0.0))
-        best_confidence = best_similar['data'].get('confidence', 0.0)
+        best_similar = max(similar_plates, key=lambda x: x.get('confidence', 0.0))
+        best_confidence = best_similar.get('confidence', 0.0)
         best_plate = best_similar['plate']
         similarity = best_similar['similarity']
         
@@ -3479,11 +3480,15 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # Calculate ROI coordinates - CENTERED HALF FRAME
     roi_xmin, roi_ymin, roi_xmax, roi_ymax = calculate_roi_coordinates(original_width, original_height)
     
+    # FIXED: Vẽ ROI ngay lập tức sau khi tạo display_frame để đảm bảo luôn có
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)  # Vàng, nét dày hơn
+    cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
+    
     # FRAME SKIPPING LOGIC - Chỉ xử lý khi cần thiết
     roi = (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
     
     # FIXED: Vẽ ROI LUÔN LUÔN - không bị ảnh hưởng bởi frame skipping
-    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 3)  # Vàng, nét dày hơn
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)  # Vàng, nét dày hơn
     # Điều chỉnh vị trí ROI text để tránh che khuất - di chuyển xuống dưới
     cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
     
@@ -3499,7 +3504,51 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         else:
             should_skip = False  # Process every frame for 15-25 FPS target
     
-    # Optimized: Remove logging for better FPS
+    # FIXED: Vẽ ROI ngay cả khi skip frame để đảm bảo luôn hiển thị
+    if should_skip:
+        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)  # Vàng, nét dày hơn
+        cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
+        
+        # Return early với ROI đã vẽ
+        try:
+            encode_result = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            if encode_result[0]:
+                frame_bytes = encode_result[1].tobytes()
+            else:
+                frame_bytes = b''
+            
+            return {
+                'frame': frame_bytes,
+                'boxes': [],
+                'labels': [],
+                'ocr_results': [],
+                'tracked_objects': {},
+                'ids': [],
+                'frame_width': original_width,
+                'frame_height': original_height,
+                'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
+                'fps': thread_container.get('current_fps', 0),
+                'detection_count': 0,
+                'track_count': 0,
+                'skipped': True
+            }
+        except Exception as e:
+            logger.error(f"Error encoding skipped frame: {e}")
+            return {
+                'frame': b'',
+                'boxes': [],
+                'labels': [],
+                'ocr_results': [],
+                'tracked_objects': {},
+                'ids': [],
+                'frame_width': original_width,
+                'frame_height': original_height,
+                'roi': [roi_xmin, roi_ymin, roi_xmax, roi_ymax],
+                'fps': thread_container.get('current_fps', 0),
+                'detection_count': 0,
+                'track_count': 0,
+                'skipped': True
+            }
     
     # Ensure ROI is valid
     if roi_xmax <= roi_xmin or roi_ymax <= roi_ymin:
@@ -3692,7 +3741,14 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             logger.info(f"🔍 DEBUG: ByteTracker returned {len(tracks)} tracks")
             for i, track in enumerate(tracks):
                 logger.info(f"🔍 DEBUG: Track {i}: {track}")
-                # Xử lý STrack objects từ ByteTracker
+            
+            # FIXED: Debug logging cho detections
+            logger.info(f"🔍 DEBUG: Processing {len(plate_detections)} detections")
+            for i, detection in enumerate(plate_detections):
+                logger.info(f"🔍 DEBUG: Detection {i}: plate='{detection.get('plate', '')}', conf={detection.get('confidence', 0):.3f}, bbox={detection.get('bbox', [])}")
+            
+            # Xử lý STrack objects từ ByteTracker
+            for track in tracks:
                 if hasattr(track, 'tlwh') and hasattr(track, 'track_id'):
                     # STrack object
                     x1, y1, w, h = track.tlwh
@@ -3903,6 +3959,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             # Text đậm hơn (thickness = 3)
                             cv2.putText(display_frame, display_text, (text_x, text_y),
                                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                            
+                            # FIXED: Vẽ ROI sau mỗi bounding box để đảm bảo luôn hiển thị
+                            cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
+                            cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
                     else:
                         logger.info(f"🔍 DEBUG: No track_id for detection {i}, using fallback logic")
                         # FIXED: Sử dụng logic grouping để tránh tạo nhiều biển số cho cùng 1 đối tượng
@@ -4019,6 +4079,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             # Text đậm hơn (thickness = 3)
                             cv2.putText(display_frame, display_text, (text_x, text_y),
                                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+                            
+                            # FIXED: Vẽ ROI sau mỗi bounding box để đảm bảo luôn hiển thị
+                            cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
+                            cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
     
     # FIXED: Persistent tracking - không clear roi_tracked_objects mỗi frame
     # Chỉ cập nhật objects mới và xóa objects cũ
@@ -4101,76 +4165,182 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     grouped_objects = {}
     processed_objects = set()
     
+    logger.info(f"🔄 STARTING GROUPING: Processing {len(roi_tracked_objects)} ROI objects with {len(plate_history)} history plates")
+    logger.info(f"🔍 DEBUG: ROI objects: {list(roi_tracked_objects.keys())}")
+    logger.info(f"🔍 DEBUG: Plate history keys: {list(plate_history.keys())}")
+    
+    # FIXED: Debug logging chi tiết cho từng ROI object
     for obj_id, obj_data in roi_tracked_objects.items():
-        if obj_id in processed_objects:
-            continue
-            
         plate_text = obj_data.get('plate', '').upper().strip()
         confidence = obj_data.get('confidence', 0)
         track_id = obj_data.get('track_id')
-        
-        if not plate_text:
-            continue
-            
-        # Tìm các biển số tương tự trong roi_tracked_objects với threshold cố định 0.6
-        similar_objects = []
-        for other_obj_id, other_obj_data in roi_tracked_objects.items():
-            if other_obj_id == obj_id or other_obj_id in processed_objects:
-                continue
-                
-            other_plate = other_obj_data.get('plate', '').upper().strip()
-            if not other_plate:
-                continue
-                
-            # Tính similarity với threshold cố định 0.6 - SIMPLIFIED
-            similarity = calculate_plate_similarity(plate_text, other_plate)
-            if similarity >= 0.6:  # Cố định 60% similarity threshold
-                similar_objects.append({
-                    'obj_id': other_obj_id,
-                    'plate': other_plate,
-                    'confidence': other_obj_data.get('confidence', 0),
-                    'similarity': similarity,
-                    'data': other_obj_data
-                })
-        
-        if similar_objects:
-            # Có biển số tương tự - tạo nhóm
-            all_objects = [{'obj_id': obj_id, 'plate': plate_text, 'confidence': confidence, 'data': obj_data}] + similar_objects
-            
-            # Sắp xếp theo confidence (cao nhất trước)
-            all_objects.sort(key=lambda x: x['confidence'], reverse=True)
-            
-            # Lấy biển số tốt nhất làm đại diện
-            best_object = all_objects[0]
-            best_obj_id = best_object['obj_id']
-            best_plate = best_object['plate']
-            best_conf = best_object['confidence']
-            
-            # Cập nhật object tốt nhất với thông tin nhóm
-            grouped_data = best_object['data'].copy()
-            grouped_data.update({
-                'plate': best_plate,
-                'confidence': best_conf,
-                'grouped_plates': [obj['plate'] for obj in all_objects],
-                'grouped_count': len(all_objects),
-                'similarity_scores': [obj.get('similarity', 1.0) for obj in all_objects]
-            })
-            
-            grouped_objects[best_obj_id] = grouped_data
-            
-            # Đánh dấu tất cả objects trong nhóm đã được xử lý
-            for obj in all_objects:
-                processed_objects.add(obj['obj_id'])
-            
-            logger.info(f"🔄 SIMPLIFIED GROUPED {len(all_objects)} similar plates: {[obj['plate'] for obj in all_objects]} -> keeping '{best_plate}' (conf: {best_conf:.3f})")
-        else:
-            # Không có biển số tương tự - giữ nguyên
-            grouped_objects[obj_id] = obj_data
-            processed_objects.add(obj_id)
+        logger.info(f"🔍 DEBUG: ROI object {obj_id}: plate='{plate_text}', conf={confidence:.3f}, track_id={track_id}")
     
-    # Cập nhật roi_tracked_objects với kết quả đã gộp
-    roi_tracked_objects = grouped_objects
-    logger.info(f"🔗 SIMPLIFIED GROUPING completed: {len(grouped_objects)} unique objects after grouping")
+    try:
+        for obj_id, obj_data in roi_tracked_objects.items():
+            if obj_id in processed_objects:
+                continue
+                
+            plate_text = obj_data.get('plate', '').upper().strip()
+            confidence = obj_data.get('confidence', 0)
+            track_id = obj_data.get('track_id')
+            
+            if not plate_text:
+                continue
+                
+            # Tìm các biển số tương tự trong roi_tracked_objects VÀ plate_history với threshold cố định 0.6
+            similar_objects = []
+            
+            # 1. Tìm trong roi_tracked_objects (cùng frame)
+            for other_obj_id, other_obj_data in roi_tracked_objects.items():
+                if other_obj_id == obj_id or other_obj_id in processed_objects:
+                    continue
+                    
+                other_plate = other_obj_data.get('plate', '').upper().strip()
+                if not other_plate:
+                    continue
+                
+                # FIXED: Exact match - NHƯNG KHÔNG GỘP VỚI CHÍNH NÓ (để tránh duplicate)
+                if other_plate == plate_text:
+                    logger.info(f"🔄 FOUND EXACT MATCH in roi_tracked_objects: '{plate_text}' - SKIPPING to avoid duplicate")
+                    # Không thêm vào similar_objects để tránh gộp với chính nó
+                    continue
+                    
+                # Tính similarity với threshold cố định 0.6 - SIMPLIFIED
+                similarity = calculate_plate_similarity(plate_text, other_plate)
+                logger.info(f"🔍 DEBUG: Similarity '{plate_text}' vs '{other_plate}': {similarity:.3f}")
+                if similarity >= 0.6:  # Cố định 60% similarity threshold
+                    similar_objects.append({
+                        'obj_id': other_obj_id,
+                        'plate': other_plate,
+                        'confidence': other_obj_data.get('confidence', 0),
+                        'similarity': similarity,
+                        'data': other_obj_data,
+                        'source': 'roi_tracked_objects'
+                    })
+            
+            # 2. Tìm trong plate_history (các frame trước)
+            for hist_plate, hist_data in plate_history.items():
+                # FIXED: Kiểm tra cả plate_text trực tiếp và plate_plate_text format
+                if hist_plate == plate_text or hist_plate == f"plate_{plate_text}":
+                    # FIXED: Exact match - NHƯNG KHÔNG GỘP VỚI CHÍNH NÓ (để tránh duplicate)
+                    logger.info(f"🔄 FOUND EXACT MATCH in history: '{plate_text}' (key: '{hist_plate}') - SKIPPING to avoid duplicate")
+                    # Không thêm vào similar_objects để tránh gộp với chính nó
+                    continue
+                    
+                # FIXED: Tính similarity với plate_text gốc (không phải key format)
+                hist_plate_clean = hist_plate.replace("plate_", "") if hist_plate.startswith("plate_") else hist_plate
+                similarity = calculate_plate_similarity(plate_text, hist_plate_clean)
+                logger.info(f"🔍 DEBUG: History similarity '{plate_text}' vs '{hist_plate_clean}' (key: '{hist_plate}'): {similarity:.3f}")
+                if similarity >= 0.6:  # Cố định 60% similarity threshold
+                    similar_objects.append({
+                        'obj_id': f"hist_{hist_plate}",
+                        'plate': hist_plate_clean,  # FIXED: Sử dụng plate_text gốc
+                        'confidence': hist_data.get('confidence', 0),
+                        'similarity': similarity,
+                        'data': hist_data,
+                        'source': 'plate_history'
+                    })
+                    logger.info(f"🔄 FOUND SIMILAR in history: '{plate_text}' vs '{hist_plate}' (similarity: {similarity:.3f})")
+            
+            if similar_objects:
+                # Có biển số tương tự - tạo nhóm
+                logger.info(f"🔄 GROUPING: Found {len(similar_objects)} similar objects for '{plate_text}'")
+                all_objects = [{'obj_id': obj_id, 'plate': plate_text, 'confidence': confidence, 'data': obj_data, 'source': 'current_frame'}] + similar_objects
+                
+                # Sắp xếp theo confidence (cao nhất trước)
+                all_objects.sort(key=lambda x: x['confidence'], reverse=True)
+                
+                # Lấy biển số tốt nhất làm đại diện
+                best_object = all_objects[0]
+                best_obj_id = best_object['obj_id']
+                best_plate = best_object['plate']
+                best_conf = best_object['confidence']
+                
+                # FIXED: Tìm bbox chính xác cho biển số tốt nhất
+                best_bbox = best_object['data'].get('bbox', [])
+                logger.info(f"🔍 DEBUG: Initial best_bbox for '{best_plate}': {best_bbox}")
+                
+                # FIXED: Ưu tiên bbox từ current_frame (bbox mới nhất) - CHỈ LẤY BBOX CỦA OBJECT HIỆN TẠI
+                for obj in all_objects:
+                    if obj.get('source') == 'current_frame' and obj['obj_id'] == obj_id and obj['data'].get('bbox') and len(obj['data'].get('bbox', [])) >= 4:
+                        best_bbox = obj['data'].get('bbox', [])
+                        logger.info(f"🔍 DEBUG: Using current frame bbox for '{best_plate}' from obj_id {obj_id}: {best_bbox}")
+                        break
+                
+                # Nếu vẫn không có bbox hợp lệ, tìm từ object khác
+                if not best_bbox or len(best_bbox) < 4:
+                    for obj in all_objects:
+                        if obj['plate'] == best_plate and obj['data'].get('bbox') and len(obj['data'].get('bbox', [])) >= 4:
+                            best_bbox = obj['data'].get('bbox', [])
+                            logger.info(f"🔍 DEBUG: Using bbox from object '{obj['plate']}': {best_bbox}")
+                            break
+                
+                # FIXED: Nếu vẫn không có bbox, sử dụng bbox từ best_object gốc
+                if not best_bbox or len(best_bbox) < 4:
+                    best_bbox = best_object['data'].get('bbox', [])
+                    logger.info(f"🔍 DEBUG: Using original best_object bbox for '{best_plate}': {best_bbox}")
+                
+                # Cập nhật object tốt nhất với thông tin nhóm
+                grouped_data = best_object['data'].copy()
+                grouped_data.update({
+                    'plate': best_plate,
+                    'confidence': best_conf,
+                    'bbox': best_bbox,  # FIXED: Đảm bảo bbox chính xác
+                    'grouped_plates': [obj['plate'] for obj in all_objects],
+                    'grouped_count': len(all_objects),
+                    'similarity_scores': [obj.get('similarity', 1.0) for obj in all_objects]
+                })
+                
+                # FIXED: Debug logging cho bbox mapping
+                logger.info(f"🔍 DEBUG: Grouping bbox mapping - Best plate: '{best_plate}', bbox: {grouped_data.get('bbox', [])}")
+                logger.info(f"🔍 DEBUG: Original obj_id: {obj_id}, best_obj_id: {best_obj_id}")
+                for obj in all_objects:
+                    logger.info(f"🔍 DEBUG: Grouped object '{obj['plate']}' (obj_id: {obj['obj_id']}, source: {obj.get('source')}) bbox: {obj['data'].get('bbox', [])}")
+                
+                grouped_objects[best_obj_id] = grouped_data
+                
+                # Xóa các biển số tương tự khỏi plate_history để tránh duplicate
+                for obj in all_objects:
+                    # FIXED: Kiểm tra 'source' key tồn tại trước khi truy cập
+                    if obj.get('source') == 'plate_history':
+                        hist_plate = obj['plate']
+                        # FIXED: Tìm key trong plate_history (có thể là plate_plate_text format)
+                        hist_key = hist_plate if hist_plate in plate_history else f"plate_{hist_plate}"
+                        if hist_key in plate_history:
+                            del plate_history[hist_key]
+                            logger.info(f"🗑️ Removed similar plate from history: '{hist_plate}' (key: '{hist_key}')")
+                        else:
+                            logger.info(f"🔍 DEBUG: Plate '{hist_plate}' not found in history for removal")
+                    processed_objects.add(obj['obj_id'])
+                
+                logger.info(f"🔄 SIMPLIFIED GROUPED {len(all_objects)} similar plates: {[obj['plate'] for obj in all_objects]} -> keeping '{best_plate}' (conf: {best_conf:.3f})")
+            else:
+                # Không có biển số tương tự - giữ nguyên
+                logger.info(f"🔄 NO GROUPING: No similar objects found for '{plate_text}'")
+                grouped_objects[obj_id] = obj_data
+                processed_objects.add(obj_id)
+    
+        # Cập nhật roi_tracked_objects với kết quả đã gộp
+        roi_tracked_objects = grouped_objects
+        logger.info(f"🔗 SIMPLIFIED GROUPING completed: {len(grouped_objects)} unique objects after grouping")
+        
+        # FIXED: Debug logging chi tiết cho kết quả grouping
+        for obj_id, obj_data in grouped_objects.items():
+            plate_text = obj_data.get('plate', '')
+            confidence = obj_data.get('confidence', 0)
+            track_id = obj_data.get('track_id')
+            grouped_count = obj_data.get('grouped_count', 1)
+            logger.info(f"🔍 DEBUG: Grouped object {obj_id}: plate='{plate_text}', conf={confidence:.3f}, track_id={track_id}, grouped_count={grouped_count}")
+    
+    except Exception as e:
+        logger.error(f"Error in grouping logic: {e}")
+        # Fallback: sử dụng roi_tracked_objects gốc nếu có lỗi
+        roi_tracked_objects = roi_tracked_objects
+    
+    # FIXED: Vẽ ROI ngay sau grouping để đảm bảo luôn hiển thị
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)
+    cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
     
     # FIXED: Chỉ lưu object có ByteTracker track_id (không lưu temp tracks)
     best_objects = {}
@@ -4221,8 +4391,8 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             # Không skip, tiếp tục lưu
         else:
             time_since_last_save = current_time - last_save_time
-            if time_since_last_save < 30.0:  # Cooldown 30 giây cho cùng 1 biển số
-                logger.info(f"⏭️ Plate '{plate_text}' in cooldown ({30.0 - time_since_last_save:.1f}s remaining), skipping crop")
+            if time_since_last_save < 5.0:  # FIXED: Giảm cooldown xuống 5 giây để test grouping
+                logger.info(f"⏭️ Plate '{plate_text}' in cooldown ({5.0 - time_since_last_save:.1f}s remaining), skipping crop")
                 continue
         
         # Xử lý object trong vòng 5 giây
@@ -4238,62 +4408,111 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             if not is_valid_vietnam_plate_format(plate_text):
                 continue
                 
+            # FIXED: Kiểm tra bbox hợp lệ trước khi crop
+            if not bbox or len(bbox) < 4:
+                logger.warning(f"❌ Invalid bbox for plate '{plate_text}': {bbox}")
+                continue
+                
+            x1, y1, x2, y2 = bbox[:4]
+            if x2 <= x1 or y2 <= y1 or (x2 - x1) < 10 or (y2 - y1) < 10:
+                logger.warning(f"❌ Invalid bbox dimensions for plate '{plate_text}': {bbox}")
+                continue
+            
+            # FIXED: Kiểm tra bbox có trong frame không
+            frame_height, frame_width = frame.shape[:2]
+            if x1 < 0 or y1 < 0 or x2 > frame_width or y2 > frame_height:
+                logger.warning(f"❌ Bbox out of frame for plate '{plate_text}': {bbox}, frame: {frame_width}x{frame_height}")
+                continue
+                
             # FIXED: CẬP NHẬT HIỂN THỊ TRACKING VỚI ĐỘ TIN CẬY MỚI
             update_tracking_display_with_confidence(track_id, plate_text, confidence, bbox, display_frame)
             
             # FIXED: KIỂM TRA NGHIÊM NGẶT với biển số (không phụ thuộc track_id)
             plate_key = f"plate_{plate_text}"
             
-            # FIXED: Kiểm tra cooldown dựa trên biển số (240 giây) để tránh spam
+            # FIXED: Kiểm tra cooldown dựa trên biển số (300 giây) để tránh spam
             if plate_key in plate_history:
                 # FIXED: plate_history[plate_key] là dictionary, cần lấy timestamp
                 plate_data = plate_history[plate_key]
                 if isinstance(plate_data, dict):
                     last_save_time = plate_data.get('timestamp', 0)
+                    last_camera_id = plate_data.get('camera_id', None)
+                    logger.info(f"🔍 DEBUG: Found plate '{plate_text}' in history - last_camera_id: {last_camera_id}, current_camera_id: {camera_id}")
                 else:
                     last_save_time = plate_data  # Fallback cho trường hợp cũ
+                    last_camera_id = None
+                    logger.info(f"🔍 DEBUG: Found plate '{plate_text}' in history (old format) - current_camera_id: {camera_id}")
                 
-                if current_time - last_save_time < 300.0:
-                    continue
+                # FIXED: Kiểm tra camera khác nhau - nếu khác camera thì lưu ngay
+                if last_camera_id is not None and last_camera_id != camera_id:
+                    logger.info(f"🔄 Camera changed: {last_camera_id} -> {camera_id}, saving plate '{plate_text}'")
+                    # Không skip, tiếp tục lưu
+                else:
+                    if current_time - last_save_time < 300.0:
+                        logger.info(f"⏭️ Plate '{plate_text}' in plate_history cooldown ({300.0 - (current_time - last_save_time):.1f}s remaining), skipping")
+                        continue
             logger.info(f"🔍 BEST ROI Object (Track {track_id}) will be saved to database")
             logger.info(f"🚀 DATABASE SAVING: Starting database save process for plate '{plate_text}'")
+            logger.info(f"🔍 DEBUG: Using bbox for crop: {bbox}")
+            logger.info(f"🔍 DEBUG: Plate text: '{plate_text}', Track ID: {track_id}")
+            logger.info(f"🔍 DEBUG: Bbox coordinates: x1={bbox[0]}, y1={bbox[1]}, x2={bbox[2]}, y2={bbox[3]}")
             
             # FIXED: Lưu crop image với track_id ổn định
             clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
             crop_filename = f"plate_track_{track_id}_{clean_plate_text}_{int(current_time)}.jpg"
             
             try:
+                logger.info(f"🔍 DEBUG: Starting crop for plate '{plate_text}' with bbox {bbox}")
+                logger.info(f"🔍 DEBUG: Frame shape: {frame.shape}, bbox: x1={bbox[0]}, y1={bbox[1]}, x2={bbox[2]}, y2={bbox[3]}")
+                logger.info(f"🔍 DEBUG: Track ID: {track_id}, Camera ID: {camera_id}")
+                
+                # FIXED: Validate bbox trước khi crop
+                x1, y1, x2, y2 = bbox[:4]
+                frame_height, frame_width = frame.shape[:2]
+                logger.info(f"🔍 DEBUG: Frame dimensions: {frame_width}x{frame_height}")
+                logger.info(f"🔍 DEBUG: Bbox validation: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
+                logger.info(f"🔍 DEBUG: Bbox in frame: {0 <= x1 < frame_width and 0 <= y1 < frame_height and x1 < x2 <= frame_width and y1 < y2 <= frame_height}")
+                
+                # FIXED: Debug logging cho crop process
+                logger.info(f"🔍 DEBUG: About to crop plate '{plate_text}' at coordinates ({x1}, {y1}) to ({x2}, {y2})")
+                
                 crop = crop_and_enhance_plate(frame, bbox, enhancement_level="minimal")
                 
-                if crop.size > 0:
+                if crop is not None and crop.size > 0:
                     crop_path = os.path.join(CROPS_FOLDER, crop_filename)
                     success_save = cv2.imwrite(crop_path, crop)
                     if success_save:
                         logger.info(f"✅ Track {track_id} crop image saved: {crop_path}")
+                        logger.info(f"🔍 DEBUG: Crop successful - plate: '{plate_text}', bbox: {bbox}, crop_size: {crop.shape}")
+                    else:
+                        logger.error(f"❌ Failed to save crop image: {crop_path}")
+                else:
+                    logger.error(f"❌ Crop failed or empty - plate: '{plate_text}', bbox: {bbox}")
+                    continue
                         
-                        # FIXED: Send to database với track_id ổn định
-                        frame_path = f"static/crops/{crop_filename}"
-                        logger.info(f"🚀 Sending Track {track_id} to database: plate='{plate_text}', frame_path='{frame_path}'")
-                        
-                        if ENABLE_THREADING:
-                            thread_pool.submit(
-                                send_plate_to_server, str(track_id), {
-                                    'plate': plate_text,
-                                    'confidence': confidence,
-                                    'bbox': bbox,
-                                    'crop_image_path': frame_path
-                                }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
-                            )
-                            logger.info(f"🚀 Track {track_id} plate '{plate_text}' queued for database")
-                        else:
-                            # Gửi sync
-                            success = send_plate_to_server(str(track_id), {
-                                'plate': plate_text,
-                                'confidence': confidence,
-                                'bbox': bbox,
-                                'crop_image_path': frame_path
-                            }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
-                            logger.info(f"🚀 Track {track_id} plate '{plate_text}' sent to database: {success}")
+                # FIXED: Send to database với track_id ổn định
+                frame_path = f"static/crops/{crop_filename}"
+                logger.info(f"🚀 Sending Track {track_id} to database: plate='{plate_text}', frame_path='{frame_path}'")
+                
+                if ENABLE_THREADING:
+                    thread_pool.submit(
+                        send_plate_to_server, str(track_id), {
+                            'plate': plate_text,
+                            'confidence': confidence,
+                            'bbox': bbox,
+                            'crop_image_path': frame_path
+                        }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name
+                    )
+                    logger.info(f"🚀 Track {track_id} plate '{plate_text}' queued for database")
+                else:
+                    # Gửi sync
+                    success = send_plate_to_server(str(track_id), {
+                        'plate': plate_text,
+                        'confidence': confidence,
+                        'bbox': bbox,
+                        'crop_image_path': frame_path
+                    }, frame_path, camera_id, source_type, video_filename, camera_location, camera_name)
+                    logger.info(f"🚀 Track {track_id} plate '{plate_text}' sent to database: {success}")
             except Exception as e:
                 logger.error(f"Error saving Track {track_id} crop image: {e}")
             
@@ -4488,17 +4707,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         draw_persistent_displays(display_frame, roi)
     except Exception as e:
         logger.error(f"Error drawing ROI objects: {e}")
-        # Vẽ ROI cơ bản nếu có lỗi
-        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 3)
-        cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
+    
+    # FIXED: Vẽ ROI sau cùng để đảm bảo luôn hiển thị trên tất cả các element khác
+    cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 4)  # Vàng, nét dày hơn
+    cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
 
     # Return results - với error handling
     try:
         # Encode frame với error handling và tối ưu quality cho 20 FPS
         encode_result = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
-        # FIXED: Đảm bảo ROI luôn được vẽ ở cuối để không bị ẩn
-        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 3)  # Vàng, nét dày hơn
-        cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
+        # ROI đã được vẽ ở trên, không cần vẽ lại
         
         if encode_result[0]:  # Nếu encode thành công
             frame_bytes = encode_result[1].tobytes()
