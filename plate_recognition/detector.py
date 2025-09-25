@@ -1263,7 +1263,6 @@ try:
     if GPU_INFO['cuda_available']:
         logger.info(f"💾 GPU Memory: {GPU_INFO['gpu_memory'] / 1024**3:.1f} GB")
     
-    # Test với một frame đơn giản để đảm bảo ALPR hoạt động
     test_frame = np.zeros((100, 100, 3), dtype=np.uint8)
     test_results = alpr.predict(test_frame)
     logger.info(f"FastALPR test successful, detected {len(test_results)} objects")
@@ -1507,7 +1506,7 @@ def levenshtein_distance(s1, s2):
     return previous_row[-1]
 
 def calculate_plate_similarity(plate1, plate2):
-    """Tính độ tương đồng giữa hai biển số sử dụng Levenshtein distance"""
+    """Tính độ tương đồng giữa hai biển số sử dụng Levenshtein distance - OPTIMIZED"""
     if not plate1 or not plate2:
         return 0.0
     
@@ -1527,23 +1526,28 @@ def calculate_plate_similarity(plate1, plate2):
     
     # Convert distance to similarity (0-1 scale)
     similarity = 1.0 - (distance / max_len)
+    
+    # OPTIMIZED: Boost similarity for plates with similar length and structure
+    if abs(len(p1) - len(p2)) <= 1:  # Similar length
+        similarity = min(1.0, similarity + 0.1)  # Boost by 10%
+    
     return max(0.0, similarity)
 
 def get_adaptive_similarity_threshold(confidence1=0.0, confidence2=0.0, base_threshold=0.6):
-    """Tính threshold similarity động dựa trên confidence của biển số"""
+    """Tính threshold similarity động dựa trên confidence của biển số - OPTIMIZED"""
     # Nếu cả hai biển số đều có confidence cao, giảm threshold để dễ gộp hơn
     if confidence1 > 0.8 and confidence2 > 0.8:
         return base_threshold - 0.1  # 0.5
     
-    # Nếu một trong hai có confidence thấp, tăng threshold để tránh gộp nhầm
+    # Nếu một trong hai có confidence thấp, chỉ tăng nhẹ threshold để vẫn gộp được
     if confidence1 < 0.5 or confidence2 < 0.5:
-        return base_threshold + 0.1  # 0.7
+        return base_threshold + 0.05  # 0.65 thay vì 0.7
     
     # Trường hợp bình thường
     return base_threshold  # 0.6
 
 def find_similar_plates(target_plate, plate_dict, similarity_threshold=0.6, target_confidence=0.0):
-    """Tìm các biển số tương tự trong dictionary với threshold động"""
+    """Tìm các biển số tương tự trong dictionary với threshold động - OPTIMIZED"""
     similar_plates = []
     target_plate_clean = target_plate.upper().strip()
     
@@ -1554,9 +1558,13 @@ def find_similar_plates(target_plate, plate_dict, similarity_threshold=0.6, targ
             logger.info(f"🔍 DEBUG: find_similar_plates - Skipping exact match: '{plate_text}'")
             continue
         
-        # Sử dụng threshold động dựa trên confidence
+        # OPTIMIZED: Sử dụng threshold cố định 0.6 để đảm bảo gộp được biển số >60% ký tự giống nhau
         existing_confidence = plate_data.get('confidence', 0.0)
-        adaptive_threshold = get_adaptive_similarity_threshold(target_confidence, existing_confidence, similarity_threshold)
+        # Chỉ sử dụng threshold động khi cả hai biển số đều có confidence cao
+        if target_confidence > 0.8 and existing_confidence > 0.8:
+            adaptive_threshold = similarity_threshold - 0.1  # 0.5 để dễ gộp hơn
+        else:
+            adaptive_threshold = similarity_threshold  # 0.6 cố định
             
         similarity = calculate_plate_similarity(target_plate_clean, plate_text)
         logger.info(f"🔍 DEBUG: find_similar_plates - Comparing '{target_plate_clean}' vs '{plate_text}': similarity={similarity:.3f}, threshold={adaptive_threshold:.3f}")
@@ -1580,16 +1588,15 @@ def check_duplicate_by_key(plate_text, plate_history):
     return clean_text in plate_history
 
 def update_plate_if_better(plate_text, confidence, plate_history, track_id=None):
-    """Cập nhật thông tin biển số nếu có độ tin cậy cao hơn"""
+    """Cập nhật thông tin biển số nếu có độ tin cậy cao hơn - SIMPLIFIED"""
     clean_text = plate_text.upper().strip()
     
     if clean_text in plate_history:
         existing = plate_history[clean_text]
         existing_conf = existing.get('confidence', 0.0)
         
-        # Update if significantly better (10% improvement threshold) - more sensitive
-        if confidence > existing_conf * 1.10:
-            # Optimized: Remove logging for better FPS
+        # SIMPLIFIED: Chỉ cập nhật nếu confidence cao hơn (không cần 10% improvement)
+        if confidence > existing_conf:
             plate_history[clean_text].update({
                 'confidence': confidence,
                 'timestamp': time.time(),
@@ -1613,7 +1620,7 @@ def update_plate_if_better(plate_text, confidence, plate_history, track_id=None)
         return True, "new"
 
 def group_similar_plates_at_end(plate_history, similarity_threshold=0.6):
-    """Nhóm các biển số tương tự ở cuối quá trình xử lý - OPTIMIZED"""
+    """Nhóm các biển số tương tự ở cuối quá trình xử lý - OPTIMIZED FOR BETTER GROUPING"""
     try:
         current_time = time.time()
         grouped_plates = {}
@@ -1622,13 +1629,15 @@ def group_similar_plates_at_end(plate_history, similarity_threshold=0.6):
         # Tạo danh sách tất cả biển số với thông tin
         all_plates = list(plate_history.items())
         
+        logger.info(f"🔄 Starting plate grouping: {len(all_plates)} plates to process")
+        
         for plate_text, plate_data in all_plates:
             if plate_text in processed_plates:
                 continue
                 
-            # Tìm tất cả biển số tương tự
+            # Tìm tất cả biển số tương tự với threshold cố định 0.6
             plate_confidence = plate_data.get('confidence', 0.0)
-            similar_plates = find_similar_plates(plate_text, plate_history, similarity_threshold, plate_confidence)
+            similar_plates = find_similar_plates(plate_text, plate_history, similarity_threshold=0.6, target_confidence=plate_confidence)
             
             if similar_plates:
                 # Tạo nhóm với biển số có độ tin cậy cao nhất
@@ -1651,24 +1660,176 @@ def group_similar_plates_at_end(plate_history, similarity_threshold=0.6):
                     'track_id': best_data.get('track_id'),
                     'last_updated': current_time,
                     'grouped_plates': [p['plate'] for p in group_plates],
-                    'similarity_scores': [p.get('similarity', 1.0) for p in group_plates]
+                    'similarity_scores': [p.get('similarity', 1.0) for p in group_plates],
+                    'grouped_count': len(group_plates)
                 }
                 
                 # Đánh dấu tất cả biển số trong nhóm đã xử lý
                 for p in group_plates:
                     processed_plates.add(p['plate'])
                 
-                # Optimized: Remove logging for better FPS
+                logger.info(f"🔄 GROUPED {len(group_plates)} similar plates: {[p['plate'] for p in group_plates]} -> keeping '{best_text}' (conf: {best_data.get('confidence', 0.0):.3f})")
             else:
                 # Biển số không có tương tự, giữ nguyên
                 grouped_plates[plate_text] = plate_data
                 processed_plates.add(plate_text)
         
+        logger.info(f"🔄 Plate grouping completed: {len(grouped_plates)} unique plates after grouping")
         return grouped_plates
         
     except Exception as e:
         logger.error(f"Error grouping similar plates: {e}")
         return plate_history
+
+def optimize_plate_grouping(plate_history, similarity_threshold=0.6):
+    """Hàm gộp biển số tối ưu mới - đảm bảo gộp được biển số >60% ký tự giống nhau"""
+    try:
+        current_time = time.time()
+        grouped_plates = {}
+        processed_plates = set()
+        
+        # Tạo danh sách tất cả biển số với thông tin
+        all_plates = list(plate_history.items())
+        
+        logger.info(f"🔄 OPTIMIZED GROUPING: Processing {len(all_plates)} plates")
+        
+        for plate_text, plate_data in all_plates:
+            if plate_text in processed_plates:
+                continue
+                
+            # Tìm tất cả biển số tương tự với threshold cố định 0.6
+            plate_confidence = plate_data.get('confidence', 0.0)
+            similar_plates = []
+            
+            # Tìm biển số tương tự với threshold cố định 0.6
+            for other_plate, other_data in plate_history.items():
+                if other_plate == plate_text or other_plate in processed_plates:
+                    continue
+                    
+                similarity = calculate_plate_similarity(plate_text, other_plate)
+                if similarity >= 0.6:  # Cố định 60% threshold
+                    similar_plates.append({
+                        'plate': other_plate,
+                        'similarity': similarity,
+                        'data': other_data
+                    })
+            
+            if similar_plates:
+                # Tạo nhóm với biển số có độ tin cậy cao nhất
+                group_plates = [{'plate': plate_text, 'data': plate_data}] + similar_plates
+                
+                # Sắp xếp theo độ tin cậy (cao nhất trước)
+                group_plates.sort(key=lambda x: x['data'].get('confidence', 0.0), reverse=True)
+                
+                # Lấy biển số tốt nhất làm đại diện
+                best_plate = group_plates[0]
+                best_text = best_plate['plate']
+                best_data = best_plate['data']
+                
+                # Cập nhật thông tin nhóm
+                grouped_plates[best_text] = {
+                    'confidence': best_data.get('confidence', 0.0),
+                    'timestamp': best_data.get('timestamp', current_time),
+                    'updated_count': best_data.get('updated_count', 1),
+                    'saved_once': True,
+                    'track_id': best_data.get('track_id'),
+                    'last_updated': current_time,
+                    'grouped_plates': [p['plate'] for p in group_plates],
+                    'similarity_scores': [p.get('similarity', 1.0) for p in group_plates],
+                    'grouped_count': len(group_plates)
+                }
+                
+                # Đánh dấu tất cả biển số trong nhóm đã xử lý
+                for p in group_plates:
+                    processed_plates.add(p['plate'])
+                
+                logger.info(f"🔄 OPTIMIZED GROUPED {len(group_plates)} similar plates: {[p['plate'] for p in group_plates]} -> keeping '{best_text}' (conf: {best_data.get('confidence', 0.0):.3f})")
+            else:
+                # Biển số không có tương tự, giữ nguyên
+                grouped_plates[plate_text] = plate_data
+                processed_plates.add(plate_text)
+        
+        logger.info(f"🔄 OPTIMIZED GROUPING completed: {len(grouped_plates)} unique plates after grouping")
+        return grouped_plates
+        
+    except Exception as e:
+        logger.error(f"Error in optimized plate grouping: {e}")
+        return plate_history
+
+def simple_plate_grouping(plate_history, similarity_threshold=0.6):
+    """Hàm gộp biển số đơn giản - chỉ cần >60% ký tự giống nhau, không cần xét confidence"""
+    try:
+        current_time = time.time()
+        grouped_plates = {}
+        processed_plates = set()
+        
+        # Tạo danh sách tất cả biển số với thông tin
+        all_plates = list(plate_history.items())
+        
+        logger.info(f"🔄 SIMPLE GROUPING: Processing {len(all_plates)} plates")
+        
+        for plate_text, plate_data in all_plates:
+            if plate_text in processed_plates:
+                continue
+                
+            # Tìm tất cả biển số tương tự với threshold cố định 0.6
+            similar_plates = []
+            
+            # Tìm biển số tương tự với threshold cố định 0.6
+            for other_plate, other_data in plate_history.items():
+                if other_plate == plate_text or other_plate in processed_plates:
+                    continue
+                    
+                similarity = calculate_plate_similarity(plate_text, other_plate)
+                if similarity >= 0.6:  # Cố định 60% threshold
+                    similar_plates.append({
+                        'plate': other_plate,
+                        'similarity': similarity,
+                        'data': other_data
+                    })
+            
+            if similar_plates:
+                # Tạo nhóm với biển số có độ tin cậy cao nhất
+                group_plates = [{'plate': plate_text, 'data': plate_data}] + similar_plates
+                
+                # Sắp xếp theo độ tin cậy (cao nhất trước)
+                group_plates.sort(key=lambda x: x['data'].get('confidence', 0.0), reverse=True)
+                
+                # Lấy biển số tốt nhất làm đại diện
+                best_plate = group_plates[0]
+                best_text = best_plate['plate']
+                best_data = best_plate['data']
+                
+                # Cập nhật thông tin nhóm
+                grouped_plates[best_text] = {
+                    'confidence': best_data.get('confidence', 0.0),
+                    'timestamp': best_data.get('timestamp', current_time),
+                    'updated_count': best_data.get('updated_count', 1),
+                    'saved_once': True,
+                    'track_id': best_data.get('track_id'),
+                    'last_updated': current_time,
+                    'grouped_plates': [p['plate'] for p in group_plates],
+                    'similarity_scores': [p.get('similarity', 1.0) for p in group_plates],
+                    'grouped_count': len(group_plates)
+                }
+                
+                # Đánh dấu tất cả biển số trong nhóm đã xử lý
+                for p in group_plates:
+                    processed_plates.add(p['plate'])
+                
+                logger.info(f"🔄 SIMPLE GROUPED {len(group_plates)} similar plates: {[p['plate'] for p in group_plates]} -> keeping '{best_text}' (conf: {best_data.get('confidence', 0.0):.3f})")
+            else:
+                # Biển số không có tương tự, giữ nguyên
+                grouped_plates[plate_text] = plate_data
+                processed_plates.add(plate_text)
+        
+        logger.info(f"🔄 SIMPLE GROUPING completed: {len(grouped_plates)} unique plates after grouping")
+        return grouped_plates
+        
+    except Exception as e:
+        logger.error(f"Error in simple plate grouping: {e}")
+        return plate_history
+
 
 def update_tracking_display_with_confidence(track_id, plate_text, confidence, bbox, frame):
     """Cập nhật hiển thị tracking với thông tin độ tin cậy mới - THREAD SAFE"""
@@ -1740,13 +1901,26 @@ def get_enhanced_plate_history():
                 'similarity_scores': plate_data.get('similarity_scores', [1.0])
             }
         
-        # Tìm các nhóm tương tự
+        # Tìm các nhóm tương tự sử dụng hàm gộp tối ưu
         processed_plates = set()
         for plate_text in plate_history_data.keys():
             if plate_text in processed_plates:
                 continue
                 
-            similar_plates = find_similar_plates(plate_text, plate_history_data, similarity_threshold=0.6, target_confidence=0.0)
+            # Sử dụng threshold cố định 0.6 để đảm bảo gộp được biển số >60% ký tự giống nhau
+            similar_plates = []
+            for other_plate, other_data in plate_history_data.items():
+                if other_plate == plate_text or other_plate in processed_plates:
+                    continue
+                    
+                similarity = calculate_plate_similarity(plate_text, other_plate)
+                if similarity >= 0.6:  # Cố định 60% threshold
+                    similar_plates.append({
+                        'plate': other_plate,
+                        'similarity': similarity,
+                        'data': other_data
+                    })
+            
             if similar_plates:
                 group = [plate_text] + [p['plate'] for p in similar_plates]
                 result['similarity_groups'].append({
@@ -2833,49 +3007,10 @@ def cleanup_roi_objects(roi):
         logger.error(f"Error cleaning up ROI objects: {e}")
 
 def draw_roi_objects(frame, roi=None):
-    """Vẽ tất cả ROI objects lên frame - THREAD SAFE"""
-    # Get thread-safe data
-    roi_tracked_objects = get_thread_safe_data('roi_tracked_objects')
-    
-    try:
-        current_time = time.time()
-        
-        for obj_id, obj_data in roi_tracked_objects.items():
-            # Kiểm tra timeout
-            if current_time - obj_data.get('last_seen', 0) > 0.1:  # 100ms tolerance
-                continue
-                
-            plate_text = obj_data.get('plate', '')
-            confidence = obj_data.get('confidence', 0)
-            bbox = obj_data.get('bbox', [])
-            
-            if not plate_text or not bbox or len(bbox) < 4:
-                continue
-            
-            x1, y1, x2, y2 = bbox[:4]
-            
-            # Kiểm tra bbox có trong ROI không
-            if roi is not None:
-                roi_x1, roi_y1, roi_x2, roi_y2 = roi
-                bbox_in_roi = not (x2 < roi_x1 or x1 > roi_x2 or y2 < roi_y1 or y1 > roi_y2)
-                if not bbox_in_roi:
-                    continue
-            
-            # Đảm bảo bbox nằm trong frame
-            frame_height, frame_width = frame.shape[:2]
-            x1 = max(0, min(x1, frame_width - 1))
-            y1 = max(0, min(y1, frame_height - 1))
-            x2 = max(x1 + 1, min(x2, frame_width))
-            y2 = max(y1 + 1, min(y2, frame_height))
-            
-            # Vẽ bounding box - màu xanh lá
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            
-            # REMOVED: Không vẽ text nhận diện trong draw_roi_objects
-            # Chỉ vẽ bounding box, text sẽ được vẽ trong detect_and_ocr_stable
-            
-    except Exception as e:
-        logger.error(f"Error drawing ROI objects: {e}")
+    """Vẽ tất cả ROI objects lên frame - THREAD SAFE - DISABLED TO AVOID DUPLICATE"""
+    # DISABLED: Không vẽ bounding box ở đây để tránh duplicate với draw_persistent_displays
+    # Chỉ vẽ bounding box trong detect_and_ocr_stable để tránh xung đột
+    pass
 
 # REMOVED: predict_bbox_position - Too complex for immediate display
 
@@ -2997,8 +3132,9 @@ def draw_persistent_displays(frame, roi=None):
             x2 = max(x1 + 1, min(x2, frame_width))
             y2 = max(y1 + 1, min(y2, frame_height))
             
-            # Vẽ bounding box - màu xanh lá đơn giản
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # DISABLED: Không vẽ bounding box ở đây để tránh duplicate
+            # Chỉ vẽ bounding box trong detect_and_ocr_stable để tránh xung đột
+            # cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
             # REMOVED: Không vẽ text nhận diện trong draw_persistent_displays
             # Chỉ vẽ bounding box, text sẽ được vẽ trong detect_and_ocr_stable
@@ -3346,7 +3482,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # FRAME SKIPPING LOGIC - Chỉ xử lý khi cần thiết
     roi = (roi_xmin, roi_ymin, roi_xmax, roi_ymax)
     
-    # Vẽ ROI trước khi kiểm tra skip
+    # FIXED: Vẽ ROI LUÔN LUÔN - không bị ảnh hưởng bởi frame skipping
     cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 2)  # Vàng, nét dày hơn
     # Điều chỉnh vị trí ROI text để tránh che khuất - di chuyển xuống dưới
     cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
@@ -3952,9 +4088,84 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         del global_saved_tracks[old_track]
         logger.debug(f"🗑️ Xóa track cũ khỏi global tracking: {old_track}")
     
-    # FIXED: DATABASE SAVING với track_id ổn định từ ByteTracker
+    # FIXED: GROUPING SIMILAR PLATES BEFORE DATABASE SAVING
     logger.info(f"🔍 Processing {len(roi_tracked_objects)} ROI tracked objects for database saving")
     logger.info(f"🔍 ROI tracked objects details: {list(roi_tracked_objects.keys())}")
+    
+    # SIMPLIFIED GROUPING: Gộp các biển số tương tự trước khi lưu database
+    grouped_objects = {}
+    processed_objects = set()
+    
+    for obj_id, obj_data in roi_tracked_objects.items():
+        if obj_id in processed_objects:
+            continue
+            
+        plate_text = obj_data.get('plate', '').upper().strip()
+        confidence = obj_data.get('confidence', 0)
+        track_id = obj_data.get('track_id')
+        
+        if not plate_text:
+            continue
+            
+        # Tìm các biển số tương tự trong roi_tracked_objects với threshold cố định 0.6
+        similar_objects = []
+        for other_obj_id, other_obj_data in roi_tracked_objects.items():
+            if other_obj_id == obj_id or other_obj_id in processed_objects:
+                continue
+                
+            other_plate = other_obj_data.get('plate', '').upper().strip()
+            if not other_plate:
+                continue
+                
+            # Tính similarity với threshold cố định 0.6 - SIMPLIFIED
+            similarity = calculate_plate_similarity(plate_text, other_plate)
+            if similarity >= 0.6:  # Cố định 60% similarity threshold
+                similar_objects.append({
+                    'obj_id': other_obj_id,
+                    'plate': other_plate,
+                    'confidence': other_obj_data.get('confidence', 0),
+                    'similarity': similarity,
+                    'data': other_obj_data
+                })
+        
+        if similar_objects:
+            # Có biển số tương tự - tạo nhóm
+            all_objects = [{'obj_id': obj_id, 'plate': plate_text, 'confidence': confidence, 'data': obj_data}] + similar_objects
+            
+            # Sắp xếp theo confidence (cao nhất trước)
+            all_objects.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            # Lấy biển số tốt nhất làm đại diện
+            best_object = all_objects[0]
+            best_obj_id = best_object['obj_id']
+            best_plate = best_object['plate']
+            best_conf = best_object['confidence']
+            
+            # Cập nhật object tốt nhất với thông tin nhóm
+            grouped_data = best_object['data'].copy()
+            grouped_data.update({
+                'plate': best_plate,
+                'confidence': best_conf,
+                'grouped_plates': [obj['plate'] for obj in all_objects],
+                'grouped_count': len(all_objects),
+                'similarity_scores': [obj.get('similarity', 1.0) for obj in all_objects]
+            })
+            
+            grouped_objects[best_obj_id] = grouped_data
+            
+            # Đánh dấu tất cả objects trong nhóm đã được xử lý
+            for obj in all_objects:
+                processed_objects.add(obj['obj_id'])
+            
+            logger.info(f"🔄 SIMPLIFIED GROUPED {len(all_objects)} similar plates: {[obj['plate'] for obj in all_objects]} -> keeping '{best_plate}' (conf: {best_conf:.3f})")
+        else:
+            # Không có biển số tương tự - giữ nguyên
+            grouped_objects[obj_id] = obj_data
+            processed_objects.add(obj_id)
+    
+    # Cập nhật roi_tracked_objects với kết quả đã gộp
+    roi_tracked_objects = grouped_objects
+    logger.info(f"🔗 SIMPLIFIED GROUPING completed: {len(grouped_objects)} unique objects after grouping")
     
     # FIXED: Chỉ lưu object có ByteTracker track_id (không lưu temp tracks)
     best_objects = {}
@@ -4255,6 +4466,10 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     try:
         # Encode frame với error handling và tối ưu quality cho 20 FPS
         encode_result = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        # FIXED: Đảm bảo ROI luôn được vẽ ở cuối để không bị ẩn
+        cv2.rectangle(display_frame, (roi_xmin, roi_ymin), (roi_xmax, roi_ymax), (0, 255, 255), 2)  # Vàng, nét dày hơn
+        cv2.putText(display_frame, "ROI", (roi_xmin + 5, roi_ymin + 45), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 255, 255), 4)
+        
         if encode_result[0]:  # Nếu encode thành công
             frame_bytes = encode_result[1].tobytes()
         else:
