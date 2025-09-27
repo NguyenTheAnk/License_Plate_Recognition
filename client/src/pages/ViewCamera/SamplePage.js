@@ -789,6 +789,15 @@ useEffect(() => {
     loadDetectionResults();
   }, [loadDetectionResults]); // Chỉ chạy một lần khi mount
 
+  // Add polling mechanism for real-time updates
+  useEffect(() => {
+    const pollingInterval = setInterval(() => {
+      loadDetectionResults();
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollingInterval);
+  }, [loadDetectionResults]);
+
   // Load lại khi có thay đổi pagination
   useEffect(() => {
     if (currentPage > 1 || itemsPerPage !== 10) {
@@ -838,6 +847,18 @@ useEffect(() => {
 
     return () => clearInterval(cleanupInterval);
   }, []);
+
+  // Auto polling để refresh dữ liệu real-time mỗi 3 giây
+  useEffect(() => {
+    const pollingInterval = setInterval(() => {
+      if (!isLoadingDetections && !isPolling) {
+        console.log("🔄 Auto polling refresh...");
+        handleAutoRefresh();
+      }
+    }, 3000); // Polling mỗi 3 giây
+
+    return () => clearInterval(pollingInterval);
+  }, [isLoadingDetections, isPolling, handleAutoRefresh]);
 
   // Reset gotoPage khi currentPage thay đổi
   useEffect(() => { setGotoPage(''); }, [currentPage]);
@@ -4493,7 +4514,7 @@ useEffect(() => {
                         mb: 0.5,
                         fontSize: '0.875rem'
                       }}>
-                        Camera {entry.cameraName}
+                        {entry.cameraName}
                       </Typography>
                       
                       <Typography variant="body2" sx={{ 
