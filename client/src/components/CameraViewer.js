@@ -199,17 +199,12 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   // Di chuyển sendFrames lên trước để tránh lỗi hoisting
   const sendFrames = useCallback(() => {
     const frameStartTime = performance.now();
-    console.log(`🔄 sendFrames called - isRecognizing: ${isRecognizing}, wsState: ${wsRef.current?.readyState}`);
-    
+    // Optimized: Remove logging for better FPS
     if (
       !isRecognizing ||
       !wsRef.current ||
       wsRef.current.readyState !== WebSocket.OPEN
     ) {
-      console.log("❌ WebSocket not ready for sending frames", {
-        isRecognizing,
-        wsConnected: wsRef.current?.readyState === WebSocket.OPEN
-      });
       return;
     }
 
@@ -217,67 +212,55 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
     const video = videoRef.current;
     if (!video || video.paused || video.ended) {
-      console.log("❌ Video not ready for frame capture:", { 
-        video: !!video, 
-        paused: video?.paused, 
-        ended: video?.ended,
-        readyState: video?.readyState
-      });
-      
       // Thử force play video nếu bị paused
       if (video && (video.paused || video.ended)) {
-        console.log("🔄 Attempting to force play video...");
         forcePlayVideo();
       }
       
       // Don't retry here - let the main timeout handle it
       return;
     }
-    
-    console.log("✅ Video ready for frame capture");
 
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = 640; // Giảm kích thước để tăng hiệu suất
-      canvas.height = 360;
+      // Sử dụng kích thước video thực tế để tránh distortion
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 360;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
-      const canvasDrawTime = performance.now();
-      console.log(`Canvas draw time: ${canvasDrawTime - frameStartTime}ms`);
-
+      // Optimized: Remove performance logging for better FPS
       canvas.toBlob((blob) => {
         if (blob && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const blobStartTime = performance.now();
           blob.arrayBuffer().then((buffer) => {
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               // Kiểm tra kích thước buffer trước khi gửi
               if (buffer.byteLength > 200000) { // Tăng giới hạn lên 200KB
-                console.warn(`Frame too large: ${buffer.byteLength} bytes, skipping`);
-                return;
+                return; // Skip without logging for performance
               }
               
               // Gửi frame trực tiếp qua WebSocket
               wsRef.current.send(buffer);
-              console.log(`📤 Frame sent via WebSocket: ${buffer.byteLength} bytes`);
-              console.log(`Blob to buffer and send time: ${performance.now() - blobStartTime}ms`);
             }
           }).catch((error) => {
             console.error("Error converting blob to buffer:", error);
           });
-        } else {
-          console.log("Blob or WebSocket not ready for sending");
         }
-      }, "image/jpeg", 0.8); // Tăng quality để giảm compression overhead
-
-      console.log(`Total frame send time: ${performance.now() - frameStartTime}ms`);
+      }, "image/jpeg", 0.6); // Giảm quality để tăng tốc độ
+      
+      // Fixed FPS for consistent 20 FPS - no adaptive logic
+      const frameTime = 50; // Fixed 20 FPS (1000ms / 20 = 50ms)
+      
+      if (isRecognizing) {
+        sendFrameTimeoutRef.current = setTimeout(sendFrames, frameTime);
+      }
     } catch (error) {
       console.error("Error in sendFrames:", error);
-    }
-
-    if (isRecognizing) {
-      // Tối ưu FPS - đặt chính xác 20 FPS
-      sendFrameTimeoutRef.current = setTimeout(sendFrames, 20); // 50 FPS (1000/20 = 50ms)a
+      
+      // Fallback to fixed 20 FPS on error
+      if (isRecognizing) {
+        sendFrameTimeoutRef.current = setTimeout(sendFrames, 50);
+      }
     }
   }, [isRecognizing, forcePlayVideo]);
 
