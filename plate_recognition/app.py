@@ -88,7 +88,7 @@ from flask_sock import Sock
 from flask_cors import CORS
 import cv2
 import numpy as np
-from detector import detect_and_ocr_stable, detect_and_ocr_thread_safe, process_frame_async, get_thread_manager_stats, enable_performance_optimizations, start_redis_server, is_redis_running
+from detector import detect_and_ocr_stable, detect_and_ocr_thread_safe, process_frame_async, get_thread_manager_stats, enable_performance_optimizations, start_redis_server, is_redis_running, stop_redis_server
 import json
 import logging
 import time
@@ -120,6 +120,11 @@ def recognize_ws(ws):
     video_filename = None
     camera_location = None
     camera_name = None
+    
+    # FPS control variables
+    target_fps = 20
+    frame_delay = 1.0 / target_fps  # 50ms per frame
+    last_frame_time = time.time()
 
     try:
         while True:
@@ -129,20 +134,26 @@ def recognize_ws(ws):
                 break
 
             if isinstance(message, bytes):
-                # Xử lý frame từ frontend
+                # Xử lý frame từ frontend với FPS control
                 try:
+                    current_time = time.time()
+                    
+                    # Skip frames if we're ahead of target FPS
+                    if current_time - last_frame_time < frame_delay:
+                        continue
+                    
                     # Chuyển đổi bytes thành numpy array
                     nparr = np.frombuffer(message, np.uint8)
                     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     
                     if frame is not None:
-                        logger.info(f"Received frame from frontend: {frame.shape}")
                         # Xử lý frame với thread-safe detection
                         result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                         
                         if isinstance(result, dict):
                             processed_frame_bytes = result.get('frame', b'')
                             tracked_objects = result.get('tracked_objects', {})
+                            fps = result.get('fps', 0)
                             
                             # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
                             # Không cần xử lý queue ở đây nữa
@@ -155,6 +166,9 @@ def recognize_ws(ws):
                                     # Fallback: encode frame manually with optimized quality
                                     _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
                                     ws.send(buffer.tobytes())
+                                
+                                logger.info(f"📤 Sent frame - FPS: {fps:.1f}")
+                                last_frame_time = current_time
                             except Exception as ws_error:
                                 logger.error(f"WebSocket send error: {ws_error}")
                                 break  # Exit the loop if WebSocket is closed
@@ -219,8 +233,18 @@ def recognize_ws(ws):
 
                         logger.info(f"Bắt đầu xử lý RTSP stream: {stream_url}")
 
-                        # Xử lý stream và gửi frames đã xử lý
+                        # Xử lý stream và gửi frames đã xử lý với 20 FPS
+                        target_fps = 20
+                        frame_delay = 1.0 / target_fps  # 50ms per frame
+                        last_frame_time = time.time()
+                        
                         while cap.isOpened():
+                            current_time = time.time()
+                            
+                            # Skip frames if we're ahead of target FPS
+                            if current_time - last_frame_time < frame_delay:
+                                continue
+                                
                             ret, frame = cap.read()
                             if not ret:
                                 logger.warning("Không thể đọc frame từ RTSP stream")
@@ -234,9 +258,10 @@ def recognize_ws(ws):
                                 tracked_objects = result.get('tracked_objects', {})
                                 detection_count = result.get('detection_count', 0)
                                 skipped = result.get('skipped', False)
+                                fps = result.get('fps', 0)
                                 
-                                # Always send frame for consistent 20 FPS - remove detection-based filtering
-                                logger.info(f"📤 Sending frame for camera {camera_id} - Detections: {detection_count}, Skipped: {skipped}")
+                                # Always send frame for consistent 20 FPS
+                                logger.info(f"📤 Sending frame for camera {camera_id} - FPS: {fps:.1f}, Detections: {detection_count}")
                                 
                                 # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
                                 
@@ -247,6 +272,8 @@ def recognize_ws(ws):
                                     # Fallback
                                     _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                                     ws.send(buffer.tobytes())
+                                
+                                last_frame_time = current_time
                             else:
                                 # Legacy support
                                 if isinstance(result, np.ndarray):
@@ -533,6 +560,52 @@ def cleanup_threads_api():
         logger.error(f"Error cleaning up threads: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/redis/status', methods=['GET'])
+def redis_status_api():
+    """Get Redis server status"""
+    try:
+        from detector import is_redis_running, redis_available
+        return jsonify({
+            "success": True,
+            "redis_available": redis_available,
+            "redis_running": is_redis_running(),
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error getting Redis status: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/redis/start', methods=['POST'])
+def redis_start_api():
+    """Start Redis server"""
+    try:
+        from detector import start_redis_server
+        success = start_redis_server()
+        return jsonify({
+            "success": success,
+            "message": "Redis server started" if success else "Failed to start Redis server",
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error starting Redis: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/redis/stop', methods=['POST'])
+def redis_stop_api():
+    """Stop Redis server"""
+    try:
+        from detector import stop_redis_server
+        stop_redis_server()
+        return jsonify({
+            "success": True,
+            "message": "Redis server stopped",
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error stopping Redis: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
 # SIMPLIFIED: Removed queue-related endpoints
 # Detector.py now sends directly to Node.js API
 
@@ -776,6 +849,42 @@ def enable_optimizations_api():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/process-external-detections', methods=['POST'])
+def process_external_detections_api():
+    """API endpoint to process pending detections externally"""
+    try:
+        data = request.get_json()
+        camera_id = data.get('camera_id')
+        source_type = data.get('source_type', 'camera')
+        video_filename = data.get('video_filename')
+        camera_location = data.get('camera_location')
+        camera_name = data.get('camera_name')
+        
+        # Import external processing function
+        from detector import process_pending_detections_external
+        
+        # Process pending detections
+        process_pending_detections_external(
+            camera_id=camera_id,
+            source_type=source_type,
+            video_filename=video_filename,
+            camera_location=camera_location,
+            camera_name=camera_name
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'External processing completed'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in external processing API: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # @app.route('/performance/clear-cache', methods=['POST'])
 # def clear_cache_api():
 #     """Clear detection cache"""
@@ -794,12 +903,8 @@ if __name__ == "__main__":
     os.makedirs('temp_videos', exist_ok=True)
     os.makedirs('llhls_output', exist_ok=True)
     
-    # Khởi động Redis server
-    logger.info("Checking Redis server...")
-    if not is_redis_running():
-        start_redis_server()
-    else:
-        logger.info("Redis server is already running")
+    # Redis server sẽ được tự động khởi động trong detector.py
+    logger.info("Redis server management integrated into detector module")
     
     # Enable performance optimizations
     enable_performance_optimizations(True)
