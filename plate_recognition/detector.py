@@ -515,36 +515,40 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         best_similarity = 0
         best_existing_track_id = None
         best_existing_plate = None
+        best_existing_confidence = 0
         
         for existing_track_id, history in plate_history.items():
             if history and existing_track_id != current_track_id:
                 best_plate = max(history, key=lambda x: x[1])
                 existing_plate = best_plate[0]
+                existing_confidence = best_plate[1]
                 
                 # Tính độ tương đồng giữa 2 biển số
                 similarity = calculate_similarity(plate_text, existing_plate)
                 
-                # Tìm biển số có độ tương đồng cao nhất
+                # Tìm biển số có độ tương đồng cao nhất (>=60%)
                 if similarity >= 60 and similarity > best_similarity:
                     best_similarity = similarity
                     best_existing_track_id = existing_track_id
                     best_existing_plate = existing_plate
+                    best_existing_confidence = existing_confidence
         
         # Gộp với biển số có độ tương đồng cao nhất
         if best_existing_track_id is not None:
             track_id_mapping[current_track_id] = best_existing_track_id
             final_track_id = best_existing_track_id
             
-            # Cập nhật biển số trong lịch sử nếu confidence cao hơn
-            existing_history = plate_history[final_track_id]
-            if existing_history:
-                best_existing_confidence = max(existing_history, key=lambda x: x[1])[1]
-                if conf_val > best_existing_confidence:
-                    # Thay thế biển số cũ bằng biển số mới có confidence cao hơn
-                    plate_history[final_track_id] = [(plate_text, conf_val)]
-                    logger.info(f"🔄 Updated plate in history: {best_existing_plate} -> {plate_text} (conf: {best_existing_confidence:.3f} -> {conf_val:.3f})")
-                else:
-                    logger.info(f"🔄 Keeping existing plate: {best_existing_plate} (conf: {best_existing_confidence:.3f} > {conf_val:.3f})")
+            # Chọn biển số có confidence cao hơn
+            if conf_val > best_existing_confidence:
+                # Thay thế biển số cũ bằng biển số mới có confidence cao hơn
+                plate_history[final_track_id] = [(plate_text, conf_val)]
+                logger.info(f"🔄 Updated plate in history: {best_existing_plate} -> {plate_text} (conf: {best_existing_confidence:.3f} -> {conf_val:.3f})")
+                # Cập nhật track_info với biển số mới
+                if final_track_id in track_info:
+                    track_info[final_track_id]['plate'] = plate_text
+                    track_info[final_track_id]['confidence'] = conf_val
+            else:
+                logger.info(f"🔄 Keeping existing plate: {best_existing_plate} (conf: {best_existing_confidence:.3f} > {conf_val:.3f})")
             
             logger.info(f"🔄 Merging similar plates: {plate_text} -> {best_existing_plate} (similarity: {best_similarity:.1f}%)")
 
@@ -565,9 +569,24 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
 
         plate_history[final_track_id].append((plate_text, conf_val))
         
-        # CHỈ GỬI 1 LẦN DUY NHẤT cho mỗi track_id
+        # CHỈ GỬI 1 LẦN DUY NHẤT cho mỗi track_id HOẶC biển số tương tự
         should_send = False
-        if final_track_id not in sent_tracks:
+        
+        # Kiểm tra xem có biển số tương tự đã được gửi chưa (trong vòng 30 giây)
+        plate_already_sent = False
+        current_time_check = time.time()
+        for sent_track_id, sent_data in sent_tracks.items():
+            sent_plate = sent_data['plate']
+            sent_time = sent_data.get('timestamp', 0)
+            
+            # Kiểm tra biển số giống hệt hoặc tương tự >=60%
+            if (sent_plate == plate_text or 
+                (current_time_check - sent_time < 30 and calculate_similarity(plate_text, sent_plate) >= 60)):
+                plate_already_sent = True
+                logger.info(f"⏭️ Similar plate {plate_text} already sent recently (track {sent_track_id}, plate: {sent_plate}), skipping")
+                break
+        
+        if not plate_already_sent and final_track_id not in sent_tracks:
             # Kiểm tra xem có confidence nào cao hơn không
             max_confidence = max(plate_history[final_track_id], key=lambda x: x[1])[1]
             if conf_val >= max_confidence:
@@ -575,7 +594,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 logger.info(f"📤 First send for track {final_track_id}: {plate_text} (conf: {conf_val:.3f})")
             else:
                 logger.info(f"⏭️ Waiting for higher confidence for track {final_track_id}")
-        else:
+        elif final_track_id in sent_tracks:
             logger.info(f"⏭️ Track {final_track_id} already sent, skipping")
         
         # Tách confidence thành detection và OCR
@@ -814,11 +833,21 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             del track_info[track_id]
             if track_id in plate_history:
                 del plate_history[track_id]
-            # Xóa khỏi sent_tracks để có thể gửi lại sau này
-            if track_id in sent_tracks:
-                del sent_tracks[track_id]
+            # KHÔNG xóa khỏi sent_tracks ngay lập tức để tránh gửi lại biển số tương tự
+            # sent_tracks sẽ được cleanup tự động sau 30 giây
 
         last_redis_update = curr_time
+        
+        # Cleanup sent_tracks cũ (sau 30 giây)
+        current_time_cleanup = time.time()
+        tracks_to_cleanup = []
+        for track_id, sent_data in sent_tracks.items():
+            if current_time_cleanup - sent_data.get('timestamp', 0) > 30:
+                tracks_to_cleanup.append(track_id)
+        
+        for track_id in tracks_to_cleanup:
+            del sent_tracks[track_id]
+            logger.debug(f"🧹 Cleaned up old sent_track: {track_id}")
 
     # Encode frame
     try:
