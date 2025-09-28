@@ -95,6 +95,14 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
     setFrameData(null);
     setRecognitionResults([]);
 
+    // FIXED: Dừng video hoàn toàn khi stop recognition
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.currentTime = 0;
+      // Không xóa src để giữ video element
+    }
+
     if (wsRef.current) {
       try {
         if (
@@ -126,6 +134,29 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
     wsRetryCount.current = 0;
     setIsProcessing(false);
   }, [isProcessing]);
+
+  // FIXED: Thêm hàm close video hoàn toàn
+  const closeVideo = useCallback(() => {
+    // Dừng recognition trước
+    stopRecognition();
+
+    // Đóng video hoàn toàn
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.src = "";
+      video.load(); // Reset video element
+    }
+
+    // Reset states
+    setVideoReady(false);
+    setLoading(true);
+
+    // Gọi onClose callback nếu có
+    if (onClose) {
+      onClose();
+    }
+  }, [stopRecognition, onClose]);
 
   const startRecognition = useCallback(() => {
     if (isProcessing) {
@@ -206,7 +237,14 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
     // Thông tin nguồn đã được gửi khi kết nối WebSocket, không cần gửi lại mỗi frame
 
     const video = videoRef.current;
-    if (!video || video.paused || video.ended) {
+    if (!video || video.paused || video.ended || !video.src) {
+      // FIXED: Kiểm tra video có bị đóng hoàn toàn không
+      if (!video || !video.src) {
+        // Video đã bị đóng hoàn toàn, dừng recognition
+        setIsRecognizing(false);
+        return;
+      }
+
       // Thử force play video nếu bị paused
       if (video && (video.paused || video.ended)) {
         forcePlayVideo();
@@ -303,6 +341,14 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
       const wsStartTime = performance.now();
       if (!isRecognizing) {
         console.log("Nhận diện đã dừng, không thử kết nối lại");
+        return;
+      }
+
+      // FIXED: Kiểm tra video có bị đóng không
+      const video = videoRef.current;
+      if (!video || !video.src) {
+        console.log("Video đã bị đóng, dừng kết nối WebSocket");
+        setIsRecognizing(false);
         return;
       }
 
@@ -475,6 +521,14 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             "isRecognizing:",
             isRecognizing
           );
+
+          // FIXED: Kiểm tra video có bị đóng không
+          const video = videoRef.current;
+          if (!video || !video.src) {
+            // Video đã bị đóng, dừng recognition
+            setIsRecognizing(false);
+            return;
+          }
 
           // Chỉ retry nếu đang nhận diện và không phải đóng bình thường
           if (
@@ -982,6 +1036,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         {actionBar({
           startRecognition,
           stopRecognition,
+          closeVideo,  // FIXED: Thêm hàm close video
           isRecognizing,
           isProcessing,
           onForcePlay: forcePlayVideo,  // Thêm force play function

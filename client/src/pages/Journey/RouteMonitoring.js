@@ -1835,12 +1835,12 @@ const RouteMonitoring = () => {
   }, [showTimeTexts]);
 
   // Action bar cho CameraViewer sử dụng CameraActionBar
-  const actionBar = ({ startRecognition, stopRecognition, isRecognizing, isProcessing, onForcePlay }) => (
+  const actionBar = ({ startRecognition, stopRecognition, closeVideo, isRecognizing, isProcessing, onForcePlay }) => (
     <CameraActionBar
       cameraName={selectedCamera?.name || "Camera"}
       cameraId={selectedCamera?.id}
       onFullscreen={handleFullscreen}
-      onClose={() => setSelectedCamera(null)}
+      onClose={closeVideo || (() => setSelectedCamera(null))}  // FIXED: Sử dụng closeVideo nếu có
       onStartRecognize={startRecognition}
       onStopRecognize={stopRecognition}
       isRecognizing={isRecognizing}
