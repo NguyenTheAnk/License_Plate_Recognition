@@ -88,7 +88,7 @@ from flask_sock import Sock
 from flask_cors import CORS
 import cv2
 import numpy as np
-from detector import detect_and_ocr_stable, enable_performance_optimizations, start_redis_server, is_redis_running
+from detector import detect_and_ocr_stable, detect_and_ocr_thread_safe, process_frame_async, get_thread_manager_stats, enable_performance_optimizations, start_redis_server, is_redis_running, stop_redis_server
 import json
 import logging
 import time
@@ -120,6 +120,11 @@ def recognize_ws(ws):
     video_filename = None
     camera_location = None
     camera_name = None
+    
+    # FPS control variables
+    target_fps = 20
+    frame_delay = 1.0 / target_fps  # 50ms per frame
+    last_frame_time = time.time()
 
     try:
         while True:
@@ -129,31 +134,43 @@ def recognize_ws(ws):
                 break
 
             if isinstance(message, bytes):
-                # Xử lý frame từ frontend
+                # Xử lý frame từ frontend với FPS control
                 try:
+                    current_time = time.time()
+                    
+                    # Skip frames if we're ahead of target FPS
+                    if current_time - last_frame_time < frame_delay:
+                        continue
+                    
                     # Chuyển đổi bytes thành numpy array
                     nparr = np.frombuffer(message, np.uint8)
                     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     
                     if frame is not None:
-                        logger.info(f"Received frame from frontend: {frame.shape}")
-                        # Xử lý frame với detect_and_ocr_stable
-                        result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
+                        # Xử lý frame với thread-safe detection
+                        result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                         
                         if isinstance(result, dict):
                             processed_frame_bytes = result.get('frame', b'')
                             tracked_objects = result.get('tracked_objects', {})
+                            fps = result.get('fps', 0)
                             
                             # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
                             # Không cần xử lý queue ở đây nữa
                             
-                            # Send processed frame
-                            if processed_frame_bytes:
-                                ws.send(processed_frame_bytes)
-                            else:
-                                # Fallback: encode frame manually
-                                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                                ws.send(buffer.tobytes())
+                            # Send processed frame with error handling
+                            try:
+                                if processed_frame_bytes:
+                                    ws.send(processed_frame_bytes)
+                                else:
+                                    # Fallback: encode frame manually with optimized quality
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                                    ws.send(buffer.tobytes())
+                                
+                                last_frame_time = current_time
+                            except Exception as ws_error:
+                                logger.error(f"WebSocket send error: {ws_error}")
+                                break  # Exit the loop if WebSocket is closed
                                 
                         else:
                             # Legacy support: result is direct frame
@@ -164,7 +181,6 @@ def recognize_ws(ws):
                                 frame_bytes = result
                             ws.send(frame_bytes)
                         
-                        logger.info(f"Processed frame sent back")
                         
                     else:
                         logger.warning("Failed to decode frame from frontend")
@@ -179,6 +195,84 @@ def recognize_ws(ws):
                     # Xử lý thông tin nguồn từ frontend
                     if data.get('type') == 'source_info':
                         logger.info(f"Received source info: {data}")
+                        
+                        source_type = data.get('source_type') or "camera"
+                        video_url = data.get('video_url')
+                        
+                        # Xử lý video file URL
+                        if source_type == 'video_file' and video_url:
+                            logger.info(f"🎬 Processing video file: {video_url}")
+                            
+                            # Đóng stream hiện tại nếu có
+                            if cap is not None:
+                                cap.release()
+                                cap = None
+                            
+                            # Mở video file với OpenCV
+                            cap = cv2.VideoCapture(video_url)
+                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            
+                            if not cap.isOpened():
+                                logger.error(f"Không thể mở video file: {video_url}")
+                                ws.send(json.dumps({"error": "Cannot open video file"}))
+                                continue
+                            
+                            logger.info(f"Bắt đầu xử lý video file: {video_url}")
+                            
+                            # Xử lý video file và gửi frames đã xử lý
+                            target_fps = 20
+                            frame_delay = 1.0 / target_fps
+                            last_frame_time = time.time()
+                            
+                            while cap.isOpened():
+                                current_time = time.time()
+                                
+                                # Skip frames if we're ahead of target FPS
+                                if current_time - last_frame_time < frame_delay:
+                                    continue
+                                    
+                                ret, frame = cap.read()
+                                if not ret:
+                                    logger.warning("Không thể đọc frame từ video file")
+                                    break
+                                
+                                # Xử lý frame với thread-safe detection
+                                result = detect_and_ocr_thread_safe(frame, camera_id=None, source_type="video_file", video_filename=video_url, camera_location=None, camera_name=video_url)
+                                
+                                if isinstance(result, dict):
+                                    processed_frame_bytes = result.get('frame', b'')
+                                    tracked_objects = result.get('tracked_objects', {})
+                                    detection_count = result.get('detection_count', 0)
+                                    skipped = result.get('skipped', False)
+                                    fps = result.get('fps', 0)
+                                    
+                                    # FIXED: Giảm logging để tăng FPS - chỉ log khi có nhiều detections
+                                    if detection_count > 2:  # Chỉ log khi có nhiều hơn 2 detections
+                                        logger.info(f"📤 Sending processed frame - FPS: {fps:.1f}, Detections: {detection_count}")
+                                    
+                                    # Send processed frame
+                                    if processed_frame_bytes:
+                                        ws.send(processed_frame_bytes)
+                                    else:
+                                        # Fallback
+                                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                        ws.send(buffer.tobytes())
+                                    
+                                    last_frame_time = current_time
+                                else:
+                                    # Legacy support
+                                    if isinstance(result, np.ndarray):
+                                        _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                        frame_bytes = buffer.tobytes()
+                                    else:
+                                        frame_bytes = result
+                                    ws.send(frame_bytes)
+                            
+                            # Video file processing completed
+                            logger.info(f"Video file processing completed: {video_url}")
+                            continue
+                        
+                        # Xử lý camera stream (logic cũ)
                         # Lưu thông tin camera để sử dụng sau
                         # Extract numeric part from camera_id (e.g., "11-1757684051439" -> 11)
                         raw_camera_id = data.get('camera_id') or "default"
@@ -187,7 +281,6 @@ def recognize_ws(ws):
                         else:
                             camera_id = int(raw_camera_id) if str(raw_camera_id).isdigit() else 1
                         camera_name = data.get('camera_name')
-                        source_type = data.get('source_type') or "camera"
                         video_filename = data.get('video_filename')
                         camera_location = data.get('camera_location')
                         logger.info(f"Camera info: ID={camera_id}, Name={camera_name}, Type={source_type}, Video={video_filename}, Location={camera_location}")
@@ -215,39 +308,48 @@ def recognize_ws(ws):
 
                         logger.info(f"Bắt đầu xử lý RTSP stream: {stream_url}")
 
-                        # Xử lý stream và gửi frames đã xử lý
+                        # Xử lý stream và gửi frames đã xử lý với 20 FPS
+                        target_fps = 20
+                        frame_delay = 1.0 / target_fps  # 50ms per frame
+                        last_frame_time = time.time()
+                        
                         while cap.isOpened():
+                            current_time = time.time()
+                            
+                            # Skip frames if we're ahead of target FPS
+                            if current_time - last_frame_time < frame_delay:
+                                continue
+                                
                             ret, frame = cap.read()
                             if not ret:
                                 logger.warning("Không thể đọc frame từ RTSP stream")
                                 break
                             
-                            # Xử lý frame với detect_and_ocr_stable
-                            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
+                            # Xử lý frame với thread-safe detection
+                            result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
                             
                             if isinstance(result, dict):
                                 processed_frame_bytes = result.get('frame', b'')
                                 tracked_objects = result.get('tracked_objects', {})
                                 detection_count = result.get('detection_count', 0)
                                 skipped = result.get('skipped', False)
+                                fps = result.get('fps', 0)
                                 
-                                # Chỉ gửi frame khi có detection hoặc không bị skip
-                                should_send_frame = detection_count > 0 or not skipped
+                                # FIXED: Giảm logging - chỉ log khi có detections
+                                if detection_count > 0:
+                                    logger.info(f"📤 Sending frame for camera {camera_id} - FPS: {fps:.1f}, Detections: {detection_count}")
                                 
-                                if should_send_frame:
-                                    logger.info(f"📤 Sending frame for camera {camera_id} - Detections: {detection_count}, Skipped: {skipped}")
-                                    
-                                    # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
-                                    
-                                    # Send processed frame only when needed
-                                    if processed_frame_bytes:
-                                        ws.send(processed_frame_bytes)
-                                    else:
-                                        # Fallback
-                                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                                        ws.send(buffer.tobytes())
+                                # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
+                                
+                                # Send processed frame for consistent FPS
+                                if processed_frame_bytes:
+                                    ws.send(processed_frame_bytes)
                                 else:
-                                    logger.debug(f"⏭️ Skipping frame send for camera {camera_id} - No detections")
+                                    # Fallback
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                    ws.send(buffer.tobytes())
+                                
+                                last_frame_time = current_time
                             else:
                                 # Legacy support
                                 if isinstance(result, np.ndarray):
@@ -357,9 +459,9 @@ def video_stream(video_id):
                 if not ret:
                     break
 
-                # Xử lý frame với detection/OCR
+                # Xử lý frame với thread-safe detection/OCR
                 try:
-                    result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
+                    result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
 
                     # Handle both dict and direct frame results
                     if isinstance(result, dict):
@@ -379,8 +481,8 @@ def video_stream(video_id):
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-                    # Giới hạn tốc độ frame (~30 FPS)
-                    time.sleep(0.033)
+                    # Giới hạn tốc độ frame (~20 FPS)
+                    time.sleep(0.05)
 
                 except Exception as e:
                     logger.error(f"Lỗi xử lý frame: {str(e)}")
@@ -403,6 +505,342 @@ def video_stream(video_id):
 #         return jsonify({"error": "Crops directory not found"}), 404
 #     return send_from_directory(crops_dir, filename)
 
+
+@app.route('/api/stream-recognition/<camera_id>')
+def stream_recognition(camera_id):
+    """HTTP streaming endpoint for real-time recognition"""
+    def generate_frames():
+        # Initialize camera capture
+        cap = None
+        try:
+            # Get camera info from database
+            camera_name = f"Camera_{camera_id}"
+            camera_location = None
+            
+            try:
+                import requests
+                response = requests.get(f"http://localhost:5000/api/cameras/{camera_id}", timeout=2)
+                if response.status_code == 200:
+                    camera_data = response.json()
+                    camera_name = camera_data.get('data', {}).get('name', f"Camera_{camera_id}")
+                    camera_location = camera_data.get('data', {}).get('location', None)
+            except:
+                pass
+            
+            # Get stream URL from database
+            stream_url = None
+            try:
+                response = requests.get(f"http://localhost:5000/api/cameras/{camera_id}/stream", timeout=2)
+                if response.status_code == 200:
+                    stream_data = response.json()
+                    stream_url = stream_data.get('data', {}).get('stream_url')
+            except:
+                pass
+            
+            if not stream_url:
+                logger.error(f"No stream URL found for camera {camera_id}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n'
+                return
+            
+            # Open camera stream
+            cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_HW_ACCELERATION, 1)
+            
+            if not cap.isOpened():
+                logger.error(f"Cannot open stream for camera {camera_id}: {stream_url}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n'
+                return
+            
+            logger.info(f"Starting HTTP streaming for camera {camera_id}")
+            
+            # FULL DETECTION: Process every frame for complete recognition
+            target_fps = 20  # Optimized FPS for full detection load
+            frame_delay = 1.0 / target_fps
+            last_frame_time = time.time()
+            
+            while cap.isOpened():
+                current_time = time.time()
+                
+                # Skip frames if we're ahead of target FPS
+                if current_time - last_frame_time < frame_delay:
+                    continue
+                
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning(f"Cannot read frame from camera {camera_id}")
+                    break
+                
+                # FULL DETECTION: Process every frame
+                try:
+                    result = detect_and_ocr_thread_safe(
+                        frame, 
+                        camera_id=int(camera_id), 
+                        source_type="camera", 
+                        camera_name=camera_name,
+                        camera_location=camera_location
+                    )
+                    
+                    if isinstance(result, dict):
+                        frame_bytes = result.get('frame', b'')
+                        if not frame_bytes:
+                            # Fallback: encode original frame
+                            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame_bytes = buffer.tobytes()
+                    else:
+                        # Legacy support
+                        if isinstance(result, np.ndarray):
+                            _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame_bytes = buffer.tobytes()
+                        else:
+                            frame_bytes = result
+                    
+                    # Yield processed frame
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    
+                except Exception as e:
+                    logger.error(f"Error processing frame for camera {camera_id}: {str(e)}")
+                    # Send original frame on error
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                
+                last_frame_time = current_time
+                    
+        except Exception as e:
+            logger.error(f"Error in HTTP streaming for camera {camera_id}: {str(e)}")
+        finally:
+            if cap is not None:
+                cap.release()
+            logger.info(f"HTTP streaming ended for camera {camera_id}")
+    
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/test-stream/<camera_id>')
+def test_stream(camera_id):
+    """Test HTTP streaming endpoint for debugging"""
+    def generate_test_frames():
+        # Create a simple test pattern
+        import numpy as np
+        frame_count = 0
+        
+        while True:
+            # Create a test frame with frame counter
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            frame[:] = (50, 50, 50)  # Dark gray background
+            
+            # Add frame counter text
+            cv2.putText(frame, f"Test Frame {frame_count}", (50, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(frame, f"Camera ID: {camera_id}", (50, 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(frame, f"Time: {time.strftime('%H:%M:%S')}", (50, 150), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            
+            # Encode frame
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            frame_bytes = buffer.tobytes()
+            
+            # Yield frame
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            frame_count += 1
+            time.sleep(0.1)  # 10 FPS
+    
+    return Response(generate_test_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/stream-fast/<camera_id>')
+def stream_fast(camera_id):
+    """Ultra-fast HTTP streaming without detection for comparison"""
+    def generate_fast_frames():
+        # Initialize camera capture
+        cap = None
+        try:
+            # Get stream URL from database
+            stream_url = None
+            try:
+                import requests
+                response = requests.get(f"http://localhost:5000/api/cameras/{camera_id}/stream", timeout=2)
+                if response.status_code == 200:
+                    stream_data = response.json()
+                    stream_url = stream_data.get('data', {}).get('stream_url')
+            except:
+                pass
+            
+            if not stream_url:
+                logger.error(f"No stream URL found for camera {camera_id}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n'
+                return
+            
+            # Open camera stream
+            cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_HW_ACCELERATION, 1)
+            
+            if not cap.isOpened():
+                logger.error(f"Cannot open stream for camera {camera_id}: {stream_url}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n'
+                return
+            
+            logger.info(f"Starting ULTRA-FAST streaming for camera {camera_id}")
+            
+            # ULTRA-FAST: No detection, just encode and send
+            target_fps = 30  # Maximum FPS
+            frame_delay = 1.0 / target_fps
+            last_frame_time = time.time()
+            
+            while cap.isOpened():
+                current_time = time.time()
+                
+                # Skip frames if we're ahead of target FPS
+                if current_time - last_frame_time < frame_delay:
+                    continue
+                
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning(f"Cannot read frame from camera {camera_id}")
+                    break
+                
+                # ULTRA-FAST: Just encode and send, no processing
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                
+                last_frame_time = current_time
+                    
+        except Exception as e:
+            logger.error(f"Error in ultra-fast streaming for camera {camera_id}: {str(e)}")
+        finally:
+            if cap is not None:
+                cap.release()
+            logger.info(f"Ultra-fast streaming ended for camera {camera_id}")
+    
+    return Response(generate_fast_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/stream-full-detection/<camera_id>')
+def stream_full_detection(camera_id):
+    """Full detection streaming with maximum optimization for every frame"""
+    def generate_full_detection_frames():
+        # Initialize camera capture
+        cap = None
+        try:
+            # Get camera info from database
+            camera_name = f"Camera_{camera_id}"
+            camera_location = None
+            
+            try:
+                import requests
+                response = requests.get(f"http://localhost:5000/api/cameras/{camera_id}", timeout=2)
+                if response.status_code == 200:
+                    camera_data = response.json()
+                    camera_name = camera_data.get('data', {}).get('name', f"Camera_{camera_id}")
+                    camera_location = camera_data.get('data', {}).get('location', None)
+            except:
+                pass
+            
+            # Get stream URL from database
+            stream_url = None
+            try:
+                response = requests.get(f"http://localhost:5000/api/cameras/{camera_id}/stream", timeout=2)
+                if response.status_code == 200:
+                    stream_data = response.json()
+                    stream_url = stream_data.get('data', {}).get('stream_url')
+            except:
+                pass
+            
+            if not stream_url:
+                logger.error(f"No stream URL found for camera {camera_id}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n'
+                return
+            
+            # Open camera stream with maximum optimization
+            cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffer
+            cap.set(cv2.CAP_PROP_HW_ACCELERATION, 1)  # Hardware acceleration
+            cap.set(cv2.CAP_PROP_FPS, 20)  # Set target FPS
+            
+            if not cap.isOpened():
+                logger.error(f"Cannot open stream for camera {camera_id}: {stream_url}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n'
+                return
+            
+            logger.info(f"Starting FULL DETECTION streaming for camera {camera_id}")
+            
+            # FULL DETECTION: Process every frame with maximum optimization
+            target_fps = 20  # Optimized FPS for full detection
+            frame_delay = 1.0 / target_fps
+            last_frame_time = time.time()
+            frame_count = 0
+            
+            while cap.isOpened():
+                current_time = time.time()
+                
+                # Skip frames if we're ahead of target FPS
+                if current_time - last_frame_time < frame_delay:
+                    continue
+                
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning(f"Cannot read frame from camera {camera_id}")
+                    break
+                
+                frame_count += 1
+                
+                # FULL DETECTION: Process every frame
+                try:
+                    result = detect_and_ocr_thread_safe(
+                        frame, 
+                        camera_id=int(camera_id), 
+                        source_type="camera", 
+                        camera_name=camera_name,
+                        camera_location=camera_location
+                    )
+                    
+                    if isinstance(result, dict):
+                        frame_bytes = result.get('frame', b'')
+                        detection_count = result.get('detection_count', 0)
+                        track_count = result.get('track_count', 0)
+                        
+                        if not frame_bytes:
+                            # Fallback: encode original frame
+                            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame_bytes = buffer.tobytes()
+                        
+                        # FIXED: Giảm logging - chỉ log khi có detections và mỗi 60 frames
+                        if frame_count % 60 == 0 and detection_count > 0:
+                            logger.info(f"📊 Frame {frame_count}: {detection_count} detections, {track_count} tracks")
+                        
+                    else:
+                        # Legacy support
+                        if isinstance(result, np.ndarray):
+                            _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            frame_bytes = buffer.tobytes()
+                        else:
+                            frame_bytes = result
+                    
+                    # Yield processed frame
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    
+                except Exception as e:
+                    logger.error(f"Error processing frame for camera {camera_id}: {str(e)}")
+                    # Send original frame on error
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                
+                last_frame_time = current_time
+                    
+        except Exception as e:
+            logger.error(f"Error in full detection streaming for camera {camera_id}: {str(e)}")
+        finally:
+            if cap is not None:
+                cap.release()
+            logger.info(f"Full detection streaming ended for camera {camera_id}")
+    
+    return Response(generate_full_detection_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -472,6 +910,114 @@ def cleanup_system():
         logger.error(f"Error in cleanup: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/persistent-displays', methods=['GET'])
+def get_persistent_displays_api():
+    """Get current persistent displays"""
+    try:
+        from detector import get_persistent_displays
+        result = get_persistent_displays()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting persistent displays: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/persistent-displays/clear', methods=['POST'])
+def clear_persistent_displays_api():
+    """Clear all persistent displays"""
+    try:
+        from detector import clear_persistent_displays
+        result = clear_persistent_displays()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error clearing persistent displays: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/enhanced-plate-history', methods=['GET'])
+def get_enhanced_plate_history_api():
+    """Get enhanced plate history with similarity information"""
+    try:
+        from detector import get_enhanced_plate_history
+        result = get_enhanced_plate_history()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting enhanced plate history: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/thread-stats', methods=['GET'])
+def get_thread_stats_api():
+    """Get thread manager statistics"""
+    try:
+        stats = get_thread_manager_stats()
+        return jsonify({
+            "success": True,
+            "thread_stats": stats,
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error getting thread stats: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/thread-cleanup', methods=['POST'])
+def cleanup_threads_api():
+    """Manually cleanup inactive threads"""
+    try:
+        from detector import thread_manager
+        thread_manager.cleanup_inactive_threads()
+        return jsonify({
+            "success": True,
+            "message": "Thread cleanup completed",
+            "active_threads": thread_manager.get_active_thread_count()
+        })
+    except Exception as e:
+        logger.error(f"Error cleaning up threads: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/redis/status', methods=['GET'])
+def redis_status_api():
+    """Get Redis server status"""
+    try:
+        from detector import is_redis_running, redis_available
+        return jsonify({
+            "success": True,
+            "redis_available": redis_available,
+            "redis_running": is_redis_running(),
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error getting Redis status: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/redis/start', methods=['POST'])
+def redis_start_api():
+    """Start Redis server"""
+    try:
+        from detector import start_redis_server
+        success = start_redis_server()
+        return jsonify({
+            "success": success,
+            "message": "Redis server started" if success else "Failed to start Redis server",
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error starting Redis: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/redis/stop', methods=['POST'])
+def redis_stop_api():
+    """Stop Redis server"""
+    try:
+        from detector import stop_redis_server
+        stop_redis_server()
+        return jsonify({
+            "success": True,
+            "message": "Redis server stopped",
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error stopping Redis: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
 # SIMPLIFIED: Removed queue-related endpoints
 # Detector.py now sends directly to Node.js API
 
@@ -526,7 +1072,7 @@ def recognize():
         return jsonify({"error": "Cần cung cấp ảnh hoặc RTSP URL"}), 400
 
     detect_start = time.time()
-    result = detect_and_ocr_stable(img, source_type="http_request", camera_name="HTTP_Request")
+    result = detect_and_ocr_thread_safe(img, source_type="http_request", camera_name="HTTP_Request")
     
     # Handle both dict and direct frame results
     if isinstance(result, dict):
@@ -537,16 +1083,12 @@ def recognize():
         
         # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
         
-        # Chỉ trả về frame khi có detection hoặc không bị skip
-        if detection_count > 0 or not skipped:
-            logger.info(f"📤 Returning frame - Detections: {detection_count}, Skipped: {skipped}")
-            if not frame_bytes:
-                # Fallback: encode manually
-                _, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                frame_bytes = buffer.tobytes()
-        else:
-            logger.debug(f"⏭️ Skipping frame return - No detections")
-            # Trả về frame trống hoặc thông báo không có detection
+        # FIXED: Giảm logging - chỉ log khi có detections
+        if detection_count > 0:
+            logger.info(f"📤 Returning frame - Detections: {detection_count}")
+        
+        if not frame_bytes:
+            # Fallback: encode manually
             _, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
             frame_bytes = buffer.tobytes()
     else:
@@ -609,10 +1151,10 @@ def processed_video_ws(ws, video_id):
             ws.close()
             return
 
-        # Lấy FPS của video gốc, nhưng giới hạn max 15fps để tránh overload
-        fps = min(cap.get(cv2.CAP_PROP_FPS), 15)
+        # Lấy FPS của video gốc, nhưng giới hạn max 20fps để đạt target FPS
+        fps = min(cap.get(cv2.CAP_PROP_FPS), 20)
         if fps <= 0:
-            fps = 15
+            fps = 20
         frame_delay = 1.0 / fps
 
         frame_count = 0
@@ -624,8 +1166,8 @@ def processed_video_ws(ws, video_id):
             if not ret:
                 break
 
-            # Xử lý frame với detection/OCR
-            result = detect_and_ocr_stable(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
+            # Xử lý frame với thread-safe detection/OCR
+            result = detect_and_ocr_thread_safe(frame, camera_id=camera_id, source_type="camera", video_filename=video_id, camera_name=camera_name)
 
             # Handle both dict and direct frame results
             if isinstance(result, dict):
@@ -715,6 +1257,42 @@ def enable_optimizations_api():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/process-external-detections', methods=['POST'])
+def process_external_detections_api():
+    """API endpoint to process pending detections externally"""
+    try:
+        data = request.get_json()
+        camera_id = data.get('camera_id')
+        source_type = data.get('source_type', 'camera')
+        video_filename = data.get('video_filename')
+        camera_location = data.get('camera_location')
+        camera_name = data.get('camera_name')
+        
+        # Import external processing function
+        from detector import process_pending_detections_external
+        
+        # Process pending detections
+        process_pending_detections_external(
+            camera_id=camera_id,
+            source_type=source_type,
+            video_filename=video_filename,
+            camera_location=camera_location,
+            camera_name=camera_name
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'External processing completed'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in external processing API: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # @app.route('/performance/clear-cache', methods=['POST'])
 # def clear_cache_api():
 #     """Clear detection cache"""
@@ -733,26 +1311,12 @@ if __name__ == "__main__":
     os.makedirs('temp_videos', exist_ok=True)
     os.makedirs('llhls_output', exist_ok=True)
     
-    # Khởi động Redis server
-    logger.info("Checking Redis server...")
-    if not is_redis_running():
-        start_redis_server()
-    else:
-        logger.info("Redis server is already running")
+    # Redis server sẽ được tự động khởi động trong detector.py
+    logger.info("Redis server management integrated into detector module")
     
     # Enable performance optimizations
     enable_performance_optimizations(True)
     # set_performance_mode('balanced')
-    
-    # Display GPU information
-    logger.info("=" * 50)
-    logger.info("🚀 LICENSE PLATE RECOGNITION SYSTEM")
-    logger.info("=" * 50)
-    logger.info(f"🎮 GPU Status: {GPU_INFO['optimization_level'].upper()}")
-    if GPU_INFO['cuda_available']:
-        logger.info(f"💾 GPU Memory: {GPU_INFO['gpu_memory'] / 1024**3:.1f} GB")
-    logger.info(f"🔧 ONNX Providers: {', '.join(ONNX_PROVIDERS)}")
-    logger.info("=" * 50)
-    
+        
     logger.info("Khởi động server trên http://0.0.0.0:5002...")
     app.run(host='0.0.0.0', port=5002, debug=False, threaded=True)

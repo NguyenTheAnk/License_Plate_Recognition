@@ -498,7 +498,6 @@ const RouteMonitoring = () => {
           // Thử tìm camera trong allCameras
           const allCamera = cameraStateRef.current.allCameras.find(cam => cam.id === parseInt(cameraData.camera_id));
           if (allCamera) {
-            console.log(`🔍 Found camera in allCameras:`, allCamera);
             if (allCamera.mapX && allCamera.mapY) {
               console.log(`📍 Camera has coordinates: (${allCamera.mapX}, ${allCamera.mapY})`);
               // Thêm camera với tọa độ từ allCameras

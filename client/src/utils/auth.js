@@ -168,12 +168,6 @@ export const uploadImage = async (url, formData, token) => {
 // SỬA: Kiểm tra chính xác hơn cho FormData
 export const postData = async (url, requestData, token = null, isMultipart = false) => {
     try {
-        console.log('postData called with:', { 
-            url, 
-            requestDataType: requestData.constructor.name, 
-            hasToken: !!token, 
-            isMultipart: isMultipart || requestData instanceof FormData 
-        });
         
         let headers = {};
         let body;

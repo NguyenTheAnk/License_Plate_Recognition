@@ -24,51 +24,79 @@ const setCachedData = (key, data) => {
     };
 };
 
-// Vietnamese license plate validation function
+// Vietnamese license plate validation function - DISABLED: Accept all plates
 function validateVietnamesePlateFormat(plateText) {
     if (!plateText || typeof plateText !== 'string') {
         return { isValid: false, normalized: '', reason: 'Empty or invalid input' };
     }
-    
+
     // Clean and normalize text
     let text = plateText.toUpperCase().trim();
     text = text.replace(/[^A-Z0-9\-\.]/g, '');
-    
-    // Common Vietnamese plate patterns
-    const patterns = [
-        /^\d{2}[A-Z]-\d{3}\.\d{2}$/,  // 12A-345.67
-        /^\d{2}[A-Z]\d-\d{4}$/,       // 12A3-4567
-        /^\d{2}[A-Z]\d-\d{3}\.\d{2}$/,  // 12A1-345.67
-        /^\d{2}[A-Z]{2}-\d{3}\.\d{2}$/, // 12AB-345.67
-        /^\d{2}[A-Z]\d-\d{4}$/,         // 12A-3456
-    ];
-    
-    // Check if text matches any pattern
-    for (const pattern of patterns) {
-        if (pattern.test(text)) {
-            return { isValid: true, normalized: text, reason: 'Valid format' };
+
+    // DISABLED: Always return valid to skip format validation
+    return { isValid: true, normalized: text, reason: 'Format validation disabled - accepting all plates' };
+}
+
+// Format Vietnamese license plate for display
+function formatVietnamesePlate(plateText) {
+    if (!plateText || typeof plateText !== 'string') {
+        return plateText;
+    }
+
+    // Clean and normalize text
+    let text = plateText.toUpperCase().trim();
+    text = text.replace(/[^A-Z0-9]/g, '');
+
+    // Skip formatting if already formatted or too short
+    if (text.includes('-') || text.includes('.') || text.length < 5) {
+        return plateText;
+    }
+
+    // Vietnamese license plate patterns
+    // Format: XX-XXXX.XX (e.g., 30A-390.59, 88A-410.10)
+    if (text.length >= 7) {
+        // Pattern: 2-3 chars + 3-4 digits + 2 digits
+        // Examples: 30A39059 -> 30A-390.59, 88A41010 -> 88A-410.10
+
+        // Find the split point between letters and numbers
+        let letterEnd = 0;
+        for (let i = 0; i < text.length; i++) {
+            if (/\d/.test(text[i])) {
+                letterEnd = i;
+                break;
+            }
+        }
+
+        if (letterEnd > 0 && letterEnd < text.length - 2) {
+            const prefix = text.substring(0, letterEnd);
+            const remaining = text.substring(letterEnd);
+
+            // Split remaining into main number and suffix
+            if (remaining.length >= 5) {
+                const mainNumber = remaining.substring(0, remaining.length - 2);
+                const suffix = remaining.substring(remaining.length - 2);
+
+                return `${prefix}-${mainNumber}.${suffix}`;
+            } else if (remaining.length >= 3) {
+                // For shorter plates, just add dash
+                const mainNumber = remaining.substring(0, remaining.length - 2);
+                const suffix = remaining.substring(remaining.length - 2);
+                return `${prefix}-${mainNumber}.${suffix}`;
+            }
+        }
+
+        // Fallback: try to format as XX-XXXX.XX
+        if (text.length >= 7) {
+            const prefix = text.substring(0, 3);
+            const mainNumber = text.substring(3, text.length - 2);
+            const suffix = text.substring(text.length - 2);
+            return `${prefix}-${mainNumber}.${suffix}`;
         }
     }
-    
-    // Additional validation checks
-    if (text.length < 6 || text.length > 12) {
-        return { isValid: false, normalized: text, reason: 'Invalid length' };
-    }
-    
-    if (!/^\d{2}/.test(text)) {
-        return { isValid: false, normalized: text, reason: 'Must start with 2 digits' };
-    }
-    
-    if (!/[A-Z]/.test(text)) {
-        return { isValid: false, normalized: text, reason: 'Must contain at least one letter' };
-    }
-    
-    const digitCount = (text.match(/\d/g) || []).length;
-    if (digitCount < 3) {
-        return { isValid: false, normalized: text, reason: 'Must contain at least 3 digits' };
-    }
-    
-    return { isValid: false, normalized: text, reason: 'Does not match Vietnamese plate format' };
+
+    // Return original if can't format
+    return plateText;
 }
 
 // Lấy danh sách license plate detections
@@ -98,7 +126,7 @@ const getLicensePlateRecognitions = async (req, res) => {
         const parsedPage = Math.max(1, parseInt(page) || 1);
         const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
         const offset = (parsedPage - 1) * parsedLimit;
-        
+
         // Validate pagination bounds
         if (parsedPage < 1 || parsedPage > 10000) {
             return res.status(400).json({
@@ -107,7 +135,7 @@ const getLicensePlateRecognitions = async (req, res) => {
                 error: 'Invalid page number'
             });
         }
-        
+
         if (parsedLimit < 1 || parsedLimit > 100) {
             return res.status(400).json({
                 success: false,
@@ -115,9 +143,8 @@ const getLicensePlateRecognitions = async (req, res) => {
                 error: 'Invalid limit'
             });
         }
-        
-        console.log('Pagination params:', { page, limit, offset, parsedPage, parsedLimit });
-        
+
+
         // Debug: Test if table exists and has data
         const testQuery = `SELECT COUNT(*) as total FROM license_plate_detections LIMIT 1`;
         try {
@@ -127,7 +154,6 @@ const getLicensePlateRecognitions = async (req, res) => {
                         console.error('Table test error:', error);
                         reject(error);
                     } else {
-                        console.log('Table test results:', results);
                         resolve(results);
                     }
                 });
@@ -140,7 +166,7 @@ const getLicensePlateRecognitions = async (req, res) => {
                 error: process.env.NODE_ENV === 'development' ? testError.message : undefined
             });
         }
-        
+
         // Build WHERE conditions and parameters
         let whereConditions = [];
         let queryParams = [];
@@ -284,11 +310,7 @@ const getLicensePlateRecognitions = async (req, res) => {
 
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
-        // Debug logging for filters
-        console.log('Filter conditions:', whereConditions);
-        console.log('Filter parameters:', queryParams);
-        console.log('Final WHERE clause:', whereClause);
-        
+
         // Query performance monitoring
         const queryStartTime = Date.now();
 
@@ -299,21 +321,18 @@ const getLicensePlateRecognitions = async (req, res) => {
 
         // Get total count first - optimized for performance
         const countQuery = `SELECT COUNT(*) as total FROM license_plate_detections lpd ${whereClause}`;
-        
+
         const countStartTime = Date.now();
         const countResults = await new Promise((resolve, reject) => {
             db.query(countQuery, queryParams, (error, results) => {
                 const countEndTime = Date.now();
                 const countDuration = countEndTime - countStartTime;
-                
+
                 if (error) {
                     console.error('Count query error:', error);
-                    console.error('Count query duration:', countDuration + 'ms');
                     reject(new Error(`Database count query failed: ${error.message}`));
                 } else {
-                    console.log('Count query results:', results);
-                    console.log('Count query duration:', countDuration + 'ms');
-                    
+
                     // Log slow count queries
                     if (countDuration > 500) {
                         console.warn('Slow count query detected:', {
@@ -321,12 +340,12 @@ const getLicensePlateRecognitions = async (req, res) => {
                             conditions: whereConditions.length
                         });
                     }
-                    
+
                     resolve(results);
                 }
             });
         });
-        
+
         const total = countResults && countResults.length > 0 ? countResults[0].total : 0;
 
         // FIXED: Get data with pagination - using string interpolation for LIMIT/OFFSET
@@ -355,24 +374,18 @@ const getLicensePlateRecognitions = async (req, res) => {
         // FIXED: Use only queryParams for WHERE conditions, not LIMIT/OFFSET
         const dataParams = [...queryParams];
 
-        // Debug logging for data query
-        console.log('Data query:', dataQuery);
-        console.log('Data params:', dataParams);
-        console.log('Pagination:', { parsedLimit, offset, page: parsedPage });
 
         const detections = await new Promise((resolve, reject) => {
             db.query(dataQuery, dataParams, (error, results) => {
                 const queryEndTime = Date.now();
                 const queryDuration = queryEndTime - queryStartTime;
-                
+
                 if (error) {
                     console.error('Database query error:', error);
                     console.error('Query duration:', queryDuration + 'ms');
                     reject(new Error(`Database data query failed: ${error.message}`));
                 } else {
-                    console.log('Data query results count:', results ? results.length : 0);
-                    console.log('Query duration:', queryDuration + 'ms');
-                    
+
                     // Log slow queries
                     if (queryDuration > 1000) {
                         console.warn('Slow query detected:', {
@@ -381,7 +394,7 @@ const getLicensePlateRecognitions = async (req, res) => {
                             params: queryParams.length
                         });
                     }
-                    
+
                     resolve(results || []);
                 }
             });
@@ -417,7 +430,7 @@ const getLicensePlateRecognitions = async (req, res) => {
             });
         }
 
-        // Return response
+        // Return response (plate_number is already formatted when saved)
         res.status(200).json({
             success: true,
             message: 'Lấy danh sách nhận diện biển số thành công',
@@ -455,7 +468,7 @@ const getLicensePlateRecognitions = async (req, res) => {
             sqlState: error.sqlState,
             sql: error.sql
         });
-        
+
         res.status(500).json({
             success: false,
             message: 'Lỗi khi lấy danh sách nhận diện biển số',
@@ -492,7 +505,7 @@ const getLicensePlateRecognitionById = async (req, res) => {
             LEFT JOIN locations loc ON c.location_id = loc.id
             WHERE lpd.id = ?
         `;
-        
+
         const detections = await new Promise((resolve, reject) => {
             db.query(query, [id], (error, results) => {
                 if (error) {
@@ -504,22 +517,22 @@ const getLicensePlateRecognitionById = async (req, res) => {
                 }
             });
         });
-        
+
         if (detections.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Không tìm thấy bản ghi nhận diện'
             });
         }
-        
+
         const detection = detections[0];
-        
+
         res.status(200).json({
             success: true,
             message: 'Lấy chi tiết nhận diện biển số thành công',
             data: detection
         });
-        
+
     } catch (error) {
         console.error('Error details:', {
             message: error.message,
@@ -528,7 +541,7 @@ const getLicensePlateRecognitionById = async (req, res) => {
             sqlState: error.sqlState,
             sql: error.sql
         });
-        
+
         res.status(500).json({
             success: false,
             message: 'Lỗi khi lấy chi tiết nhận diện biển số',
@@ -545,27 +558,27 @@ const getLicensePlateRecognitionById = async (req, res) => {
 const getLicensePlateRecognitionStats = async (req, res) => {
     try {
         const { start_date, end_date, camera_id } = req.query;
-        
+
         let whereConditions = [];
         let queryParams = [];
-        
+
         if (start_date) {
             whereConditions.push('detected_at >= ?');
             queryParams.push(start_date);
         }
-        
+
         if (end_date) {
             whereConditions.push('detected_at <= ?');
             queryParams.push(end_date);
         }
-        
+
         if (camera_id) {
             whereConditions.push('camera_id = ?');
             queryParams.push(camera_id);
         }
-        
+
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-        
+
         // Thống kê tổng quan - check cache first
         let stats = getCachedData('stats');
         if (!stats) {
@@ -582,20 +595,20 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                 FROM license_plate_detections 
                 ${whereClause}
             `;
-            
+
             const statsStartTime = Date.now();
             const statsResult = await new Promise((resolve, reject) => {
                 db.query(statsQuery, queryParams, (error, results) => {
                     const statsEndTime = Date.now();
                     const statsDuration = statsEndTime - statsStartTime;
-                    
+
                     if (error) {
                         console.error('Stats query error:', error);
                         console.error('Stats query duration:', statsDuration + 'ms');
                         reject(error);
                     } else {
                         console.log('Stats query duration:', statsDuration + 'ms');
-                        
+
                         // Log slow stats queries
                         if (statsDuration > 1000) {
                             console.warn('Slow stats query detected:', {
@@ -603,17 +616,17 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                                 conditions: whereConditions.length
                             });
                         }
-                        
+
                         resolve(results);
                     }
                 });
             });
             stats = statsResult[0];
-            
+
             // Cache the stats
             setCachedData('stats', stats);
         }
-        
+
         // Thống kê theo loại xe - check cache first
         let vehicleTypeStats = getCachedData('vehicleTypeStats');
         if (!vehicleTypeStats) {
@@ -626,20 +639,20 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                 GROUP BY detected_vehicle_type
                 ORDER BY count DESC
             `;
-            
+
             const vehicleTypeStartTime = Date.now();
             vehicleTypeStats = await new Promise((resolve, reject) => {
                 db.query(vehicleTypeQuery, queryParams, (error, results) => {
                     const vehicleTypeEndTime = Date.now();
                     const vehicleTypeDuration = vehicleTypeEndTime - vehicleTypeStartTime;
-                    
+
                     if (error) {
                         console.error('Vehicle type query error:', error);
                         console.error('Vehicle type query duration:', vehicleTypeDuration + 'ms');
                         reject(error);
                     } else {
                         console.log('Vehicle type query duration:', vehicleTypeDuration + 'ms');
-                        
+
                         // Log slow vehicle type queries
                         if (vehicleTypeDuration > 1000) {
                             console.warn('Slow vehicle type query detected:', {
@@ -647,16 +660,16 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                                 conditions: whereConditions.length
                             });
                         }
-                        
+
                         resolve(results || []);
                     }
                 });
             });
-            
+
             // Cache the vehicle type stats
             setCachedData('vehicleTypeStats', vehicleTypeStats);
         }
-        
+
         // Thống kê theo camera - check cache first
         let cameraStats = getCachedData('cameraStats');
         if (!cameraStats) {
@@ -671,20 +684,20 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                 GROUP BY lpd.camera_id, c.name
                 ORDER BY count DESC
             `;
-            
+
             const cameraStartTime = Date.now();
             cameraStats = await new Promise((resolve, reject) => {
                 db.query(cameraQuery, queryParams, (error, results) => {
                     const cameraEndTime = Date.now();
                     const cameraDuration = cameraEndTime - cameraStartTime;
-                    
+
                     if (error) {
                         console.error('Camera stats query error:', error);
                         console.error('Camera query duration:', cameraDuration + 'ms');
                         reject(error);
                     } else {
                         console.log('Camera query duration:', cameraDuration + 'ms');
-                        
+
                         // Log slow camera queries
                         if (cameraDuration > 1000) {
                             console.warn('Slow camera query detected:', {
@@ -692,16 +705,16 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                                 conditions: whereConditions.length
                             });
                         }
-                        
+
                         resolve(results || []);
                     }
                 });
             });
-            
+
             // Cache the camera stats
             setCachedData('cameraStats', cameraStats);
         }
-        
+
         // Thống kê theo ngày - check cache first
         let dailyStats = getCachedData('dailyStats');
         if (!dailyStats) {
@@ -715,20 +728,20 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                 ORDER BY date DESC
                 LIMIT 30
             `;
-            
+
             const dailyStartTime = Date.now();
             dailyStats = await new Promise((resolve, reject) => {
                 db.query(dailyQuery, queryParams, (error, results) => {
                     const dailyEndTime = Date.now();
                     const dailyDuration = dailyEndTime - dailyStartTime;
-                    
+
                     if (error) {
                         console.error('Daily stats query error:', error);
                         console.error('Daily query duration:', dailyDuration + 'ms');
                         reject(error);
                     } else {
                         console.log('Daily query duration:', dailyDuration + 'ms');
-                        
+
                         // Log slow daily queries
                         if (dailyDuration > 1000) {
                             console.warn('Slow daily query detected:', {
@@ -736,16 +749,16 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                                 conditions: whereConditions.length
                             });
                         }
-                        
+
                         resolve(results || []);
                     }
                 });
             });
-            
+
             // Cache the daily stats
             setCachedData('dailyStats', dailyStats);
         }
-        
+
         res.status(200).json({
             success: true,
             message: 'Lấy thống kê nhận diện biển số thành công',
@@ -765,7 +778,7 @@ const getLicensePlateRecognitionStats = async (req, res) => {
                 daily_stats: dailyStats
             }
         });
-        
+
     } catch (error) {
         console.error('Error details:', {
             message: error.message,
@@ -774,7 +787,7 @@ const getLicensePlateRecognitionStats = async (req, res) => {
             sqlState: error.sqlState,
             sql: error.sql
         });
-        
+
         res.status(500).json({
             success: false,
             message: 'Lỗi khi lấy thống kê nhận diện biển số',
@@ -791,7 +804,7 @@ const getLicensePlateRecognitionStats = async (req, res) => {
 const deleteLicensePlateRecognition = async (req, res) => {
     try {
         const { id } = req.params;
-        
+
         // Kiểm tra xem detection có tồn tại không
         const checkQuery = 'SELECT id FROM license_plate_detections WHERE id = ?';
         const existing = await new Promise((resolve, reject) => {
@@ -804,14 +817,14 @@ const deleteLicensePlateRecognition = async (req, res) => {
                 }
             });
         });
-        
+
         if (existing.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Không tìm thấy bản ghi nhận diện'
             });
         }
-        
+
         // Xóa detection
         const deleteQuery = 'DELETE FROM license_plate_detections WHERE id = ?';
         await new Promise((resolve, reject) => {
@@ -824,12 +837,12 @@ const deleteLicensePlateRecognition = async (req, res) => {
                 }
             });
         });
-        
+
         res.status(200).json({
             success: true,
             message: 'Xóa bản ghi nhận diện thành công'
         });
-        
+
     } catch (error) {
         console.error('Error details:', {
             message: error.message,
@@ -838,7 +851,7 @@ const deleteLicensePlateRecognition = async (req, res) => {
             sqlState: error.sqlState,
             sql: error.sql
         });
-        
+
         res.status(500).json({
             success: false,
             message: 'Lỗi khi xóa bản ghi nhận diện',
@@ -859,11 +872,11 @@ const updateRecognitionVerification = async (req, res) => {
             body: req.body,
             user: req.user
         });
-        
+
         const { id } = req.params;
         const { is_verified, verification_notes } = req.body;
         const verified_by = req.user?.userId; // Lấy user ID từ middleware auth
-        
+
         // Kiểm tra xem detection có tồn tại không
         const checkQuery = 'SELECT id FROM license_plate_detections WHERE id = ?';
         const existing = await new Promise((resolve, reject) => {
@@ -876,21 +889,21 @@ const updateRecognitionVerification = async (req, res) => {
                 }
             });
         });
-        
+
         if (existing.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Không tìm thấy bản ghi nhận diện'
             });
         }
-        
+
         // Cập nhật verification
         const updateQuery = `
             UPDATE license_plate_detections 
             SET is_verified = ?, verification_notes = ?, verified_by = ?, verified_at = NOW()
             WHERE id = ?
         `;
-        
+
         await new Promise((resolve, reject) => {
             db.query(updateQuery, [is_verified, verification_notes, verified_by, id], (error, results) => {
                 if (error) {
@@ -901,12 +914,12 @@ const updateRecognitionVerification = async (req, res) => {
                 }
             });
         });
-        
+
         res.status(200).json({
             success: true,
             message: 'Cập nhật trạng thái xác thực thành công'
         });
-        
+
     } catch (error) {
         console.error('Error details:', {
             message: error.message,
@@ -915,7 +928,7 @@ const updateRecognitionVerification = async (req, res) => {
             sqlState: error.sqlState,
             sql: error.sql
         });
-        
+
         res.status(500).json({
             success: false,
             message: 'Lỗi khi cập nhật trạng thái xác thực',
@@ -931,6 +944,8 @@ const updateRecognitionVerification = async (req, res) => {
 // Tạo mới license plate recognition (cho real-time detection)
 const createLicensePlateRecognition = async (req, res) => {
     try {
+        console.log(`📥 Received plate data from detector:`, req.body);
+
         let {
             detection_uuid,
             plate_number,
@@ -957,13 +972,13 @@ const createLicensePlateRecognition = async (req, res) => {
                 message: 'Thiếu thông tin bắt buộc: plate_number'
             });
         }
-        
+
         // Set default camera_id if not provided or invalid
         if (!camera_id || camera_id === 'default' || camera_id === 'null' || camera_id === 'test') {
             camera_id = 1; // Default camera ID
             console.log('⚠️ Using default camera_id: 1');
         }
-        
+
         // Ensure camera_id is a valid integer
         const parsedCameraId = parseInt(camera_id);
         if (isNaN(parsedCameraId) || parsedCameraId <= 0) {
@@ -973,9 +988,52 @@ const createLicensePlateRecognition = async (req, res) => {
             camera_id = parsedCameraId;
         }
 
+        // Get camera and location information from database
+        let actual_location_id = location_id;
+        let actual_camera_name = camera_name;
+        let actual_location_name = 'Unknown Location';
+
+        try {
+            // Query camera and location information
+            const cameraQuery = `
+                SELECT c.id, c.name as camera_name, c.location_id, l.name as location_name
+                FROM cameras c
+                LEFT JOIN locations l ON c.location_id = l.id
+                WHERE c.id = ?
+            `;
+
+            const cameraResult = await new Promise((resolve, reject) => {
+                db.query(cameraQuery, [camera_id], (error, results) => {
+                    if (error) {
+                        console.error('Camera query error:', error);
+                        reject(error);
+                    } else {
+                        resolve(results && results.length > 0 ? results[0] : null);
+                    }
+                });
+            });
+
+            if (cameraResult) {
+                actual_location_id = cameraResult.location_id;
+                actual_camera_name = cameraResult.camera_name;
+                actual_location_name = cameraResult.location_name || 'Unknown Location';
+                console.log(`📷 Camera found: ${actual_camera_name} at ${actual_location_name} (ID: ${camera_id}, Location ID: ${actual_location_id})`);
+            } else {
+                console.log(`⚠️ Camera ID ${camera_id} not found in database, using defaults`);
+                actual_location_id = 1; // Default location ID
+                actual_camera_name = `Camera ${camera_id}`;
+                actual_location_name = 'Unknown Location';
+            }
+        } catch (error) {
+            console.error('Error querying camera information:', error);
+            actual_location_id = 1; // Default location ID
+            actual_camera_name = `Camera ${camera_id}`;
+            actual_location_name = 'Unknown Location';
+        }
+
         // Process video_filename and camera_name based on source_type
         let video_filename = req.body.video_filename || null;
-        
+
         if (!camera_name) {
             if (source_type === 'video_upload') {
                 // For video upload, use video filename
@@ -983,9 +1041,8 @@ const createLicensePlateRecognition = async (req, res) => {
                 camera_name = `Video Upload: ${video_filename}`;
                 console.log(`📹 Video upload detected: ${camera_name}`);
             } else if (source_type === 'camera' || !source_type) {
-                // For camera live, use camera location or default
-                const camera_location = req.body.camera_location || 'Unknown Location';
-                camera_name = `Camera Live: ${camera_location}`;
+                // For camera live, use actual location from database
+                camera_name = `Camera Live: ${actual_location_name}`;
                 console.log(`📷 Camera live detected: ${camera_name}`);
             } else {
                 // Default fallback
@@ -994,34 +1051,33 @@ const createLicensePlateRecognition = async (req, res) => {
             }
         }
 
-        // Validate plate format
-        const plateValidation = validateVietnamesePlateFormat(plate_number);
-        if (!plateValidation.isValid) {
-            return res.status(400).json({
-                success: false,
-                message: `Biển số không hợp lệ: ${plateValidation.reason}`,
-                plate_number: plate_number
-            });
+        // Format plate number for Vietnamese standard before saving
+        const formattedPlateNumber = formatVietnamesePlate(plate_number);
+        const plateValidation = { isValid: true, normalized: formattedPlateNumber, reason: 'Plate formatted for Vietnamese standard' };
+        console.log(`📋 Plate formatted: ${plate_number} -> ${formattedPlateNumber}`);
+
+        // Generate UUID if not provided - FIXED: Use consistent UUID for same track
+        let detectionUuid;
+        if (!detection_uuid) {
+            // Create consistent UUID based on track_id to avoid duplicates
+            const trackId = req.body.track_id || 'unknown';
+            detectionUuid = `track_${trackId}_${Date.now()}`;
+        } else {
+            detectionUuid = detection_uuid;
         }
 
-        // Generate UUID if not provided
-        const detectionUuid = detection_uuid || require('crypto').randomUUID();
-        
         // Parse bbox if provided
         let bbox_x1 = null, bbox_y1 = null, bbox_x2 = null, bbox_y2 = null;
         if (bbox && Array.isArray(bbox) && bbox.length >= 4) {
             [bbox_x1, bbox_y1, bbox_x2, bbox_y2] = bbox;
         }
-        
+
         // Check BlackList and WhiteList from database
         let actual_whitelist_match = false;
         let actual_blacklist_match = false;
-        
+
         try {
-            // DEBUG: Log plate number being checked
-            console.log(`🔍 DEBUG: Checking plate number: "${plateValidation.normalized}"`);
-            console.log(`🔍 DEBUG: Original plate number: "${plate_number}"`);
-            
+
             // Check whitelist - ENHANCED with validity and approval checks
             const whitelistQuery = `
                 SELECT id FROM vehicle_whitelist 
@@ -1031,7 +1087,7 @@ const createLicensePlateRecognition = async (req, res) => {
                 AND (valid_from IS NULL OR valid_from <= CURDATE())
                 AND (valid_to IS NULL OR valid_to >= CURDATE())
             `;
-            
+
             // DEBUG: First check all entries with this plate number (without conditions)
             const debugQuery = 'SELECT * FROM vehicle_whitelist WHERE plate_number = ?';
             const debugResult = await new Promise((resolve, reject) => {
@@ -1045,11 +1101,9 @@ const createLicensePlateRecognition = async (req, res) => {
                     }
                 });
             });
-            
-            // DEBUG: Log the exact query being executed
-            console.log(`🔍 DEBUG: Whitelist query:`, whitelistQuery);
-            console.log(`🔍 DEBUG: Query parameter:`, plateValidation.normalized);
-            
+
+
+
             const whitelistResult = await new Promise((resolve, reject) => {
                 db.query(whitelistQuery, [plateValidation.normalized], (error, results) => {
                     if (error) {
@@ -1062,7 +1116,7 @@ const createLicensePlateRecognition = async (req, res) => {
                 });
             });
             actual_whitelist_match = whitelistResult.length > 0;
-            
+
             // Check blacklist - ENHANCED with validity checks
             const blacklistQuery = `
                 SELECT id FROM vehicle_blacklist 
@@ -1071,10 +1125,8 @@ const createLicensePlateRecognition = async (req, res) => {
                 AND (valid_from IS NULL OR valid_from <= CURDATE())
                 AND (valid_to IS NULL OR valid_to >= CURDATE())
             `;
-            
-            // DEBUG: Log blacklist query
-            console.log(`🔍 DEBUG: Blacklist query:`, blacklistQuery);
-            
+
+
             const blacklistResult = await new Promise((resolve, reject) => {
                 db.query(blacklistQuery, [plateValidation.normalized], (error, results) => {
                     if (error) {
@@ -1087,7 +1139,7 @@ const createLicensePlateRecognition = async (req, res) => {
                 });
             });
             actual_blacklist_match = blacklistResult.length > 0;
-            
+
             console.log(`🔍 ENHANCED BlackList/WhiteList check for ${plateValidation.normalized}:`, {
                 whitelist_match: actual_whitelist_match,
                 blacklist_match: actual_blacklist_match,
@@ -1101,25 +1153,15 @@ const createLicensePlateRecognition = async (req, res) => {
             actual_blacklist_match = is_blacklist_match;
         }
 
-        // Enhanced logging for debugging
-        console.log('🔍 Received plate detection data:', {
-            detection_uuid: detectionUuid,
-            plate_number: plate_number,
-            camera_id: camera_id,
-            location_id: location_id,
-            confidence_score: confidence_score,
-            bbox: bbox,
-            whitelist_match: actual_whitelist_match,
-            blacklist_match: actual_blacklist_match
-        });
+
 
         // Prepare data for insertion
         const insertData = {
             detection_uuid: detectionUuid,
-            plate_number: plateValidation.normalized,
-            raw_plate_text: raw_plate_text || plate_number,
+            plate_number: formattedPlateNumber, // Use formatted plate number
+            raw_plate_text: raw_plate_text || plate_number, // Keep original raw text
             camera_id: camera_id,
-            location_id: parseInt(location_id) || 1,
+            location_id: actual_location_id,
             detected_at: detected_at ? new Date(detected_at * 1000) : new Date(),
             confidence_score: parseFloat(confidence_score) || 0.0,
             ocr_confidence: parseFloat(ocr_confidence) || 0.0,
@@ -1147,7 +1189,7 @@ const createLicensePlateRecognition = async (req, res) => {
                 existingTrackId = parts[2]; // Lấy track_id từ detection_uuid
             }
         }
-        
+
         // Nếu có track_id, kiểm tra xem track này đã có biển số chưa
         if (existingTrackId) {
             const checkTrackQuery = `
@@ -1158,7 +1200,7 @@ const createLicensePlateRecognition = async (req, res) => {
                 ORDER BY confidence_score DESC 
                 LIMIT 1
             `;
-            
+
             const trackPattern = `%_${existingTrackId}_%`;
             const existingTrack = await new Promise((resolve, reject) => {
                 db.query(checkTrackQuery, [trackPattern], (error, results) => {
@@ -1166,13 +1208,15 @@ const createLicensePlateRecognition = async (req, res) => {
                     else resolve(results && results.length > 0 ? results[0] : null);
                 });
             });
-            
+
             if (existingTrack) {
-                // Track đã có biển số, chỉ cập nhật nếu confidence cao hơn đáng kể
-                if (insertData.confidence_score > existingTrack.confidence_score * 1.2) {
+                // FIXED: Tăng ngưỡng confidence để tránh update liên tục
+                const confidenceThreshold = 1.5; // Tăng từ 1.2 lên 1.5 (50% cao hơn)
+
+                if (insertData.confidence_score > existingTrack.confidence_score * confidenceThreshold) {
                     console.log(`🔄 Updating track ${existingTrackId}: '${existingTrack.plate_number}' -> '${insertData.plate_number}' (conf: ${existingTrack.confidence_score} -> ${insertData.confidence_score})`);
-                    
-                    // Cập nhật record cũ
+
+                    // Cập nhật record cũ với biển số đã format
                     const updateQuery = `
                         UPDATE license_plate_detections 
                         SET plate_number = ?, raw_plate_text = ?, confidence_score = ?, 
@@ -1180,35 +1224,35 @@ const createLicensePlateRecognition = async (req, res) => {
                             bbox_x2 = ?, bbox_y2 = ?, cropped_plate_image_path = ?, detected_at = NOW()
                         WHERE id = ?
                     `;
-                    
+
                     const updateParams = [
-                        insertData.plate_number, insertData.raw_plate_text, insertData.confidence_score,
+                        formattedPlateNumber, insertData.raw_plate_text, insertData.confidence_score,
                         insertData.ocr_confidence, insertData.detection_confidence, insertData.bbox_x1,
                         insertData.bbox_y1, insertData.bbox_x2, insertData.bbox_y2, insertData.cropped_plate_image_path,
                         existingTrack.id
                     ];
-                    
+
                     const updateResult = await new Promise((resolve, reject) => {
                         db.query(updateQuery, updateParams, (error, results) => {
                             if (error) reject(error);
                             else resolve(results);
                         });
                     });
-                    
+
                     return res.status(200).json({
                         success: true,
                         message: 'Cập nhật biển số cho track thành công',
                         data: {
                             id: existingTrack.id,
                             detection_uuid: insertData.detection_uuid,
-                            plate_number: insertData.plate_number,
+                            plate_number: formattedPlateNumber,
                             is_whitelist_match: insertData.is_whitelist_match,
                             is_blacklist_match: insertData.is_blacklist_match,
                             updated: true
                         }
                     });
                 } else {
-                    console.log(`⏭️ Track ${existingTrackId} đã có biển số tốt hơn: '${existingTrack.plate_number}' (conf: ${existingTrack.confidence_score}) vs '${insertData.plate_number}' (conf: ${insertData.confidence_score})`);
+                    console.log(`⏭️ Track ${existingTrackId} đã có biển số tốt hơn: '${existingTrack.plate_number}' (conf: ${existingTrack.confidence_score}) vs '${insertData.plate_number}' (conf: ${insertData.confidence_score}) - threshold: ${confidenceThreshold}`);
                     return res.status(200).json({
                         success: true,
                         message: 'Track đã có biển số tốt hơn, bỏ qua',
@@ -1287,7 +1331,7 @@ const createLicensePlateRecognition = async (req, res) => {
             data: {
                 id: result.insertId,
                 detection_uuid: insertData.detection_uuid,
-                plate_number: insertData.plate_number,
+                plate_number: formattedPlateNumber,
                 is_whitelist_match: insertData.is_whitelist_match,
                 is_blacklist_match: insertData.is_blacklist_match
             }
@@ -1307,21 +1351,21 @@ const createLicensePlateRecognition = async (req, res) => {
 const getRealtimeDetections = async (req, res) => {
     try {
         const { limit = 10, camera_id } = req.query;
-        
+
         let whereConditions = [];
         let queryParams = [];
-        
+
         if (camera_id) {
             whereConditions.push('lpd.camera_id = ?');
             queryParams.push(camera_id);
         }
-        
+
         // Add confidence filters to where conditions
         whereConditions.push('lpd.detection_confidence >= 0.8');
         whereConditions.push('lpd.ocr_confidence >= 0.9');
-        
+
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-        
+
         const query = `
             SELECT 
                 lpd.id, lpd.detection_uuid, lpd.plate_number, lpd.raw_plate_text, 
@@ -1338,9 +1382,9 @@ const getRealtimeDetections = async (req, res) => {
             ORDER BY lpd.detected_at DESC
             LIMIT ?
         `;
-        
+
         queryParams.push(parseInt(limit));
-        
+
         const detections = await new Promise((resolve, reject) => {
             db.query(query, queryParams, (error, results) => {
                 if (error) {
@@ -1351,14 +1395,14 @@ const getRealtimeDetections = async (req, res) => {
                 }
             });
         });
-        
+
         res.status(200).json({
             success: true,
             data: detections,
             count: detections.length,
             timestamp: new Date().toISOString()
         });
-        
+
     } catch (error) {
         console.error('Error getting realtime detections:', error);
         res.status(500).json({

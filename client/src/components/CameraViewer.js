@@ -6,7 +6,6 @@ import { fetchDataFromAPI } from "../utils/auth";
 
 
 const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRecognizing, recordingTimer }) => {
-  console.log('CameraViewer props:', { camera, externalIsRecognizing });
   const videoRef = useRef(null);
   // const imgRef = useRef(null); // overlay removed
   const wsRetryTimeoutRef = useRef(null);
@@ -29,7 +28,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   const currentTimeRef = useRef(0);
 
   // Dùng để tránh cảnh báo biến không dùng
-  useEffect(() => {}, [recognitionResults]);
+  useEffect(() => { }, [recognitionResults]);
 
   // Function to fetch realtime detections
   const fetchRealtimeDetections = useCallback(async () => {
@@ -37,29 +36,19 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
       const response = await fetchDataFromAPI('/api/plate-recognitions/realtime?limit=5');
       if (response.success && response.data) {
         setRealtimeDetections(response.data);
-        
+
         // Check for new detections
         if (response.data.length > 0) {
           const latestDetection = response.data[0];
           const detectionTime = new Date(latestDetection.detected_at).getTime();
-          
+
           if (!lastDetectionTime || detectionTime > lastDetectionTime) {
             setLastDetectionTime(detectionTime);
-            
-            // Show notification for new detection
-            if (latestDetection.is_whitelist_match) {
-              console.log('✅ WHITELIST MATCH:', latestDetection.plate_number);
-              // You can add toast notification here
-            } else if (latestDetection.is_blacklist_match) {
-              console.log('🚨 BLACKLIST MATCH:', latestDetection.plate_number);
-              // You can add alert notification here
-            } else {
-              console.log('🔍 NEW DETECTION:', latestDetection.plate_number);
-            }
-            
+
+
+
             // Trigger refresh of main detection list
             if (window.refreshDetectionResults) {
-              console.log('🔄 Triggering main list refresh...');
               window.refreshDetectionResults();
             }
           }
@@ -84,12 +73,10 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   const forcePlayVideo = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return false;
-    
+
     try {
       if (video.paused || video.ended) {
-        console.log("Force playing video...");
         await video.play();
-        console.log("Video force play successful");
         return true;
       }
       return true;
@@ -101,11 +88,9 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
   const stopRecognition = useCallback(() => {
     if (isProcessing) {
-      console.log("Stop recognition ignored, processing in progress");
       return;
     }
     setIsProcessing(true);
-    console.log("Stopping recognition, closing WebSocket");
     setIsRecognizing(false);
     setFrameData(null);
     setRecognitionResults([]);
@@ -117,7 +102,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           wsRef.current.readyState === WebSocket.CONNECTING
         ) {
           wsRef.current.close(1000, "Recognition stopped by user");
-          console.log("WebSocket close requested");
         }
         wsRef.current = null;
       } catch (error) {
@@ -145,27 +129,22 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
   const startRecognition = useCallback(() => {
     if (isProcessing) {
-      console.log("Stop recognition ignored, processing in progress");
       return;
     }
     setIsProcessing(true);
-    console.log("Starting recognition for camera:", camera.id);
-    
+
     // Kiểm tra video đã sẵn sàng chưa
     const video = videoRef.current;
     if (!video) {
-      console.error("Video element not found");
       setIsProcessing(false);
       return;
     }
 
     // Kiểm tra video đã load chưa
     if (!videoReady) {
-      console.log("Video not ready yet, waiting...");
       // Đợi video ready
       const checkVideoReady = () => {
         if (videoReady) {
-          console.log("Video is now ready, starting recognition...");
           setIsRecognizing(true);
           setIsProcessing(false);
         } else {
@@ -178,9 +157,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
     // Kiểm tra video đang phát chưa
     if (video.paused || video.ended) {
-      console.log("Video is paused/ended, attempting to play...");
       video.play().then(() => {
-        console.log("Video started playing, starting recognition...");
         setIsRecognizing(true);
         setIsProcessing(false);
       }).catch((err) => {
@@ -191,25 +168,38 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
     }
 
     // Video đã sẵn sàng, bắt đầu recognition
-    console.log("Video is ready, starting recognition...");
     setIsRecognizing(true);
     setIsProcessing(false);
   }, [isProcessing, camera.id, videoReady]);
 
+  // AUTO START RECOGNITION: Tự động bắt đầu nhận diện khi video ready
+  const autoStartRecognition = useCallback(() => {
+    if (!videoReady || isRecognizing || isProcessing) {
+      return;
+    }
+
+    // FIXED: Bỏ console.log để giảm noise
+    setIsRecognizing(true);
+  }, [videoReady, isRecognizing, isProcessing, camera.name]);
+
   // Di chuyển sendFrames lên trước để tránh lỗi hoisting
   const sendFrames = useCallback(() => {
     const frameStartTime = performance.now();
-    console.log(`🔄 sendFrames called - isRecognizing: ${isRecognizing}, wsState: ${wsRef.current?.readyState}`);
-    
+    // Optimized: Remove logging for better FPS
     if (
       !isRecognizing ||
       !wsRef.current ||
       wsRef.current.readyState !== WebSocket.OPEN
     ) {
-      console.log("❌ WebSocket not ready for sending frames", {
-        isRecognizing,
-        wsConnected: wsRef.current?.readyState === WebSocket.OPEN
-      });
+      return;
+    }
+
+    // Kiểm tra xem có phải video file không
+    const isVideoFile = camera.streamUrl && (camera.streamUrl.includes('.mp4') || camera.streamUrl.includes('.avi') || camera.streamUrl.includes('.mov'));
+
+    // Nếu là video file, không cần gửi frames - Python sẽ xử lý trực tiếp từ URL
+    if (isVideoFile) {
+      // FIXED: Bỏ console.log để giảm noise
       return;
     }
 
@@ -217,69 +207,57 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
     const video = videoRef.current;
     if (!video || video.paused || video.ended) {
-      console.log("❌ Video not ready for frame capture:", { 
-        video: !!video, 
-        paused: video?.paused, 
-        ended: video?.ended,
-        readyState: video?.readyState
-      });
-      
       // Thử force play video nếu bị paused
       if (video && (video.paused || video.ended)) {
-        console.log("🔄 Attempting to force play video...");
         forcePlayVideo();
       }
-      
+
       // Don't retry here - let the main timeout handle it
       return;
     }
-    
-    console.log("✅ Video ready for frame capture");
 
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = 640; // Giảm kích thước để tăng hiệu suất
-      canvas.height = 360;
+      // Sử dụng kích thước video thực tế để tránh distortion
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 360;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      const canvasDrawTime = performance.now();
-      console.log(`Canvas draw time: ${canvasDrawTime - frameStartTime}ms`);
 
+      // Optimized: Remove performance logging for better FPS
       canvas.toBlob((blob) => {
         if (blob && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const blobStartTime = performance.now();
           blob.arrayBuffer().then((buffer) => {
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               // Kiểm tra kích thước buffer trước khi gửi
               if (buffer.byteLength > 200000) { // Tăng giới hạn lên 200KB
-                console.warn(`Frame too large: ${buffer.byteLength} bytes, skipping`);
-                return;
+                return; // Skip without logging for performance
               }
-              
+
               // Gửi frame trực tiếp qua WebSocket
               wsRef.current.send(buffer);
-              console.log(`📤 Frame sent via WebSocket: ${buffer.byteLength} bytes`);
-              console.log(`Blob to buffer and send time: ${performance.now() - blobStartTime}ms`);
             }
           }).catch((error) => {
             console.error("Error converting blob to buffer:", error);
           });
-        } else {
-          console.log("Blob or WebSocket not ready for sending");
         }
-      }, "image/jpeg", 0.8); // Tăng quality để giảm compression overhead
+      }, "image/jpeg", 0.7); // Optimized quality for full detection
 
-      console.log(`Total frame send time: ${performance.now() - frameStartTime}ms`);
+      // Fixed FPS for consistent 20 FPS - optimized for full detection
+      const frameTime = 50; // Fixed 20 FPS (1000ms / 20 = 50ms)
+
+      if (isRecognizing) {
+        sendFrameTimeoutRef.current = setTimeout(sendFrames, frameTime);
+      }
     } catch (error) {
       console.error("Error in sendFrames:", error);
-    }
 
-    if (isRecognizing) {
-      // Tối ưu FPS - đặt chính xác 20 FPS
-      sendFrameTimeoutRef.current = setTimeout(sendFrames, 20); // 50 FPS (1000/20 = 50ms)a
+      // Fallback to fixed 20 FPS on error
+      if (isRecognizing) {
+        sendFrameTimeoutRef.current = setTimeout(sendFrames, 50);
+      }
     }
-  }, [isRecognizing, forcePlayVideo]);
+  }, [isRecognizing, forcePlayVideo, camera.streamUrl]);
 
   // Function để fetch kết quả từ database
   const fetchDatabaseResults = async () => {
@@ -294,10 +272,9 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           sort_order: 'DESC'
         }
       });
-      
+
       if (response && response.success && response.data) {
         setDatabaseResults(response.data);
-        console.log('✅ Fetched database results:', response.data.length);
       } else {
         console.error('❌ Failed to fetch database results:', response);
       }
@@ -311,12 +288,12 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   // Fetch database results khi component mount và định kỳ
   useEffect(() => {
     fetchDatabaseResults();
-    
+
     // Fetch database results mỗi 2 giây để cập nhật realtime
     const interval = setInterval(() => {
       fetchDatabaseResults();
     }, 2000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -348,75 +325,39 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}`,
         `${window.location.hostname}:5002`
       ];
-      
+
       const wsHost = process.env.REACT_APP_DETECT_HOST || possibleHosts[0];
       const wsUrl = `ws://${wsHost}/recognize-ws`;
-      
-      console.log(`🔗 Attempting WebSocket connection to: ${wsUrl}`);
-      console.log(`🔄 Retry attempt: ${wsRetryCount.current}/${maxWsRetries}`);
-      
-      // Kiểm tra server health trước khi kết nối WebSocket
-      try {
-        const healthUrl = `http://${wsHost}/health`;
-        console.log(`🏥 Checking server health: ${healthUrl}`);
-        
-        const healthResponse = await fetch(healthUrl, { 
-          method: 'GET',
-          mode: 'cors',
-          timeout: 5000
-        });
-        
-        if (!healthResponse.ok) {
-          throw new Error(`Server health check failed: ${healthResponse.status}`);
-        }
-        
-        const healthData = await healthResponse.json();
-        console.log("✅ Server health check passed:", healthData);
-        
-      } catch (healthError) {
-        console.error("❌ Server health check failed:", healthError);
-        console.log("🔄 Retrying health check in 2 seconds...");
-        
-        // Retry health check
-        if (isRecognizing && wsRetryCount.current < maxWsRetries) {
-          wsRetryTimeoutRef.current = setTimeout(tryConnectWebSocket, 2000);
-          return;
-        } else {
-          console.error("🚫 Max health check retries reached");
-          setIsRecognizing(false);
-          return;
-        }
-      }
-      
+
       try {
         wsRef.current = new WebSocket(wsUrl);
-        
-        console.log(`WebSocket connection attempt time: ${performance.now() - wsStartTime}ms`);
 
         wsRef.current.onopen = () => {
-          console.log("✅ WebSocket connection established successfully!");
+
           wsRetryCount.current = 0;
-          console.log(`⏱️ WebSocket open time: ${performance.now() - wsStartTime}ms`);
-          
+
           // Gửi thông tin nguồn ngay sau khi kết nối
           const isVideoUpload = camera.id && camera.id.startsWith('upload-');
+          const isVideoFile = camera.streamUrl && (camera.streamUrl.includes('.mp4') || camera.streamUrl.includes('.avi') || camera.streamUrl.includes('.mov'));
+
           const sourceInfo = {
             type: 'source_info',
-            source_type: isVideoUpload ? 'video_upload' : 'camera',
-            video_filename: isVideoUpload ? camera.name : null,
-            camera_id: isVideoUpload ? null : camera.id,
-            camera_name: isVideoUpload ? null : camera.name
+            source_type: isVideoUpload ? 'video_upload' : (isVideoFile ? 'video_file' : 'camera'),
+            video_filename: isVideoUpload ? camera.name : (isVideoFile ? camera.name : null),
+            video_url: isVideoFile ? camera.streamUrl : null,
+            camera_id: (isVideoUpload || isVideoFile) ? null : camera.id,
+            camera_name: (isVideoUpload || isVideoFile) ? null : camera.name
           };
-          
+
           try {
             wsRef.current.send(JSON.stringify(sourceInfo));
-            console.log(`📤 Source info sent:`, sourceInfo);
+            // FIXED: Bỏ console.log để giảm noise
           } catch (error) {
             console.error("Error sending source info:", error);
           }
-          
+
           if (isRecognizing) {
-            console.log("🎬 Starting to send frames...");
+            // FIXED: Bỏ console.log để giảm noise
             // Đợi một chút trước khi bắt đầu gửi frames
             setTimeout(() => {
               if (isRecognizing && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -427,118 +368,98 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
         };
 
         wsRef.current.onmessage = (event) => {
-  const messageStartTime = performance.now();
-  console.log(`📥 WebSocket message received:`, event.data instanceof Blob ? 'Blob' : 'Text', event.data instanceof Blob ? `${event.data.size} bytes` : event.data);
-  
-  if (event.data instanceof Blob) {
-    // CRITICAL FIX: Hiển thị processed frame từ server
-    console.log(`📸 Received processed frame: ${event.data.size} bytes`);
-    
-    try {
-      // Tạo object URL từ blob
-      const imageUrl = URL.createObjectURL(event.data);
-      
-      // Tìm video element
-      const video = videoRef.current;
-      if (video) {
-        // Tạo canvas để display processed frame
-        let canvas = document.getElementById(`canvas-${camera.id}`);
-        if (!canvas) {
-          canvas = document.createElement('canvas');
-          canvas.id = `canvas-${camera.id}`;
-          canvas.style.position = 'absolute';
-          canvas.style.top = '0';
-          canvas.style.left = '0';
-          canvas.style.width = '100%';
-          canvas.style.height = '100%';
-          canvas.style.zIndex = '10';
-          canvas.style.pointerEvents = 'none';
-          video.parentElement.appendChild(canvas);
-        }
-        
-        // Load và display processed image
-        const img = new Image();
-        img.onload = function() {
-          canvas.width = img.width;
-          canvas.height = img.height;
-          
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0);
-          
-          console.log(`✅ Displayed processed frame on canvas: ${img.width}x${img.height}`);
-          
-          // Cleanup
-          URL.revokeObjectURL(imageUrl);
+          const messageStartTime = performance.now();
+
+          if (event.data instanceof Blob) {
+            // CRITICAL FIX: Hiển thị processed frame từ server
+
+            try {
+              // Tạo object URL từ blob
+              const imageUrl = URL.createObjectURL(event.data);
+
+              // Tìm video element
+              const video = videoRef.current;
+              if (video) {
+                // Tạo canvas để display processed frame
+                let canvas = document.getElementById(`canvas-${camera.id}`);
+                if (!canvas) {
+                  canvas = document.createElement('canvas');
+                  canvas.id = `canvas-${camera.id}`;
+                  canvas.style.position = 'absolute';
+                  canvas.style.top = '0';
+                  canvas.style.left = '0';
+                  canvas.style.width = '100%';
+                  canvas.style.height = '100%';
+                  canvas.style.zIndex = '10';
+                  canvas.style.pointerEvents = 'none';
+                  video.parentElement.appendChild(canvas);
+                }
+
+                // Load và display processed image
+                const img = new Image();
+                img.onload = function () {
+                  canvas.width = img.width;
+                  canvas.height = img.height;
+
+                  const ctx = canvas.getContext('2d');
+                  ctx.clearRect(0, 0, canvas.width, canvas.height);
+                  ctx.drawImage(img, 0, 0);
+
+
+                  // Cleanup
+                  URL.revokeObjectURL(imageUrl);
+                };
+
+                img.onerror = function (e) {
+                  URL.revokeObjectURL(imageUrl);
+                };
+
+                img.src = imageUrl;
+              }
+
+              // FPS counter removed - no longer needed
+
+            } catch (error) {
+              console.error('Error processing frame blob:', error);
+            }
+
+          } else {
+            // Xử lý JSON message (metadata)
+            try {
+              const data = JSON.parse(event.data);
+
+              // Xử lý heartbeat
+              if (data.type === 'heartbeat') {
+                return;
+              }
+
+              // Xử lý error message
+              if (data.type === 'error') {
+                return;
+              }
+
+              if (data.status === 'connected') {
+                return;
+              }
+
+              // Xử lý detection result metadata
+              if (data.type === 'detection_result') {
+
+
+
+
+              }
+
+            } catch (parseError) {
+              console.error("Error parsing WebSocket message:", parseError);
+            }
+          }
+
         };
-        
-        img.onerror = function(e) {
-          console.error('Error loading processed frame:', e);
-          URL.revokeObjectURL(imageUrl);
-        };
-        
-        img.src = imageUrl;
-      }
-      
-      // FPS counter removed - no longer needed
-      
-    } catch (error) {
-      console.error('Error processing frame blob:', error);
-    }
-    
-  } else {
-    // Xử lý JSON message (metadata)
-    try {
-      const data = JSON.parse(event.data);
-      
-      // Xử lý heartbeat
-      if (data.type === 'heartbeat') {
-        console.log("💓 Heartbeat received from server");
-        return;
-      }
-      
-      // Xử lý error message
-      if (data.type === 'error') {
-        console.error("❌ Server error:", data.message);
-        return;
-      }
-      
-      if (data.status === 'connected') {
-        console.log("✅ Connected to WebSocket server");
-        return;
-      }
-      
-      // Xử lý detection result metadata
-      if (data.type === 'detection_result') {
-        console.log(`📊 Detection metadata: ${data.boxes?.length || 0} boxes, ${data.ocr_results?.length || 0} OCR results`);
-        console.log(`📍 ROI: [${data.roi?.join(', ') || 'N/A'}]`);
-        console.log(`🎬 Frame ${data.frame_count}, Detection: ${data.detection_this_frame ? 'YES' : 'NO'}`);
-        
-        // Log detection details
-        if (data.boxes && data.boxes.length > 0) {
-          console.log('📦 Detected boxes:', data.boxes);
-        }
-        if (data.ocr_results && data.ocr_results.length > 0) {
-          console.log('🔤 OCR results:', data.ocr_results);
-        }
-        
-      } else {
-        console.log('📝 Other message:', data);
-      }
-      
-    } catch (parseError) {
-      console.error("Error parsing WebSocket message:", parseError);
-    }
-  }
-  
-  console.log(`Message processing time: ${performance.now() - messageStartTime}ms`);
-};
 
         wsRef.current.onerror = (error) => {
-          console.error("❌ WebSocket connection error:", error);
-          console.error(`🔗 Failed to connect to: ${wsUrl}`);
-          console.error(`🔄 This is retry ${wsRetryCount.current}/${maxWsRetries}`);
-          
+
+
           // Không tăng retry count ngay lập tức, đợi onclose
           if (wsRetryTimeoutRef.current) {
             clearTimeout(wsRetryTimeoutRef.current);
@@ -554,7 +475,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             "isRecognizing:",
             isRecognizing
           );
-          
+
           // Chỉ retry nếu đang nhận diện và không phải đóng bình thường
           if (
             isRecognizing &&
@@ -565,13 +486,11 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             if (wsRetryTimeoutRef.current) {
               clearTimeout(wsRetryTimeoutRef.current);
             }
-            
+
             // Tăng thời gian delay giữa các lần retry
             const delay = Math.min(2000 * Math.pow(2, wsRetryCount.current - 1), 10000);
-            console.log(`WebSocket closed, retrying in ${delay/1000} seconds... (${wsRetryCount.current}/${maxWsRetries})`);
             wsRetryTimeoutRef.current = setTimeout(tryConnectWebSocket, delay);
           } else if (event.code !== 1000) {
-            console.error("WebSocket connection failed permanently");
             setIsRecognizing(false);
           } else {
             console.log("WebSocket closed normally");
@@ -595,7 +514,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
     return () => {
       // Chỉ đóng WebSocket khi component unmount hoặc khi dừng recognition
       if (!isRecognizing && wsRef.current) {
-        console.log("Cleaning up WebSocket due to recognition stop");
         wsRef.current.close(1000, "Recognition stopped");
         wsRef.current = null;
       }
@@ -609,7 +527,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   // Sync external isRecognizing with internal state
   useEffect(() => {
     if (externalIsRecognizing !== undefined && externalIsRecognizing !== isRecognizing) {
-      console.log(`🔄 Syncing external state: ${externalIsRecognizing} -> ${isRecognizing}`);
       setIsRecognizing(externalIsRecognizing);
     }
   }, [externalIsRecognizing]); // Loại bỏ isRecognizing khỏi dependencies để tránh vòng lặp
@@ -617,17 +534,26 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   // Separate effect for handling external state changes
   useEffect(() => {
     if (externalIsRecognizing && !isRecognizing) {
-      console.log("🚀 External recognition started, starting internal recognition");
       setIsRecognizing(true);
     } else if (!externalIsRecognizing && isRecognizing) {
-      console.log("⏹️ External recognition stopped, stopping internal recognition");
       setIsRecognizing(false);
     }
   }, [externalIsRecognizing]); // Chỉ phụ thuộc vào externalIsRecognizing
 
+  // AUTO START RECOGNITION: Tự động bắt đầu nhận diện khi video ready
+  useEffect(() => {
+    if (videoReady && !isRecognizing && !isProcessing) {
+      // Đợi một chút để đảm bảo video đã ổn định
+      const timer = setTimeout(() => {
+        autoStartRecognition();
+      }, 1000); // Đợi 1 giây sau khi video ready
+
+      return () => clearTimeout(timer);
+    }
+  }, [videoReady, isRecognizing, isProcessing, autoStartRecognition]);
+
   // Video initialization effect (unchanged)
   useEffect(() => {
-    console.log('CameraViewer video init effect - camera:', camera);
     let hls;
     const video = videoRef.current;
 
@@ -637,7 +563,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
       const tryInitPlayer = () => {
         const startTime = performance.now();
-        console.log('Trying to init player with:', { streamUrl: camera.streamUrl, video: !!video });
         if (!camera.streamUrl || !video) return;
 
         const isHls = camera.streamUrl.includes(".m3u8");
@@ -646,7 +571,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
         if (isRtsp) {
           // RTSP stream - sử dụng FFmpeg conversion endpoint
-          console.log('RTSP stream detected, using FFmpeg conversion');
           const convertedUrl = `http://localhost:5000/api/rtsp-stream?url=${encodeURIComponent(camera.streamUrl)}`;
           video.src = convertedUrl;
           video.load();
@@ -676,7 +600,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             hls.loadSource(camera.streamUrl);
           }
           hls.attachMedia(video);
-          console.log(`HLS load/attach time: ${performance.now() - startTime}ms`);
 
           const jumpToLiveEdge = () => {
             try {
@@ -743,12 +666,10 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             }
           });
         } else if (isMp4 || video.canPlayType("video/mp4")) {
-          console.log("Loading MP4 video:", camera.streamUrl);
           if (video.src !== camera.streamUrl) {
             video.src = camera.streamUrl;
           }
           video.addEventListener("loadedmetadata", () => {
-            console.log("Video metadata loaded");
             setLoading(false);
             setVideoReady(true); // Đánh dấu video đã sẵn sàng
             if (videoRetryTimeoutRef.current) {
@@ -782,19 +703,17 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
 
     if (video) {
       video.addEventListener("timeupdate", handleTimeUpdate);
-      
+
       // Thêm event listener để theo dõi trạng thái video
       video.addEventListener("pause", () => {
-        console.log("Video paused, attempting to resume...");
         if (isRecognizing) {
           video.play().catch((err) => {
             console.error("Failed to resume video:", err);
           });
         }
       });
-      
+
       video.addEventListener("ended", () => {
-        console.log("Video ended, attempting to restart...");
         if (isRecognizing) {
           video.currentTime = 0;
           video.play().catch((err) => {
@@ -810,8 +729,8 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
       if (hls) hls.destroy();
       if (video) {
         video.removeEventListener("timeupdate", handleTimeUpdate);
-        video.removeEventListener("pause", () => {});
-        video.removeEventListener("ended", () => {});
+        video.removeEventListener("pause", () => { });
+        video.removeEventListener("ended", () => { });
         video.src = "";
         video.pause();
       }
@@ -830,32 +749,31 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
   //   setIsUploadedVideo(camera.id.startsWith("upload-"));
   // }, [camera.id]);
 
-  console.log('CameraViewer render - frameData:', frameData, 'loading:', loading, 'isRecognizing:', isRecognizing, 'videoReady:', videoReady);
-  
+
   // Ẩn số 0 có thể xuất hiện
   useEffect(() => {
     const hideZeroElements = () => {
       // Tìm và ẩn mọi element chứa số 0 ở góc dưới trái
       const allElements = document.querySelectorAll('*');
       allElements.forEach(element => {
-        if (element.textContent === '0' && 
-            element.style.position === 'absolute' && 
-            element.style.bottom === '0px' && 
-            element.style.left === '0px') {
+        if (element.textContent === '0' &&
+          element.style.position === 'absolute' &&
+          element.style.bottom === '0px' &&
+          element.style.left === '0px') {
           element.style.display = 'none';
         }
       });
     };
-    
+
     // Chạy ngay lập tức
     hideZeroElements();
-    
+
     // Chạy lại sau mỗi 100ms để đảm bảo
     const interval = setInterval(hideZeroElements, 100);
-    
+
     return () => clearInterval(interval);
   }, []);
-  
+
   return (
     <div
       style={{
@@ -946,9 +864,6 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             userSelect: "none",
             pointerEvents: "none"
           }}
-          onLoadStart={() => console.log('Video load started')}
-          onLoadedData={() => console.log('Video loaded successfully')}
-          onCanPlay={() => console.log('Video can play')}
           onError={(e) => console.error('Video error:', e)}
           onClick={() =>
             videoRef.current
@@ -956,9 +871,9 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
               .catch((err) => console.error("Lỗi phát thủ công:", err))
           }
         />
-        
+
         {/* ĐÃ LOẠI BỎ overlay kết quả nhận diện để giữ video sạch */}
-        
+
         {/* Recording Timer Overlay */}
         {recordingTimer && recordingTimer > 0 && (
           <div
@@ -992,7 +907,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
             REC {Math.floor(recordingTimer / 60)}:{(recordingTimer % 60).toString().padStart(2, '0')}
           </div>
         )}
-        
+
         {/* Realtime Detections Overlay */}
         {isRecognizing && realtimeDetections.length > 0 && (
           <div
@@ -1015,16 +930,16 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
               🔍 Realtime Detections
             </div>
             {realtimeDetections.slice(0, 3).map((detection, index) => (
-              <div 
+              <div
                 key={detection.id}
                 style={{
                   marginBottom: "6px",
                   padding: "4px 6px",
                   borderRadius: "4px",
                   backgroundColor: detection.is_whitelist_match ? "rgba(0, 255, 0, 0.2)" :
-                                 detection.is_blacklist_match ? "rgba(255, 0, 0, 0.2)" : "rgba(128, 128, 128, 0.2)",
+                    detection.is_blacklist_match ? "rgba(255, 0, 0, 0.2)" : "rgba(128, 128, 128, 0.2)",
                   border: detection.is_whitelist_match ? "1px solid #00ff00" :
-                         detection.is_blacklist_match ? "1px solid #ff0000" : "1px solid #808080",
+                    detection.is_blacklist_match ? "1px solid #ff0000" : "1px solid #808080",
                 }}
               >
                 <div style={{ fontWeight: "bold", fontSize: "14px" }}>
@@ -1032,15 +947,15 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
                 </div>
                 <div style={{ fontSize: "10px", opacity: 0.8 }}>
                   {Math.round(detection.confidence_score * 100)}% • {
-                    detection.is_whitelist_match ? '✅ Whitelist' : 
-                    detection.is_blacklist_match ? '🚨 Blacklist' : '❓ Unknown'
+                    detection.is_whitelist_match ? '✅ Whitelist' :
+                      detection.is_blacklist_match ? '🚨 Blacklist' : '❓ Unknown'
                   } • {new Date(detection.detected_at).toLocaleTimeString()}
                 </div>
               </div>
             ))}
           </div>
         )}
-        
+
         {/* Hiển thị trạng thái recognition */}
         {isRecognizing && (
           <div
@@ -1056,7 +971,9 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
               pointerEvents: "none",
             }}
           >
-            🔍 Recognition ON
+            {camera.streamUrl && (camera.streamUrl.includes('.mp4') || camera.streamUrl.includes('.avi') || camera.streamUrl.includes('.mov'))
+              ? "🎬 Auto Video Recognition"
+              : "🔍 Recognition ON"}
           </div>
         )}
       </div>
@@ -1070,7 +987,7 @@ const CameraViewer = ({ camera, actionBar, onClose, isRecognizing: externalIsRec
           onForcePlay: forcePlayVideo,  // Thêm force play function
         })}
       </div>
-      
+
       {/* Không hiển thị panel overlay để giữ video sạch */}
     </div>
   );

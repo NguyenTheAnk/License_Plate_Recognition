@@ -95,10 +95,6 @@ const getAllLocations = async (req, res) => {
             return param;
         });
 
-        console.log('WHERE clause:', whereClause);
-        console.log('Query params:', queryParams);
-        console.log('Params length:', queryParams.length);
-
         // Get total count first
         const [countResult] = await connection.execute(`
             SELECT COUNT(*) as total

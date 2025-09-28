@@ -34,7 +34,6 @@ const getAllUsers = async (req, res) => {
         const limitNum = parseInt(limit, 10) || 10;
         const offset = (pageNum - 1) * limitNum;
 
-        console.log('Pagination params:', { pageNum, limitNum, offset });
 
         let whereClause = 'WHERE 1=1';
         const params = [];

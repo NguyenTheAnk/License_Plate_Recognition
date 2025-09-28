@@ -4,6 +4,26 @@ const http = require("http");
 const path = require("path");
 const fs = require("fs");
 
+// Rate limiting for logs
+const logRateLimit = new Map();
+const shouldLog = (key, maxPerMinute = 10) => {
+  const now = Date.now();
+  const minute = Math.floor(now / 60000);
+  const logKey = `${key}_${minute}`;
+
+  if (!logRateLimit.has(logKey)) {
+    logRateLimit.set(logKey, 0);
+  }
+
+  const count = logRateLimit.get(logKey);
+  if (count >= maxPerMinute) {
+    return false;
+  }
+
+  logRateLimit.set(logKey, count + 1);
+  return true;
+};
+
 class StreamingService {
   constructor() {
     this.activeStreams = new Map(); // Map cho từng camera
@@ -16,7 +36,9 @@ class StreamingService {
     this.wss = new WebSocket.Server({ server });
 
     this.wss.on("connection", (ws) => {
-      console.log("Client connected to stream");
+      if (shouldLog("stream_ws_connect")) {
+        console.log("Client connected to stream");
+      }
       let currentCameraId = null;
 
       ws.on("message", async (message) => {
@@ -30,12 +52,16 @@ class StreamingService {
             this.stopStream(data.cameraId, ws);
           }
         } catch (error) {
-          console.error("Error parsing WebSocket message:", error);
+          if (shouldLog("stream_ws_parse_error", 5)) {
+            console.error("Error parsing WebSocket message:", error);
+          }
         }
       });
 
       ws.on("close", () => {
-        console.log("Client disconnected from stream");
+        if (shouldLog("stream_ws_disconnect")) {
+          console.log("Client disconnected from stream");
+        }
         if (currentCameraId) {
           this.stopStream(currentCameraId, ws);
         }
@@ -52,7 +78,9 @@ class StreamingService {
 
     if (streamInfo) {
       // Nếu stream đã tồn tại, thêm client mới vào danh sách
-      console.log(`Stream ${cameraId} already active, adding new client`);
+      if (shouldLog(`stream_active_${cameraId}`, 3)) {
+        console.log(`Stream ${cameraId} already active, adding new client`);
+      }
       streamInfo.clients.push(ws);
       this.activeStreams.set(cameraId, streamInfo);
 
@@ -76,14 +104,33 @@ class StreamingService {
     const rtspUrl = this.buildRtspUrl(camera);
 
     const ffmpegProcess = ffmpeg(rtspUrl)
-      .inputOptions(["-rtsp_transport", "tcp", "-re"])
-      .outputOptions(["-f", "mjpeg", "-q:v", "2", "-r", "25"]) // Tăng chất lượng và FPS
+      .inputOptions([
+        "-rtsp_transport", "tcp", // Use TCP for better stability with VLC
+        "-re", // Read input at native frame rate
+        "-timeout", "10000000", // 10 second timeout
+        "-analyzeduration", "2000000", // 2 second analysis duration
+        "-probesize", "2000000" // 2MB probe size
+      ])
+      .outputOptions([
+        "-f", "mjpeg",
+        "-q:v", "3", // Better quality
+        "-r", "15", // Moderate frame rate for stability
+        "-s", "1280x720", // HD resolution
+        "-update", "1", // Update the same image
+        "-bufsize", "64k", // Buffer size
+        "-maxrate", "1M", // Max bitrate
+        "-preset", "ultrafast" // Fast encoding
+      ]) // Tăng chất lượng và FPS
       .on("start", (cmdLine) => {
-        console.log(`Started streaming camera ${cameraId}`);
-        console.log("FFmpeg command:", cmdLine);
+        if (shouldLog(`stream_start_${cameraId}`, 3)) {
+          console.log(`Started streaming camera ${cameraId}`);
+          console.log("FFmpeg command:", cmdLine);
+        }
       })
       .on("error", (err) => {
-        console.error(`Stream error for camera ${cameraId}:`, err);
+        if (shouldLog(`stream_error_${cameraId}`, 3)) {
+          console.error(`Stream error for camera ${cameraId}:`, err);
+        }
         // Gửi lỗi đến tất cả clients
         if (this.activeStreams.has(cameraId)) {
           const streamInfo = this.activeStreams.get(cameraId);
@@ -98,7 +145,9 @@ class StreamingService {
         }
       })
       .on("end", () => {
-        console.log(`Stream ended for camera ${cameraId}`);
+        if (shouldLog(`stream_end_${cameraId}`, 3)) {
+          console.log(`Stream ended for camera ${cameraId}`);
+        }
         this.activeStreams.delete(cameraId);
       });
 
@@ -173,7 +222,7 @@ class StreamingService {
       const ffmpegProcess = ffmpeg(rtspUrl)
         .inputOptions([
           "-rtsp_transport",
-          "tcp",
+          "udp",
           "-re",
           "-fflags",
           "+nobuffer",
@@ -280,7 +329,9 @@ class StreamingService {
         }
 
         this.activeStreams.delete(cameraId);
-        console.log(`Stopped stream for camera ${cameraId}`);
+        if (shouldLog(`stream_stop_${cameraId}`, 3)) {
+          console.log(`Stopped stream for camera ${cameraId}`);
+        }
       }
     }
   }
@@ -319,10 +370,28 @@ class StreamingService {
 
   buildRtspUrl(camera) {
     if (camera.protocol === "rtsp") {
-      if (camera.username && camera.password) {
-        return `rtsp://${camera.username}:${camera.password}@${camera.host}:${camera.port}${camera.path}`;
+      // Fix VLC streaming URL (VLC often creates rtsp://:port/path)
+      let host = camera.host;
+      if (!host || host === '' || host === ':') {
+        host = 'localhost'; // Default to localhost for VLC streams
+        if (shouldLog('vlc_rtsp_fix', 3)) {
+          console.log('Fixed VLC RTSP URL - using localhost as host');
+        }
       }
-      return `rtsp://${camera.host}:${camera.port}${camera.path}`;
+
+      // Ensure port is valid
+      const port = camera.port || 8554;
+
+      // Ensure path starts with /
+      let path = camera.path || '/stream1';
+      if (!path.startsWith('/')) {
+        path = '/' + path;
+      }
+
+      if (camera.username && camera.password) {
+        return `rtsp://${camera.username}:${camera.password}@${host}:${port}${path}`;
+      }
+      return `rtsp://${host}:${port}${path}`;
     }
     return `${camera.protocol}://${camera.host}:${camera.port}${camera.path}`;
   }

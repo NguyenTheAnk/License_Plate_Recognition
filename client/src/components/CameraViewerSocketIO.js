@@ -38,17 +38,20 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
 
         if (isHls && Hls.isSupported()) {
           hls = new Hls({
-            maxBufferLength: 60,
-            maxMaxBufferLength: 120,
-            liveSyncDuration: 60,
-            liveMaxLatencyDuration: 120,
+            maxBufferLength: 30,  // Reduced for lower latency
+            maxMaxBufferLength: 60,  // Reduced for lower latency
+            liveSyncDuration: 30,  // Reduced for lower latency
+            liveMaxLatencyDuration: 60,  // Reduced for lower latency
             enableWorker: true,
-            fragLoadingTimeOut: 20000,
-            manifestLoadingTimeOut: 20000,
-            levelLoadingTimeOut: 20000,
-            nudgeOffset: 0.2,
-            maxFragLookUpTolerance: 0.3,
-            lowBufferWatchdogPeriod: 0.5,
+            fragLoadingTimeOut: 10000,  // Reduced timeout
+            manifestLoadingTimeOut: 10000,  // Reduced timeout
+            levelLoadingTimeOut: 10000,  // Reduced timeout
+            nudgeOffset: 0.1,  // Reduced nudge
+            maxFragLookUpTolerance: 0.2,  // Reduced tolerance
+            lowBufferWatchdogPeriod: 0.3,  // More frequent checks
+            backBufferLength: 10,  // Reduced back buffer
+            maxBufferSize: 60 * 1000 * 1000,  // 60MB max buffer
+            maxBufferHole: 0.1,  // Reduced buffer hole tolerance
           });
 
           if (!hls.url || hls.url !== camera.streamUrl) {
@@ -111,12 +114,10 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
             }
           });
         } else if (isMp4 || video.canPlayType("video/mp4")) {
-          console.log("Loading MP4 video:", camera.streamUrl);
           if (video.src !== camera.streamUrl) {
             video.src = camera.streamUrl;
           }
           video.addEventListener("loadedmetadata", () => {
-            console.log("Video metadata loaded:", { duration: video.duration, width: video.videoWidth, height: video.videoHeight });
             setLoading(false);
             if (videoRetryTimeoutRef.current) {
               clearTimeout(videoRetryTimeoutRef.current);
@@ -185,16 +186,37 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
   useEffect(() => {
     if (isRecognizing) {
       console.log("Connecting to WebSocket server...");
-      socketRef.current = new WebSocket("ws://localhost:5000/recognize-ws");
+      socketRef.current = new WebSocket("ws://localhost:5002/recognize-ws");
 
       socketRef.current.onopen = () => {
-        console.log("Connected to WebSocket server");
+        console.log("✅ Connected to WebSocket server");
+
+        // Gửi thông tin nguồn trước khi bắt đầu gửi frame
+        const sourceInfo = {
+          type: 'source_info',
+          camera_id: camera.id,
+          camera_name: camera.name,
+          source_type: 'camera',
+          camera_location: camera.location || 'Unknown'
+        };
+
+        console.log("📤 Sending source info:", sourceInfo);
+        socketRef.current.send(JSON.stringify(sourceInfo));
+
         if (isRecognizing) sendFrames();
+      };
+
+      socketRef.current.onerror = (error) => {
+        console.error("❌ WebSocket error:", error);
+      };
+
+      socketRef.current.onclose = (event) => {
+        console.log("🔌 WebSocket closed:", event.code, event.reason);
       };
 
       socketRef.current.onmessage = (event) => {
         console.log("Received data from server:", event.data);
-        
+
         // Check if it's binary data (processed frame)
         if (event.data instanceof Blob) {
           const reader = new FileReader();
@@ -202,7 +224,7 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
             const dataUrl = reader.result;
             setFrameData(dataUrl);
             console.log("Processed frame received and displayed");
-            
+
             // Extract plate information from frame if possible
             // This is a simple approach - in real implementation, you might want to send metadata separately
             const currentTime = new Date().toLocaleTimeString();
@@ -221,7 +243,7 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
             const dataUrl = reader.result;
             setFrameData(dataUrl);
             console.log("Processed frame received and displayed");
-            
+
             // Extract plate information from frame if possible
             const currentTime = new Date().toLocaleTimeString();
             setRecognitionResults(prev => [...prev, {
@@ -236,7 +258,7 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
           try {
             const data = JSON.parse(event.data);
             console.log("Received JSON data:", data);
-            
+
             if (data.metadata) {
               setRecognitionResults((prev) => {
                 const newResult = {
@@ -294,7 +316,7 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
     canvas.height = 540;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
+
     const canvasDrawTime = performance.now();
     console.log(`Canvas draw time: ${canvasDrawTime - frameStartTime}ms`);
 
@@ -318,7 +340,6 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
   const startRecognition = () => {
     if (isProcessing) return;
     setIsProcessing(true);
-    console.log("Starting recognition for camera:", camera.id);
     if (!camera.id || !camera.streamUrl) {
       console.error("ID camera hoặc URL stream không hợp lệ");
       alert("Không thể bắt đầu nhận diện: Thiếu ID camera hoặc URL stream.");
@@ -389,7 +410,7 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
                 </div>
               </div>
             )}
-            
+
             <video
               ref={videoRef}
               className="w-full h-full object-contain bg-black"
@@ -397,7 +418,7 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
               muted
               playsInline
             />
-            
+
             {frameData && (
               <div className="mt-4">
                 <h3 className="text-lg font-semibold mb-2 text-green-600">Kết quả nhận diện (có bounding box):</h3>
@@ -416,17 +437,16 @@ const CameraViewerSocketIO = ({ camera, actionBar, onClose }) => {
               <button
                 onClick={isRecognizing ? stopRecognition : startRecognition}
                 disabled={isProcessing}
-                className={`w-full py-2 px-4 rounded ${
-                  isRecognizing
-                    ? "bg-red-500 hover:bg-red-600 text-white"
-                    : "bg-blue-500 hover:bg-blue-600 text-white"
-                } disabled:opacity-50`}
+                className={`w-full py-2 px-4 rounded ${isRecognizing
+                  ? "bg-red-500 hover:bg-red-600 text-white"
+                  : "bg-blue-500 hover:bg-blue-600 text-white"
+                  } disabled:opacity-50`}
               >
                 {isProcessing
                   ? "Đang xử lý..."
                   : isRecognizing
-                  ? "Dừng nhận diện"
-                  : "Bắt đầu nhận diện"}
+                    ? "Dừng nhận diện"
+                    : "Bắt đầu nhận diện"}
               </button>
             </div>
 

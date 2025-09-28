@@ -20,7 +20,6 @@ const getAllWhitelist = async (req, res) => {
         const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
         const offset = (parsedPage - 1) * parsedLimit;
         
-        console.log('Pagination params:', { page, limit, offset, parsedPage, parsedLimit });
         
         // Build WHERE conditions and parameters
         let whereConditions = [];

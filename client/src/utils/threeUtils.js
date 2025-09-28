@@ -247,3 +247,6 @@ export const calculateDistance = (city1, city2, cities) => {
     const [x2, z2] = cities[city2];
     return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
 };
+
+
+

@@ -138,7 +138,6 @@ const CameraActionBar = ({
       <button 
         className="action-btn close-btn" 
         onClick={() => {
-          console.log("❌ Close button clicked for camera:", cameraName);
           onClose();
         }} 
         title="Đóng camera/video"
@@ -238,7 +237,6 @@ const CameraActionBar = ({
       <button
         className="action-btn fullscreen-btn"
         onClick={() => {
-          console.log("🔍 Fullscreen button clicked for camera:", cameraName);
           onFullscreen();
         }}
         title="Toàn màn hình"
@@ -251,7 +249,6 @@ const CameraActionBar = ({
       <button
         className="action-btn source-btn"
         onClick={() => {
-          console.log("📁 Select source button clicked for camera:", cameraName);
           if (onSelectSource) {
             onSelectSource();
           }
@@ -272,13 +269,10 @@ const CameraActionBar = ({
         }`}
         onClick={() => {
           if (isProcessing) {
-            console.log("⚠️ Recognition button clicked but processing in progress");
             return; // NGĂN NHẤN KHI ĐANG XỬ LÝ
           }
-          console.log("🔍 Recognition button clicked, isRecognizing:", isRecognizing);
           try {
             isRecognizing ? onStopRecognize() : onStartRecognize();
-            console.log("✅ Recognition action executed successfully");
           } catch (error) {
             console.error("❌ Error in recognition action:", error);
             alert("Lỗi khi thực hiện nhận diện: " + error.message);

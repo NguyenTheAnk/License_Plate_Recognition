@@ -22,7 +22,6 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 app.use('/api/cameras', require('./routes/camera')); // Sửa thành /api/cameras
 app.use('/api/videos', require('./routes/videoRoutes'));
-app.use('/api/plate-routes', require('./routes/plateRoute')); // Route cho tìm kiếm hành trình biển số xe
 // Plate recognition and uploads
 app.use('/api', require('./routes/upload'));
 app.use('/streams', express.static(path.join(__dirname, '../public/streams')));
@@ -39,51 +38,51 @@ app.set('wss', wss);
 // Thêm xử lý WebSocket cho các sự kiện khác (không phải streaming)
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-
+  
   if (url.pathname === '/recognize-ws') {
     // Recognition WebSocket - proxy to Python server
     console.log('Client connected to recognition WebSocket');
-
+    
     // Proxy to Python server
     const pythonWs = new WebSocket('ws://127.0.0.1:5002/recognize-ws');
-
+    
     pythonWs.on('open', () => {
       console.log('Connected to Python recognition server');
     });
-
+    
     pythonWs.on('message', (data) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(data);
       }
     });
-
+    
     pythonWs.on('close', () => {
       console.log('Python recognition server disconnected');
       if (ws.readyState === WebSocket.OPEN) {
         ws.close();
       }
     });
-
+    
     pythonWs.on('error', (error) => {
       console.error('Python recognition server error:', error);
       if (ws.readyState === WebSocket.OPEN) {
         ws.close();
       }
     });
-
+    
     ws.on('message', (data) => {
       if (pythonWs.readyState === WebSocket.OPEN) {
         pythonWs.send(data);
       }
     });
-
+    
     ws.on('close', () => {
       console.log('Client disconnected from recognition WebSocket');
       if (pythonWs.readyState === WebSocket.OPEN) {
         pythonWs.close();
       }
     });
-
+    
     ws.on('error', (error) => {
       console.error('Recognition WebSocket error:', error);
       if (pythonWs.readyState === WebSocket.OPEN) {

@@ -60,7 +60,7 @@ class VLCStreamService {
       "-I",
       "dummy",
       "--dummy-quiet",
-      "--rtsp-tcp", // Sử dụng TCP cho RTSP (ổn định hơn)
+      "--rtsp-udp", 
       "--network-caching=300", // Giảm cache mạng xuống 300ms
       "--sout-mux-caching=100", // Giảm cache mux xuống 100ms
       "--live-caching=300", // Giảm cache live xuống 300ms
@@ -175,7 +175,7 @@ class VLCStreamService {
       "-I",
       "dummy",
       "--dummy-quiet",
-      "--rtsp-tcp",
+      "--rtsp-udp",
       "--network-caching=100",
       rtspUrl,
       "--sout",

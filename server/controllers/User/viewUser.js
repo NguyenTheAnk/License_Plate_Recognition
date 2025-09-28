@@ -118,12 +118,9 @@ const getUserDetailedView = async (req, res) => {
         const loginOffset = Math.max(0, (loginPage - 1) * loginLimit);
         const accessOffset = Math.max(0, (accessPage - 1) * accessLimit);
 
-        console.log('[getUserDetailedView] Pagination params:', { 
-            loginPage, loginLimit, loginOffset, accessPage, accessLimit, accessOffset 
-        });
+
 
         // STEP 1: Get user basic information
-        console.log('[getUserDetailedView] Fetching user basic info...');
         const [userInfo] = await connection.execute(`
             SELECT 
                 u.id,
