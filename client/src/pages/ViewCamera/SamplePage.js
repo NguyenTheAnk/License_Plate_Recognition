@@ -101,22 +101,22 @@ const SamplePage = () => {
   const [showLogPanel, setShowLogPanel] = useState(true);
   const [logFilter, setLogFilter] = useState('all'); // 'all', 'recent', 'verified', 'unverified'
 
-    useEffect(() => {
-            const storedUser = localStorage.getItem('user');
-            if (storedUser ) {
-                try {
-                    const user = JSON.parse(storedUser); // Parse dữ liệu user
-                    const permissions = user.permissions || [];
-                    setHasViewPlate(permissions.some(permission => permission.code === 'recognition_plate.view_detail'));
-                    setHasVerifyPlate(permissions.some(permission => permission.code === 'recognition_plate.verify'));
-                    setHasDeletePlate(permissions.some(permission => permission.code === 'recognition_plate.delete'));
-                    setHasSearchPlate(permissions.some(permission => permission.code === 'recognition_plate.search'));
-  
-                } catch (error) {
-                    console.error('Error parsing permissions:', error);
-                }
-            }
-        }, []);
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser); // Parse dữ liệu user
+        const permissions = user.permissions || [];
+        setHasViewPlate(permissions.some(permission => permission.code === 'recognition_plate.view_detail'));
+        setHasVerifyPlate(permissions.some(permission => permission.code === 'recognition_plate.verify'));
+        setHasDeletePlate(permissions.some(permission => permission.code === 'recognition_plate.delete'));
+        setHasSearchPlate(permissions.some(permission => permission.code === 'recognition_plate.search'));
+
+      } catch (error) {
+        console.error('Error parsing permissions:', error);
+      }
+    }
+  }, []);
   // States cho tìm kiếm nâng cao (dựa trên WhiteList)
   const [searchFilters, setSearchFilters] = useState({
     plate_number: '',
@@ -135,15 +135,15 @@ const SamplePage = () => {
     detection_status: '',
     alert_triggered: '',
   });
-  
+
   // States cho giao diện tìm kiếm
   const [searchCameras, setSearchCameras] = useState([]);
   const [searchLocations, setSearchLocations] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(null);
-  
-  
- 
+
+
+
   const verificationStatusOptions = [
     { value: '', label: 'Tất cả', color: 'default' },
     { value: 'verified', label: 'Đã xác minh', color: 'success' },
@@ -174,11 +174,11 @@ const SamplePage = () => {
     { value: 'true', label: 'Có cảnh báo', color: 'error' },
     { value: 'false', label: 'Không có cảnh báo', color: 'success' }
   ];
-  
+
   // State cho modal xem chi tiết
   const [selectedResult, setSelectedResult] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  
+
   // State cho modal xác nhận
   const [confirmationModal, setConfirmationModal] = useState({
     open: false,
@@ -197,11 +197,11 @@ const SamplePage = () => {
     error: false,
     msg: ''
   });
-  
+
   // State cho thông báo BlackList/WhiteList (thay đổi thành Snackbar)
   const [toastNotifications, setToastNotifications] = useState([]);
   const [notifiedPlates, setNotifiedPlates] = useState(new Set());
-  
+
   // State cho loading và actions
   const [actionLoading, setActionLoading] = useState({
     verify: new Set(),
@@ -212,12 +212,16 @@ const SamplePage = () => {
   const showToastNotification = (result) => {
     const notificationId = Date.now() + Math.random();
     
+    // Lấy thông tin camera và khu vực
+    const cameraName = result.camera_name || `Camera ${result.camera_id}` || 'Camera không xác định';
+    const locationName = result.location_name || 'Khu vực không xác định';
+
     if (result.is_blacklist_match) {
       const notification = {
         id: notificationId,
         type: 'blacklist',
         plateNumber: result.plate_number,
-        message: `Phương tiện có biển số xe ${result.plate_number} đang nằm trong BlackList, không được phép vào khu vực này.`,
+        message: `🚨 CẢNH BÁO: Phương tiện có biển số xe ${result.plate_number} đang nằm trong BlackList, không được phép vào khu vực này.`,
         severity: 'error',
         details: result
       };
@@ -229,7 +233,7 @@ const SamplePage = () => {
         }
         return newNotifications;
       });
-      
+
       // Tự động xóa sau 8 giây
       setTimeout(() => {
         setToastNotifications(prev => prev.filter(n => n.id !== notificationId));
@@ -239,7 +243,7 @@ const SamplePage = () => {
         id: notificationId,
         type: 'whitelist',
         plateNumber: result.plate_number,
-        message: `Phương tiện có biển số xe ${result.plate_number} được phép vào khu vực này (có trong WhiteList).`,
+        message: `✅ CHO PHÉP: Phương tiện có biển số xe ${result.plate_number} được phép vào khu vực này (có trong WhiteList).`,
         severity: 'success',
         details: result
       };
@@ -251,7 +255,7 @@ const SamplePage = () => {
         }
         return newNotifications;
       });
-      
+
       // Tự động xóa sau 6 giây
       setTimeout(() => {
         setToastNotifications(prev => prev.filter(n => n.id !== notificationId));
@@ -262,18 +266,18 @@ const SamplePage = () => {
   const loadDetectionResults = useCallback(async () => {
     try {
       setIsLoadingDetections(true);
-      
+
       // Validate filters before sending request
       if (!validateConfidenceRange(searchFilters.confidence_min, searchFilters.confidence_max)) {
         setSearchError('Giá trị độ tin cậy tối thiểu phải nhỏ hơn hoặc bằng giá trị tối đa');
         return;
       }
-      
+
       if (!validateDateRange(searchFilters.start_date, searchFilters.end_date)) {
         setSearchError('Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc');
         return;
       }
-      
+
       const token = localStorage.getItem("token");
       const params = new URLSearchParams({
         page: currentPage.toString(),
@@ -282,12 +286,12 @@ const SamplePage = () => {
         detection_confidence_min: '0.8',  // >= 80%
         ocr_confidence_min: '0.9'         // >= 90%
       });
-      
+
       // Thêm các tham số tìm kiếm với xử lý đặc biệt cho ngày và confidence
       Object.keys(searchFilters).forEach(key => {
         if (searchFilters[key] && searchFilters[key] !== '') {
           let value = searchFilters[key];
-          
+
           // Xử lý đặc biệt cho ngày
           if (key === 'start_date') {
             value = convertDateFormat(searchFilters[key]);
@@ -298,38 +302,26 @@ const SamplePage = () => {
           else if (key === 'confidence_min' || key === 'confidence_max') {
             value = (parseFloat(searchFilters[key]) / 100).toString();
           }
-          
+
           if (value) {
             params.append(key, value);
           }
         }
       });
-      
+
       const response = await fetchDataFromAPI(`/api/plate-recognitions?${params.toString()}`, token);
       if (response.success) {
         const newResults = response.data || [];
-        console.log('Detection results data:', newResults); // Debug log
-        
-        // Debug log để kiểm tra dữ liệu location
-        if (newResults.length > 0) {
-          console.log('First result location data:', {
-            camera_id: newResults[0].camera_id,
-            location_id: newResults[0].location_id,
-            camera_name: newResults[0].camera_name,
-            location_name: newResults[0].location_name,
-            source_type: newResults[0].source_type
-          });
-        }
-        
+
         setDetectionResults(newResults);
-        
+
         // Kiểm tra và hiển thị thông báo cho kết quả mới có BlackList/WhiteList
         newResults.forEach(result => {
           if (result.is_blacklist_match || result.is_whitelist_match) {
             // Chỉ hiển thị thông báo cho kết quả mới (sau lần load cuối)
             const resultTime = new Date(result.detected_at);
             const plateKey = `${result.plate_number}_${result.is_blacklist_match ? 'blacklist' : 'whitelist'}`;
-            
+
             if (resultTime > lastNotificationTimeRef.current && !notifiedPlates.has(plateKey)) {
               setTimeout(() => {
                 showToastNotification(result);
@@ -338,16 +330,16 @@ const SamplePage = () => {
             }
           }
         });
-        
+
         // Cập nhật thời gian cuối cùng để tránh hiển thị thông báo trùng lặp
         lastNotificationTimeRef.current = new Date();
-        
+
         if (response.pagination) {
           setTotalPages(response.pagination.total_pages || 1);
           setTotalItems(response.pagination.total || 0);
         }
       }
-      
+
       // Clear any previous errors
       setSearchError(null);
     } catch (error) {
@@ -401,22 +393,22 @@ const SamplePage = () => {
     loadDetectionResults();
   };
 
- 
+
 
   // Hàm format ngày giờ cho hiển thị (dd/mm/yyyy HH:mm)
   const formatDateTimeForDisplay = (dateString) => {
     if (!dateString) return 'N/A';
-    
+
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) return 'N/A';
-      
+
       const day = date.getDate().toString().padStart(2, '0');
       const month = (date.getMonth() + 1).toString().padStart(2, '0');
       const year = date.getFullYear();
       const hours = date.getHours().toString().padStart(2, '0');
       const minutes = date.getMinutes().toString().padStart(2, '0');
-      
+
       return `${day}/${month}/${year} ${hours}:${minutes}`;
     } catch (error) {
       console.error('Error formatting date for display:', error);
@@ -428,32 +420,32 @@ const SamplePage = () => {
   // Hàm chuyển đổi datetime từ yyyy-MM-ddTHH:mm sang yyyy-MM-dd HH:mm:ss
   const convertDateFormat = (dateString) => {
     if (!dateString) return '';
-    
+
     // Kiểm tra định dạng yyyy-MM-ddTHH:mm (từ datetime-local)
     const dateRegex = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
     const match = dateString.match(dateRegex);
-    
+
     if (match) {
       const [, year, month, day, hour, minute] = match;
       // Chuyển đổi sang yyyy-MM-dd HH:mm:ss
       return `${year}-${month}-${day} ${hour}:${minute}:00`;
     }
-    
+
     return dateString; // Trả về nguyên gốc nếu không đúng định dạng
   };
 
   // Hàm chuyển đổi datetime kết thúc từ yyyy-MM-ddTHH:mm sang yyyy-MM-dd HH:mm:ss
   const convertEndDateFormat = (dateString) => {
     if (!dateString) return '';
-    
+
     const dateRegex = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
     const match = dateString.match(dateRegex);
-    
+
     if (match) {
       const [, year, month, day, hour, minute] = match;
       return `${year}-${month}-${day} ${hour}:${minute}:00`;
     }
-    
+
     return dateString;
   };
 
@@ -504,7 +496,7 @@ const SamplePage = () => {
       const [day, month, year] = datePart.split('/');
       convertedValue = `${year}-${month}-${day}T${timePart}`;
     }
-    
+
     // Cập nhật cả giá trị hiển thị và giá trị thực
     if (field === 'start_date') {
       handleFilterChange('start_date', convertedValue);
@@ -513,7 +505,7 @@ const SamplePage = () => {
       handleFilterChange('end_date', convertedValue);
       handleFilterChange('end_date_display', value);
     }
-    
+
     // Ẩn placeholder nếu có giá trị
     const input = event.target;
     if (input) {
@@ -533,10 +525,10 @@ const SamplePage = () => {
       console.log('Input field not found for field:', field);
       return;
     }
-    
+
     // Lấy vị trí của input field
     const rect = inputField.getBoundingClientRect();
-    
+
     // Tạo một input datetime-local ẩn để mở date picker
     const hiddenInput = document.createElement('input');
     hiddenInput.type = 'datetime-local';
@@ -550,18 +542,18 @@ const SamplePage = () => {
     hiddenInput.style.pointerEvents = 'none';
     hiddenInput.style.border = 'none';
     hiddenInput.style.outline = 'none';
-    
+
     // Set giá trị hiện tại nếu có
     const currentValue = field === 'start_date' ? searchFilters.start_date : searchFilters.end_date;
     if (currentValue) {
       hiddenInput.value = currentValue;
     }
-    
+
     document.body.appendChild(hiddenInput);
-    
+
     // Focus và mở date picker
     hiddenInput.focus();
-    
+
     // Sử dụng setTimeout để đảm bảo input được render trước khi gọi showPicker
     setTimeout(() => {
       try {
@@ -571,36 +563,30 @@ const SamplePage = () => {
         hiddenInput.click();
       }
     }, 10);
-    
+
     // Xử lý khi chọn ngày
     const handleChange = (e) => {
       const selectedValue = e.target.value;
-      console.log('Date selected:', selectedValue, 'for field:', field);
-      
+
       if (selectedValue) {
         // Chuyển đổi từ yyyy-mm-ddThh:mm sang dd/mm/yyyy hh:mm
         const [datePart, timePart] = selectedValue.split('T');
         const [year, month, day] = datePart.split('-');
         const displayValue = `${day}/${month}/${year} ${timePart}`;
-        
-        console.log('Updating field:', field, 'with value:', displayValue);
-        
+
+
         // Cập nhật giá trị ngay lập tức
         if (field === 'start_date') {
-          console.log('Setting start_date to:', selectedValue);
-          console.log('Setting start_date_display to:', displayValue);
           handleFilterChange('start_date', selectedValue);
           handleFilterChange('start_date_display', displayValue);
         } else if (field === 'end_date') {
-          console.log('Setting end_date to:', selectedValue);
-          console.log('Setting end_date_display to:', displayValue);
           handleFilterChange('end_date', selectedValue);
           handleFilterChange('end_date_display', displayValue);
         }
-        
+
         // Focus vào input field thực
         inputField.focus();
-        
+
         // Delay cleanup để đảm bảo state được cập nhật
         setTimeout(() => {
           cleanup();
@@ -610,19 +596,17 @@ const SamplePage = () => {
         cleanup();
       }
     };
-    
+
     // Xử lý khi blur (click ra ngoài)
     const handleBlur = () => {
-      console.log('Calendar blurred, cleaning up');
       cleanup();
     };
-    
+
     // Xử lý khi input bị hủy
     const handleCancel = () => {
-      console.log('Calendar cancelled, cleaning up');
       cleanup();
     };
-    
+
     // Cleanup function
     const cleanup = () => {
       try {
@@ -633,18 +617,17 @@ const SamplePage = () => {
         if (document.body.contains(hiddenInput)) {
           document.body.removeChild(hiddenInput);
         }
-        console.log('Calendar cleaned up');
       } catch (error) {
         console.log('Error during cleanup:', error);
       }
     };
-    
+
     // Thêm event listeners
     hiddenInput.addEventListener('change', handleChange);
     hiddenInput.addEventListener('input', handleChange);
     hiddenInput.addEventListener('blur', handleBlur);
     hiddenInput.addEventListener('cancel', handleCancel);
-    
+
     // Auto cleanup sau 10 giây
     setTimeout(() => {
       cleanup();
@@ -657,14 +640,14 @@ const SamplePage = () => {
     const updatePlaceholderVisibility = () => {
       const startDateInput = document.querySelector('input[placeholder="dd/mm/yyyy hh:mm"]');
       const endDateInput = document.querySelectorAll('input[placeholder="dd/mm/yyyy hh:mm"]')[1];
-      
+
       if (startDateInput) {
         const startPlaceholder = startDateInput.parentElement.querySelector('.placeholder-text');
         if (startPlaceholder) {
           startPlaceholder.style.display = !startDateInput.value ? 'block' : 'none';
         }
       }
-      
+
       if (endDateInput) {
         const endPlaceholder = endDateInput.parentElement.querySelector('.placeholder-text');
         if (endPlaceholder) {
@@ -675,10 +658,10 @@ const SamplePage = () => {
 
     // Chạy ngay lập tức
     updatePlaceholderVisibility();
-    
+
     // Chạy lại sau khi component render xong
     const timeoutId = setTimeout(updatePlaceholderVisibility, 50);
-    
+
     return () => clearTimeout(timeoutId);
   }, [searchFilters.start_date, searchFilters.end_date]);
 
@@ -687,14 +670,14 @@ const SamplePage = () => {
     const handleInputChange = () => {
       const startDateInput = document.querySelector('input[placeholder="dd/mm/yyyy hh:mm"]');
       const endDateInput = document.querySelectorAll('input[placeholder="dd/mm/yyyy hh:mm"]')[1];
-      
+
       if (startDateInput) {
         const startPlaceholder = startDateInput.parentElement.querySelector('.placeholder-text');
         if (startPlaceholder) {
           startPlaceholder.style.display = !startDateInput.value ? 'block' : 'none';
         }
       }
-      
+
       if (endDateInput) {
         const endPlaceholder = endDateInput.parentElement.querySelector('.placeholder-text');
         if (endPlaceholder) {
@@ -706,12 +689,12 @@ const SamplePage = () => {
     // Thêm event listeners
     const startDateInput = document.querySelector('input[type="datetime-local"]');
     const endDateInput = document.querySelectorAll('input[type="datetime-local"]')[1];
-    
+
     if (startDateInput) {
       startDateInput.addEventListener('input', handleInputChange);
       startDateInput.addEventListener('change', handleInputChange);
     }
-    
+
     if (endDateInput) {
       endDateInput.addEventListener('input', handleInputChange);
       endDateInput.addEventListener('change', handleInputChange);
@@ -755,26 +738,25 @@ const SamplePage = () => {
       delete window.startVideoStream;
     };
   }, [videos]);
-const getRelativeTime = (dateString) => {
-  const now = new Date();
-  const date = new Date(dateString);
-  const diffMs = now - date;
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  
-  if (diffMins < 1) return 'Vừa xong';
-  if (diffMins < 60) return `${diffMins} phút trước`;
-  if (diffHours < 24) return `${diffHours} giờ trước`;
-  if (diffDays < 7) return `${diffDays} ngày trước`;
-  return `${Math.floor(diffDays / 7)} tuần trước`;
-};
+  const getRelativeTime = (dateString) => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Vừa xong';
+    if (diffMins < 60) return `${diffMins} phút trước`;
+    if (diffHours < 24) return `${diffHours} giờ trước`;
+    if (diffDays < 7) return `${diffDays} ngày trước`;
+    return `${Math.floor(diffDays / 7)} tuần trước`;
+  };
 
 
-useEffect(() => {
+  useEffect(() => {
     // Tạo global function để CameraViewer có thể gọi
     window.refreshDetectionResults = () => {
-      console.log("🔄 Refreshing detection results...");
       loadDetectionResults();
     };
 
@@ -808,10 +790,9 @@ useEffect(() => {
   // Auto refresh function - chỉ refresh khi có sự kiện từ CameraViewer
   const handleAutoRefresh = useCallback(async () => {
     if (isPolling || isLoadingDetections) return;
-    
+
     setIsPolling(true);
     try {
-      console.log("🔄 Auto refresh triggered by new detection...");
       await loadDetectionResults();
     } catch (error) {
       console.error("Error in auto refresh:", error);
@@ -823,7 +804,7 @@ useEffect(() => {
   // Tạo global function để CameraViewer có thể gọi
   useEffect(() => {
     window.refreshDetectionResults = handleAutoRefresh;
-    
+
     return () => {
       delete window.refreshDetectionResults;
     };
@@ -833,14 +814,14 @@ useEffect(() => {
   useEffect(() => {
     const cleanupInterval = setInterval(() => {
       // Xóa thông báo cũ hơn 2 phút
-      setToastNotifications(prev => 
+      setToastNotifications(prev =>
         prev.filter(notification => {
           const notificationTime = new Date(notification.details?.detected_at || 0);
           const now = new Date();
           return (now - notificationTime) < 2 * 60 * 1000; // 2 phút
         })
       );
-      
+
       // Reset danh sách biển số đã thông báo để tránh tích lũy
       setNotifiedPlates(new Set());
     }, 30000); // Cleanup mỗi 30 giây
@@ -852,7 +833,6 @@ useEffect(() => {
   useEffect(() => {
     const pollingInterval = setInterval(() => {
       if (!isLoadingDetections && !isPolling) {
-        console.log("🔄 Auto polling refresh...");
         handleAutoRefresh();
       }
     }, 3000); // Polling mỗi 3 giây
@@ -867,7 +847,7 @@ useEffect(() => {
   // Hàm format thời gian cho log - hiển thị chi tiết dd/mm/yyyy hh:mm:ss
   const formatLogTime = (timestamp) => {
     const time = new Date(timestamp);
-    
+
     // Format theo định dạng dd/mm/yyyy hh:mm:ss
     const day = time.getDate().toString().padStart(2, '0');
     const month = (time.getMonth() + 1).toString().padStart(2, '0');
@@ -875,14 +855,14 @@ useEffect(() => {
     const hours = time.getHours().toString().padStart(2, '0');
     const minutes = time.getMinutes().toString().padStart(2, '0');
     const seconds = time.getSeconds().toString().padStart(2, '0');
-    
+
     return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
   };
 
   // Hàm lọc log entries
   const getFilteredLogEntries = () => {
     let filtered = logEntries;
-    
+
     switch (logFilter) {
       case 'recent':
         filtered = logEntries.filter(entry => {
@@ -899,7 +879,7 @@ useEffect(() => {
       default:
         filtered = logEntries;
     }
-    
+
     return filtered;
   };
 
@@ -907,26 +887,22 @@ useEffect(() => {
   const loadSearchData = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
-      
+
       // Load cameras
       const camerasResponse = await fetchDataFromAPI('/api/cameras', token);
-      console.log('Cameras response:', camerasResponse);
       if (camerasResponse && camerasResponse.success) {
         const camerasData = camerasResponse.data?.cameras || [];
         setSearchCameras(Array.isArray(camerasData) ? camerasData : []);
-        console.log('Loaded search cameras:', camerasData);
       } else {
         setSearchCameras([]);
         console.warn('Failed to load cameras:', camerasResponse);
       }
-      
+
       // Load locations
       const locationsResponse = await fetchDataFromAPI('/api/location', token);
-      console.log('Locations response:', locationsResponse);
       if (locationsResponse && locationsResponse.success) {
         const locationsData = locationsResponse.data?.locations || [];
         setSearchLocations(Array.isArray(locationsData) ? locationsData : []);
-        console.log('Loaded search locations:', locationsData);
       } else {
         setSearchLocations([]);
         console.warn('Failed to load locations:', locationsResponse);
@@ -948,13 +924,13 @@ useEffect(() => {
     if (detectionResults.length > 0) {
       const now = new Date();
       const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000); // 10 phút trước
-      
+
       // Lọc chỉ những detection trong 10 phút gần đây
       const recentDetections = detectionResults.filter(detection => {
         const detectionTime = new Date(detection.detected_at || detection.created_at || new Date());
         return detectionTime >= tenMinutesAgo;
       });
-      
+
       const newLogEntries = recentDetections.map(detection => ({
         id: `log-${detection.id}`,
         timestamp: new Date(detection.detected_at || detection.created_at || new Date()),
@@ -970,17 +946,17 @@ useEffect(() => {
       setLogEntries(prev => {
         const existingIds = new Set(prev.map(entry => entry.id));
         const uniqueNewEntries = newLogEntries.filter(entry => !existingIds.has(entry.id));
-        
+
         // Sắp xếp theo thời gian mới nhất
         const allEntries = [...uniqueNewEntries, ...prev];
         const sortedEntries = allEntries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        
+
         // Lọc lại để chỉ giữ những entries trong 10 phút gần đây
         const filteredEntries = sortedEntries.filter(entry => {
           const entryTime = new Date(entry.timestamp);
           return entryTime >= tenMinutesAgo;
         });
-        
+
         return filteredEntries.slice(0, 20); // Giữ tối đa 20 entries
       });
     }
@@ -991,13 +967,13 @@ useEffect(() => {
     const cleanupInterval = setInterval(() => {
       const now = new Date();
       const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
-      
+
       setLogEntries(prev => {
         const filteredEntries = prev.filter(entry => {
           const entryTime = new Date(entry.timestamp);
           return entryTime >= tenMinutesAgo;
         });
-        
+
         return filteredEntries;
       });
     }, 30000); // Cleanup mỗi 30 giây
@@ -1018,15 +994,11 @@ useEffect(() => {
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      console.log("Fetching cameras with token:", token ? "Present" : "Missing");
-      
+
       const data = await fetchDataFromAPI("/api/cameras/streams/all", token);
-      console.log("API Response:", data);
-      
+
       const cameraList = data.data?.cameras || [];
-      console.log("Camera list:", cameraList);
-      console.log("Number of cameras:", cameraList.length);
-      
+
       camerasRef.current = cameraList;
       setCameras(cameraList);
       const positions = cameraList.map((camera) => ({
@@ -1048,32 +1020,22 @@ useEffect(() => {
     }
   };
 
-  
+
   const handleCameraClick = async (cameraId) => {
     if (showConfig || isLoadingStream.current) return;
 
-    console.log("handleCameraClick called with cameraId:", cameraId);
-    console.log("camerasRef.current:", camerasRef.current);
-    console.log("camerasRef.current.length:", camerasRef.current.length);
-
     // Convert cameraId to number for comparison
     const numericCameraId = parseInt(cameraId);
-    console.log("Numeric camera ID:", numericCameraId);
-    
+
     const camera = camerasRef.current.find((c) => c.id === numericCameraId);
-    console.log("Found camera:", camera);
 
     if (!camera) {
-      console.log("Camera not found, fetching cameras...");
       await fetchCameras();
-      console.log("After fetch, camerasRef.current:", camerasRef.current);
-      console.log("After fetch, camerasRef.current.length:", camerasRef.current.length);
-      
+
       const refreshedCamera = camerasRef.current.find(
         (c) => c.id === numericCameraId
       );
-      console.log("Refreshed camera:", refreshedCamera);
-      
+
       if (!refreshedCamera) {
         console.log("Still no camera found after refresh");
         alert(`Không tìm thấy camera ${cameraId}`);
@@ -1089,7 +1051,7 @@ useEffect(() => {
     }
 
     const streamId = `${numericCameraId}-${Date.now()}`;
-    
+
     // Lưu thông tin camera riêng cho stream này
     if (selectedCamera) {
       setStreamCameraInfo(prev => ({
@@ -1147,7 +1109,7 @@ useEffect(() => {
       delete newSizes[streamId];
       return newSizes;
     });
-    
+
     // Reset camera info nếu không còn stream nào
     if (selectedStreams.length <= 1) {
       setSelectedCameraInfo(null);
@@ -1159,7 +1121,7 @@ useEffect(() => {
       delete newVideos[streamId];
       return newVideos;
     });
-    
+
     // Xóa thông tin camera cho stream này
     setStreamCameraInfo((prev) => {
       const newStreamCameraInfo = { ...prev };
@@ -1171,8 +1133,7 @@ useEffect(() => {
 
   // Hàm xử lý bắt đầu ghi hình
   const handleStartRecording = (streamId) => {
-    console.log("🎥 Starting recording for stream:", streamId);
-    
+
     try {
       const videoElement = document.getElementById(`video-${streamId}`);
       if (!videoElement) {
@@ -1192,9 +1153,9 @@ useEffect(() => {
       const ctx = canvas.getContext('2d');
       canvas.width = videoElement.videoWidth || 640;
       canvas.height = videoElement.videoHeight || 480;
-      
+
       const stream = canvas.captureStream(30); // 30 FPS
-      
+
       // Kiểm tra browser có hỗ trợ MediaRecorder không
       if (!window.MediaRecorder) {
         alert("Trình duyệt không hỗ trợ ghi hình. Vui lòng sử dụng Chrome, Firefox hoặc Edge mới nhất.");
@@ -1218,7 +1179,7 @@ useEffect(() => {
       });
 
       const chunks = [];
-      
+
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           chunks.push(event.data);
@@ -1229,7 +1190,7 @@ useEffect(() => {
         const fileExtension = mimeType.includes('mp4') ? 'mp4' : 'webm';
         const blob = new Blob(chunks, { type: mimeType });
         const url = URL.createObjectURL(blob);
-        
+
         // Tạo link download
         const a = document.createElement('a');
         a.href = url;
@@ -1238,13 +1199,12 @@ useEffect(() => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
-        console.log("✅ Recording saved successfully");
+
       };
 
       // Bắt đầu ghi hình
       mediaRecorder.start(1000); // Ghi mỗi 1 giây
-      
+
       // Bắt đầu timer ghi hình
       const startTime = Date.now();
       const timerInterval = setInterval(() => {
@@ -1256,23 +1216,22 @@ useEffect(() => {
       }, 1000);
 
       // Lưu MediaRecorder vào state để có thể dừng sau
-      setRecording((prev) => ({ 
-        ...prev, 
-        [streamId]: { 
-          isRecording: true, 
+      setRecording((prev) => ({
+        ...prev,
+        [streamId]: {
+          isRecording: true,
           mediaRecorder,
           canvas,
           ctx,
           videoElement,
           interval: setInterval(() => {
             ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-          }, 1000/30), // 30 FPS
+          }, 1000 / 30), // 30 FPS
           timerInterval
         }
       }));
 
-      console.log("✅ Recording started successfully");
-      
+
     } catch (error) {
       console.error("❌ Error starting recording:", error);
       alert("Lỗi khi bắt đầu ghi hình: " + error.message);
@@ -1281,8 +1240,7 @@ useEffect(() => {
 
   // Hàm xử lý dừng ghi hình
   const handleStopRecording = (streamId) => {
-    console.log("🛑 Stopping recording for stream:", streamId);
-    
+
     try {
       const recordingData = recording[streamId];
       if (!recordingData || !recordingData.mediaRecorder) {
@@ -1324,8 +1282,7 @@ useEffect(() => {
         return newState;
       });
 
-      console.log("✅ Recording stopped successfully");
-      
+
     } catch (error) {
       console.error("❌ Error stopping recording:", error);
       alert("Lỗi khi dừng ghi hình: " + error.message);
@@ -1334,8 +1291,7 @@ useEffect(() => {
 
   // Hàm xử lý chụp ảnh
   const handleSnapshot = (streamId) => {
-    console.log("📸 Taking snapshot for stream:", streamId);
-    
+
     try {
       const videoElement = document.getElementById(`video-${streamId}`);
       if (!videoElement) {
@@ -1349,10 +1305,10 @@ useEffect(() => {
       const ctx = canvas.getContext('2d');
       canvas.width = videoElement.videoWidth || 640;
       canvas.height = videoElement.videoHeight || 480;
-      
+
       // Vẽ frame hiện tại lên canvas
       ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-      
+
       // Tạo blob và download
       canvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
@@ -1363,10 +1319,9 @@ useEffect(() => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
-        console.log("✅ Snapshot saved successfully");
+
       }, 'image/png');
-      
+
     } catch (error) {
       console.error("❌ Error taking snapshot:", error);
       alert("Lỗi khi chụp ảnh: " + error.message);
@@ -1375,8 +1330,7 @@ useEffect(() => {
 
   // Hàm xử lý toggle mute
   const handleToggleMute = (streamId) => {
-    console.log("🔇 Toggling mute for stream:", streamId);
-    
+
     try {
       const videoElement = document.getElementById(`video-${streamId}`);
       if (!videoElement) {
@@ -1386,14 +1340,13 @@ useEffect(() => {
 
       const newMutedState = !muted[streamId];
       videoElement.muted = newMutedState;
-      
+
       setMuted((prev) => ({
         ...prev,
         [streamId]: newMutedState
       }));
 
-      console.log("✅ Mute toggled successfully:", newMutedState);
-      
+
     } catch (error) {
       console.error("❌ Error toggling mute:", error);
       alert("Lỗi khi thay đổi âm thanh: " + error.message);
@@ -1402,8 +1355,7 @@ useEffect(() => {
 
   // Hàm xử lý play/pause
   const handlePlayPause = (streamId) => {
-    console.log("⏯️ Toggling play/pause for stream:", streamId);
-    
+
     try {
       const videoElement = document.getElementById(`video-${streamId}`);
       if (!videoElement) {
@@ -1412,20 +1364,18 @@ useEffect(() => {
       }
 
       const newPlayingState = videoElement.paused;
-      
+
       if (newPlayingState) {
         videoElement.play();
       } else {
         videoElement.pause();
       }
-      
+
       setPlaying((prev) => ({
         ...prev,
         [streamId]: !newPlayingState
       }));
 
-      console.log("✅ Play/pause toggled successfully:", !newPlayingState);
-      
     } catch (error) {
       console.error("❌ Error toggling play/pause:", error);
       alert("Lỗi khi phát/tạm dừng video: " + error.message);
@@ -1434,15 +1384,14 @@ useEffect(() => {
 
   // Hàm xử lý cài đặt chất lượng
   const handleQualitySettings = (streamId, quality) => {
-    console.log("⚙️ Changing quality for stream:", streamId, "to:", quality);
-    
+
     try {
       const qualities = {
         'low': { width: 640, height: 360, label: 'Low (360p)' },
         'medium': { width: 1280, height: 720, label: 'Medium (720p)' },
         'high': { width: 1920, height: 1080, label: 'High (1080p)' }
       };
-      
+
       const selectedQuality = qualities[quality];
       if (!selectedQuality) {
         console.error("Invalid quality option:", quality);
@@ -1458,12 +1407,11 @@ useEffect(() => {
       // Lưu thông tin chất lượng vào localStorage để giữ khi reload
       localStorage.setItem(`quality_${streamId}`, quality);
 
-      console.log("✅ Quality settings applied:", selectedQuality);
-      
+
       // TODO: Implement actual quality change logic here
       // Có thể cần gọi API để thay đổi stream quality
       // Hiện tại chỉ lưu preference, không thay đổi stream thực tế
-      
+
     } catch (error) {
       console.error("❌ Error changing quality:", error);
       alert("Lỗi khi thay đổi chất lượng: " + error.message);
@@ -1511,20 +1459,17 @@ useEffect(() => {
     document.addEventListener("mouseup", onMouseUp);
   };
 
-  
+
 
   // Hàm xử lý chọn nguồn video từ nút trong CameraActionBar
   const handleSelectSource = (streamId) => {
-    console.log("📁 Select source button clicked for stream:", streamId);
-    console.log("📁 Current uploadedVideos:", uploadedVideos);
-    console.log("📁 Current rtspStreams:", rtspStreams);
-    
+
     // Tạo input file ẩn để chọn video
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'video/*';
     input.style.display = 'none';
-    
+
     input.onchange = async (event) => {
       const file = event.target.files[0];
       if (!file) return;
@@ -1542,25 +1487,27 @@ useEffect(() => {
             headers: { "Content-Type": "multipart/form-data" },
           }
         );
-        
+
         if (response.success) {
           const fullUrl = `${window.location.origin}${response.data.url}`;
-          
+
           // Cập nhật video cho stream hiện tại
+          const cameraId = parseInt(streamId.split("-")[1]);
           setUploadedVideos((prev) => ({
             ...prev,
             [streamId]: {
               url: fullUrl,
               name: file.name,
+              cameraId: cameraId, // Thêm cameraId để CameraViewer có thể sử dụng
             },
           }));
-          
+
           // Lưu thông tin camera cho video upload (giữ nguyên camera gốc của stream này)
           // Không cập nhật từ selectedCameraInfo để tránh thay đổi tên camera của video khác
           if (!streamCameraInfo[streamId]) {
             // Chỉ lưu thông tin camera nếu stream này chưa có
-            const cameraId = streamId.split("-")[1];
-            const defaultCamera = cameras.find((c) => c.id === parseInt(cameraId));
+            const cameraId = parseInt(streamId.split("-")[1]);
+            const defaultCamera = cameras.find((c) => c.id === cameraId);
             if (defaultCamera) {
               setStreamCameraInfo(prev => ({
                 ...prev,
@@ -1568,7 +1515,7 @@ useEffect(() => {
               }));
             }
           }
-          
+
           // Xóa rtspStreams cho streamId này để tránh xung đột
           if (rtspStreams[streamId]) {
             setRtspStreams((prev) => {
@@ -1577,28 +1524,22 @@ useEffect(() => {
               return newRtspStreams;
             });
           }
-          
+
           // Nếu stream chưa được chọn, thêm vào danh sách
           if (!selectedStreams.includes(streamId)) {
             setSelectedStreams((prev) => [...prev, streamId]);
           }
-          
+
           setCameraSizes((prev) => ({
             ...prev,
             [streamId]: { width: 400, height: 250 },
           }));
-          
-          console.log("✅ Video uploaded and will play in stream:", streamId);
-          console.log("📹 Updated streamInfo:", {
-            streamId,
-            url: fullUrl,
-            name: file.name,
-            uploadedVideos: uploadedVideos[streamId]
-          });
-          
+
+
+
           // Video sẽ tự động phát thông qua CameraViewer component
           // khi streamUrl được cập nhật trong state
-          
+
         } else {
           console.error("❌ Video upload failed:", response.message);
           alert("Tải video thất bại: " + (response.message || "Lỗi không xác định"));
@@ -1607,11 +1548,11 @@ useEffect(() => {
         console.error("❌ Error uploading video:", error);
         alert("Tải video thất bại: " + (error.message || "Lỗi không xác định"));
       }
-      
+
       // Cleanup
       document.body.removeChild(input);
     };
-    
+
     // Thêm input vào DOM và trigger click
     document.body.appendChild(input);
     input.click();
@@ -1651,18 +1592,17 @@ useEffect(() => {
   }
 
   const handleViewDetails = async (result) => {
-    console.log("Viewing details for result:", result);
-    
+
     // Thêm loading state
     setActionLoading(prev => ({
       ...prev,
       view: new Set([...prev.view, result.id])
     }));
-    
+
     try {
       // Simulate loading delay for better UX
       await new Promise(resolve => setTimeout(resolve, 300));
-      
+
       setSelectedResult(result);
       setShowDetailsModal(true);
     } finally {
@@ -1685,7 +1625,7 @@ useEffect(() => {
         message: 'Bạn có chắc chắn muốn xác minh biển số này không?',
         details: [
           `🚗 Biển số: ${result.plate_number || 'N/A'}`,
-          result.source_type === 'video_upload' 
+          result.source_type === 'video_upload'
             ? `🎬 Video: ${result.video_filename || 'Video Upload'}`
             : `📹 Camera: ${result.camera_name || `Camera ${result.camera_id}` || 'N/A'}`,
           `🕐 Thời gian: ${result.detected_at ? formatDateTimeForDisplay(result.detected_at) : 'N/A'}`,
@@ -1741,7 +1681,7 @@ useEffect(() => {
   // Hàm thực hiện xác minh
   const performVerify = async (resultId) => {
     setConfirmationModal(prev => ({ ...prev, loading: true }));
-    
+
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(`/api/plate-detections/verify/${resultId}`, {
@@ -1752,19 +1692,19 @@ useEffect(() => {
         },
         body: JSON.stringify({ is_verified: true })
       });
-      
+
       const data = await response.json();
-      
+
       if (data.success) {
         // Cập nhật trạng thái local ngay lập tức
-        setDetectionResults(prev => 
-          prev.map(result => 
-            result.id === resultId 
+        setDetectionResults(prev =>
+          prev.map(result =>
+            result.id === resultId
               ? { ...result, is_verified: true, verification_status: 'verified' }
               : result
           )
         );
-        
+
         // Đóng modal và hiển thị thông báo thành công
         closeConfirmationModal();
         showAlert("Xác minh thành công! Biển số đã được xác minh và cập nhật trong hệ thống.", false);
@@ -1790,9 +1730,9 @@ useEffect(() => {
   // Hàm thực hiện xóa
   const performDelete = async (resultId) => {
     setConfirmationModal(prev => ({ ...prev, loading: true }));
-    
+
     try {
-      const token = localStorage.getItem("token"); 
+      const token = localStorage.getItem("token");
       const response = await fetch(`/api/plate-detections/delete/${resultId}`, {
         method: 'DELETE',
         headers: {
@@ -1800,14 +1740,14 @@ useEffect(() => {
           'Content-Type': 'application/json'
         }
       });
-      
+
       const data = await response.json();
-      
+
       if (data.success) {
         // Cập nhật danh sách local ngay lập tức
         setDetectionResults(prev => prev.filter(result => result.id !== resultId));
         setTotalItems(prev => prev - 1);
-        
+
         // Đóng modal và hiển thị thông báo thành công
         closeConfirmationModal();
         showAlert("Xóa thành công! Kết quả nhận diện đã được xóa khỏi hệ thống.", false);
@@ -1831,14 +1771,14 @@ useEffect(() => {
   };
 
   return (
-    <Box sx={{ 
+    <Box sx={{
       minHeight: '100vh',
       backgroundColor: '#f5f5f5',
       p: 2
     }}>
       {/* CSS để hiển thị datetime theo định dạng dd/MM/yyyy HH:mm */}
       <style>
-  {`
+        {`
     /* Ẩn số 0 có thể xuất hiện từ video player - chỉ trong video container */
     .video-container video::-webkit-media-controls-timeline {
       display: none !important;
@@ -1941,9 +1881,9 @@ useEffect(() => {
       }
     }
   `}
-</style>
+      </style>
       {/* Header */}
-      <Card sx={{ 
+      <Card sx={{
         background: 'white',
         borderRadius: 3,
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
@@ -1953,7 +1893,7 @@ useEffect(() => {
         <CardContent>
           <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
             <Box>
-              <Typography variant="h4" component="h1" sx={{ 
+              <Typography variant="h4" component="h1" sx={{
                 fontWeight: 700,
                 color: '#1976d2',
                 mb: 1
@@ -1965,13 +1905,13 @@ useEffect(() => {
                 Theo dõi camera trực tiếp và phát hiện biển số xe tự động
               </Typography>
             </Box>
-            
+
             <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
               <Button
                 variant="outlined"
                 startIcon={<ClearIcon />}
                 onClick={() => setSelectedStreams([])}
-                sx={{ 
+                sx={{
                   borderRadius: 2,
                   textTransform: 'none',
                   fontWeight: 600
@@ -1979,13 +1919,13 @@ useEffect(() => {
               >
                 Xóa tất cả
               </Button>
-             
+
             </Box>
           </Box>
         </CardContent>
       </Card>
 
-      <Card sx={{ 
+      <Card sx={{
         background: 'white',
         borderRadius: 3,
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
@@ -1993,9 +1933,9 @@ useEffect(() => {
         mb: 3,
         minHeight: '400px'
       }}>
-        <Box sx={{ 
-          backgroundColor: '#1976d2', 
-          color: 'white', 
+        <Box sx={{
+          backgroundColor: '#1976d2',
+          color: 'white',
           p: 2,
           borderRadius: '12px 12px 0 0'
         }}>
@@ -2004,46 +1944,35 @@ useEffect(() => {
             Hiển thị Camera và Video ({selectedStreams.length})
           </Typography>
         </Box>
-        
+
         <CardContent sx={{ p: 3 }}>
-        {selectedStreams.length > 0 ? (
+          {selectedStreams.length > 0 ? (
             <Grid container spacing={2}>
               {selectedStreams.map((streamId) => {
                 // Ưu tiên uploadedVideos nếu có, sau đó mới đến rtspStreams
                 const streamInfo = uploadedVideos[streamId] || rtspStreams[streamId];
-            if (!streamInfo) return null;
+                if (!streamInfo) return null;
 
-            const isUploadedVideo = streamId.startsWith("upload-") || !!uploadedVideos[streamId];
-            const cameraId = streamInfo.cameraId || streamId.split("-")[1];
-            
-            // Sử dụng thông tin camera riêng cho từng stream
-            const streamCamera = streamCameraInfo[streamId];
-            const originalCamera = streamCamera || cameras.find((c) => c.id === cameraId);
-            const camera = originalCamera || {
-              id: cameraId,
-              name: `Camera ${cameraId}`,
-            };
-            
-            // Luôn giữ tên camera gốc đã chọn cho stream này
-            const originalCameraName = streamCamera ? streamCamera.name : (originalCamera ? originalCamera.name : `Camera ${cameraId}`);
-            
-            // Debug log để kiểm tra camera
-            console.log('Camera debug:', {
-              streamId,
-              streamInfo,
-              cameraId,
-              camera,
-              streamCamera,
-              originalCameraName,
-              isUploadedVideo,
-              uploadedVideos: uploadedVideos[streamId],
-              rtspStreams: rtspStreams[streamId]
-            });
+                const isUploadedVideo = streamId.startsWith("upload-") || !!uploadedVideos[streamId];
+                const cameraId = streamInfo.cameraId || parseInt(streamId.split("-")[1]);
+
+                // Sử dụng thông tin camera riêng cho từng stream
+                const streamCamera = streamCameraInfo[streamId];
+                const originalCamera = streamCamera || cameras.find((c) => c.id === cameraId);
+                const camera = originalCamera || {
+                  id: cameraId,
+                  name: `Camera ${cameraId}`,
+                };
+
+                // Luôn giữ tên camera gốc đã chọn cho stream này
+                const originalCameraName = streamCamera ? streamCamera.name : (originalCamera ? originalCamera.name : `Camera ${cameraId}`);
+
+
                 const size = cameraSizes[streamId] || { width: 400, height: 250 };
 
-            return (
+                return (
                   <Grid item xs={12} sm={6} md={4} key={streamId}>
-                    <Card sx={{ 
+                    <Card sx={{
                       borderRadius: 2,
                       overflow: 'hidden',
                       border: '1px solid #e0e0e0',
@@ -2057,70 +1986,73 @@ useEffect(() => {
                       }
                     }}>
                       <Box
-                ref={(el) => (resizeRefs.current[streamId] = el)}
-                        sx={{ 
+                        ref={(el) => (resizeRefs.current[streamId] = el)}
+                        sx={{
                           position: 'relative',
                           flex: 1,
                           display: 'flex',
                           flexDirection: 'column',
                           minHeight: 0 // Quan trọng để flex hoạt động đúng
                         }}
-                >
-                  <CameraViewer
-                    camera={{
-                      id: streamId,
-                      name: isUploadedVideo
-                        ? uploadedVideos[streamId].name
-                        : `${camera.name} (Stream ${streamId.split("-")[1]})`,
-                      streamUrl: streamInfo.url,
-                      isUploadedVideo: isUploadedVideo,
-                    }}
-                    actionBar={({
-                      startRecognition,
-                      stopRecognition,
-                      isRecognizing,
-                      isProcessing,
-                      onForcePlay,
-                    }) => (
-                      <CameraActionBar
-                        cameraName={originalCameraName}
-                        cameraId={cameraId}
-                        onFullscreen={() => {
-                          const video = document.getElementById(`video-${streamId}`);
-                          if (video && video.requestFullscreen) {
-                            video.requestFullscreen();
-                          }
-                        }}
-                        onClose={() => handleCloseCameraFeed(streamId)}
-                        onStartRecognize={startRecognition}
-                        onStopRecognize={stopRecognition}
-                        isRecognizing={isRecognizing}
-                        isProcessing={isProcessing}
-                        onStartRecording={() => handleStartRecording(streamId)}
-                        onStopRecording={() => handleStopRecording(streamId)}
-                        isRecording={recording[streamId]?.isRecording || false}
-                        onSnapshot={() => handleSnapshot(streamId)}
-                        onToggleMute={() => handleToggleMute(streamId)}
-                        isMuted={muted[streamId] || false}
-                        onPlayPause={() => handlePlayPause(streamId)}
-                        isPlaying={playing[streamId] || false}
-                        onQualitySettings={(quality) => handleQualitySettings(streamId, quality)}
-                        currentQuality={currentQuality[streamId] || 'medium'}
-                        onSelectSource={() => handleSelectSource(streamId)}
-                      />
-                    )}
-                    onClose={() => handleCloseCameraFeed(streamId)}
-                    recordingTimer={recordingTimers[streamId] || 0}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      maxWidth: '100%',
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column'
-                    }}
-                  />
-                        
+                      >
+                        <CameraViewer
+                          camera={{
+                            id: camera.id,  // Sử dụng ID thực tế từ database
+                            name: isUploadedVideo
+                              ? uploadedVideos[streamId].name
+                              : camera.name,  // Sử dụng tên camera thực tế từ database
+                            streamUrl: streamInfo.url,
+                            isUploadedVideo: isUploadedVideo,
+                            location: camera.location,  // Thêm thông tin location
+                            location_name: camera.location_name,  // Thêm tên location
+                          }}
+                          actionBar={({
+                            startRecognition,
+                            stopRecognition,
+                            closeVideo,
+                            isRecognizing,
+                            isProcessing,
+                            onForcePlay,
+                          }) => (
+                            <CameraActionBar
+                              cameraName={originalCameraName}
+                              cameraId={cameraId}
+                              onFullscreen={() => {
+                                const video = document.getElementById(`video-${streamId}`);
+                                if (video && video.requestFullscreen) {
+                                  video.requestFullscreen();
+                                }
+                              }}
+                              onClose={closeVideo || (() => handleCloseCameraFeed(streamId))}  // FIXED: Sử dụng closeVideo nếu có
+                              onStartRecognize={startRecognition}
+                              onStopRecognize={stopRecognition}
+                              isRecognizing={isRecognizing}
+                              isProcessing={isProcessing}
+                              onStartRecording={() => handleStartRecording(streamId)}
+                              onStopRecording={() => handleStopRecording(streamId)}
+                              isRecording={recording[streamId]?.isRecording || false}
+                              onSnapshot={() => handleSnapshot(streamId)}
+                              onToggleMute={() => handleToggleMute(streamId)}
+                              isMuted={muted[streamId] || false}
+                              onPlayPause={() => handlePlayPause(streamId)}
+                              isPlaying={playing[streamId] || false}
+                              onQualitySettings={(quality) => handleQualitySettings(streamId, quality)}
+                              currentQuality={currentQuality[streamId] || 'medium'}
+                              onSelectSource={() => handleSelectSource(streamId)}
+                            />
+                          )}
+                          onClose={() => handleCloseCameraFeed(streamId)}
+                          recordingTimer={recordingTimers[streamId] || 0}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            maxWidth: '100%',
+                            flex: 1,
+                            display: 'flex',
+                            flexDirection: 'column'
+                          }}
+                        />
+
                         {/* Resize handle */}
                         <Box
                           sx={{
@@ -2128,15 +2060,15 @@ useEffect(() => {
                             height: 10,
                             background: '#607D8B',
                             position: 'absolute',
-                      bottom: 0,
-                      right: 0,
+                            bottom: 0,
+                            right: 0,
                             cursor: 'se-resize',
                             '&:hover': {
                               background: '#455A64'
                             }
-                    }}
-                    onMouseDown={(e) => startResize(streamId, e)}
-                  />
+                          }}
+                          onMouseDown={(e) => startResize(streamId, e)}
+                        />
                       </Box>
                     </Card>
                   </Grid>
@@ -2144,8 +2076,8 @@ useEffect(() => {
               })}
             </Grid>
           ) : (
-            <Box sx={{ 
-              textAlign: 'center', 
+            <Box sx={{
+              textAlign: 'center',
               py: 8,
               color: 'text.secondary'
             }}>
@@ -2161,13 +2093,13 @@ useEffect(() => {
         </CardContent>
       </Card>
 
-      <Card sx={{ 
+      <Card sx={{
         background: 'white',
         borderRadius: 3,
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
         border: '1px solid #e0e0e0'
       }}>
-        
+
 
         {/* ===== Giao diện tìm kiếm nâng cao (dựa trên WhiteList) ===== */}
         <Card sx={{ mt: 2, mb: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
@@ -2178,22 +2110,22 @@ useEffect(() => {
               <Typography variant="h5" sx={{ fontWeight: 700, color: '#1976d2', flexGrow: 1 }}>
                 Tìm kiếm kết quả nhận diện biển số
               </Typography>
-              
+
               {/* Action buttons ở góc trên bên phải */}
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <Button
                   variant="outlined"
                   startIcon={<Refresh />}
                   onClick={resetFilters}
-                  sx={{ 
+                  sx={{
                     borderColor: '#f44336',
                     color: '#f44336',
                     fontWeight: 600,
                     borderRadius: 2,
                     px: 3,
                     py: 1,
-                    '&:hover': { 
-                      borderColor: '#d32f2f', 
+                    '&:hover': {
+                      borderColor: '#d32f2f',
                       backgroundColor: '#ffebee',
                       transform: 'translateY(-1px)'
                     }
@@ -2203,365 +2135,365 @@ useEffect(() => {
                 </Button>
                 {hasSearchPlate && (
                   <Button
-                  variant="contained"
-                  startIcon={<SearchIcon />}
-                  onClick={applySearch}
-                  disabled={searchLoading}
-                  sx={{ 
-                    backgroundColor: '#1976d2',
-                    fontWeight: 600,
-                    borderRadius: 2,
-                    px: 4,
-                    py: 1,
-                    '&:hover': { 
-                      backgroundColor: '#1565c0',
-                      transform: 'translateY(-1px)'
-                    },
-                    '&:disabled': {
-                      backgroundColor: '#e0e0e0',
-                      color: '#9e9e9e'
-                    }
-                  }}
-                >
-                  {searchLoading ? 'Đang tìm kiếm...' : 'Tìm kiếm'}
-                </Button>
+                    variant="contained"
+                    startIcon={<SearchIcon />}
+                    onClick={applySearch}
+                    disabled={searchLoading}
+                    sx={{
+                      backgroundColor: '#1976d2',
+                      fontWeight: 600,
+                      borderRadius: 2,
+                      px: 4,
+                      py: 1,
+                      '&:hover': {
+                        backgroundColor: '#1565c0',
+                        transform: 'translateY(-1px)'
+                      },
+                      '&:disabled': {
+                        backgroundColor: '#e0e0e0',
+                        color: '#9e9e9e'
+                      }
+                    }}
+                  >
+                    {searchLoading ? 'Đang tìm kiếm...' : 'Tìm kiếm'}
+                  </Button>
                 )}
-                
+
               </Box>
             </Box>
 
             {/* Tất cả bộ lọc hiển thị luôn */}
             <Grid container spacing={2} alignItems="center">
-                {/* Biển số xe */}
-                <Grid item xs={12} md={3}>
+              {/* Biển số xe */}
+              <Grid item xs={12} md={3}>
+                <TextField
+                  label="Biển số xe"
+                  value={searchFilters.plate_number}
+                  onChange={e => handleFilterChange('plate_number', e.target.value)}
+                  fullWidth
+                  size="medium"
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start"><SearchIcon color="primary" sx={{ fontSize: 22 }} /></InputAdornment>,
+                    sx: {
+                      borderRadius: 3,
+                      bgcolor: 'background.paper',
+                      boxShadow: '0 2px 8px rgba(25,118,210,0.06)',
+                      '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
+                      '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
+                    }
+                  }}
+                  InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
+                />
+              </Grid>
+
+              {/* Khu vực */}
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Khu vực</InputLabel>
+                  <Select
+                    value={searchFilters.location_id}
+                    label="Khu vực"
+                    onChange={e => handleFilterChange('location_id', e.target.value)}
+                    startAdornment={<LocationIcon color="info" sx={{ mr: 1, fontSize: 22 }} />}
+                    MenuProps={{
+                      PaperProps: {
+                        style: {
+                          maxHeight: 300,
+                          overflow: 'auto',
+                        },
+                      },
+                    }}
+                    sx={{
+                      borderRadius: 3,
+                      bgcolor: 'background.paper',
+                      fontSize: 16,
+                      fontWeight: 600,
+                      '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
+                      '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
+                    }}
+                  >
+                    <MenuItem value="">Tất cả khu vực</MenuItem>
+                    {Array.isArray(searchLocations) && searchLocations.map(location => (
+                      <MenuItem key={location.id} value={location.id}>
+                        {location.name || `Khu vực ${location.id}`}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              {/* Camera */}
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Camera</InputLabel>
+                  <Select
+                    value={searchFilters.camera_id}
+                    label="Camera"
+                    onChange={e => handleFilterChange('camera_id', e.target.value)}
+                    MenuProps={{
+                      PaperProps: {
+                        style: {
+                          maxHeight: 300,
+                          overflow: 'auto',
+                        },
+                      },
+                    }}
+                    sx={{
+                      borderRadius: 3,
+                      bgcolor: 'background.paper',
+                      fontSize: 16,
+                      fontWeight: 600,
+                      '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
+                      '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
+                    }}
+                  >
+                    <MenuItem value="">Tất cả camera</MenuItem>
+                    {Array.isArray(searchCameras) && searchCameras.map(camera => (
+                      <MenuItem key={camera.id} value={camera.id}>
+                        {camera.name || `Camera ${camera.id}`}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              {/* Thời gian */}
+              <Grid item xs={12} md={3}>
+                <div className="custom-datetime-input">
                   <TextField
-                    label="Biển số xe"
-                    value={searchFilters.plate_number}
-                    onChange={e => handleFilterChange('plate_number', e.target.value)}
+                    label="Từ ngày giờ"
+                    type="text"
+                    value={searchFilters.start_date_display || ''}
+                    onChange={e => handleDateTimeChange('start_date', e.target.value, e)}
+                    onFocus={handleDateTimeFocus}
+                    onBlur={handleDateTimeBlur}
                     fullWidth
                     size="medium"
-                    InputProps={{
-                      startAdornment: <InputAdornment position="start"><SearchIcon color="primary" sx={{ fontSize: 22 }} /></InputAdornment>,
-                      sx: { 
-                        borderRadius: 3, 
-                        bgcolor: 'background.paper', 
+                    placeholder="dd/mm/yyyy hh:mm"
+                    inputProps={{
+                      pattern: "\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}",
+                      title: "Định dạng: dd/mm/yyyy hh:mm"
+                    }}
+                    InputLabelProps={{
+                      shrink: true,
+                      sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 3,
+                        bgcolor: 'background.paper',
                         boxShadow: '0 2px 8px rgba(25,118,210,0.06)',
                         '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
                         '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
-                      }
+                      },
                     }}
-                    InputLabelProps={{ sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } }}
                   />
-                </Grid>
-
-                {/* Khu vực */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Khu vực</InputLabel>
-                    <Select
-                      value={searchFilters.location_id}
-                      label="Khu vực"
-                      onChange={e => handleFilterChange('location_id', e.target.value)}
-                      startAdornment={<LocationIcon color="info" sx={{ mr: 1, fontSize: 22 }} />}
-                      MenuProps={{
-                        PaperProps: {
-                          style: {
-                            maxHeight: 300,
-                            overflow: 'auto',
-                          },
-                        },
-                      }}
-                      sx={{ 
-                        borderRadius: 3, 
-                        bgcolor: 'background.paper', 
-                        fontSize: 16, 
-                        fontWeight: 600,
-                        '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
-                        '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
-                      }}
-                    >
-                      <MenuItem value="">Tất cả khu vực</MenuItem>
-                      {Array.isArray(searchLocations) && searchLocations.map(location => (
-                        <MenuItem key={location.id} value={location.id}>
-                          {location.name || `Khu vực ${location.id}`}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                {/* Camera */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }}>Camera</InputLabel>
-                    <Select
-                      value={searchFilters.camera_id}
-                      label="Camera"
-                      onChange={e => handleFilterChange('camera_id', e.target.value)}
-                      MenuProps={{
-                        PaperProps: {
-                          style: {
-                            maxHeight: 300,
-                            overflow: 'auto',
-                          },
-                        },
-                      }}
-                      sx={{ 
-                        borderRadius: 3, 
-                        bgcolor: 'background.paper', 
-                        fontSize: 16, 
-                        fontWeight: 600,
-                        '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
-                        '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
-                      }}
-                    >
-                      <MenuItem value="">Tất cả camera</MenuItem>
-                      {Array.isArray(searchCameras) && searchCameras.map(camera => (
-                        <MenuItem key={camera.id} value={camera.id}>
-                          {camera.name || `Camera ${camera.id}`}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                {/* Thời gian */}
-                <Grid item xs={12} md={3}>
-                  <div className="custom-datetime-input">
-                    <TextField
-                      label="Từ ngày giờ"
-                      type="text"
-                      value={searchFilters.start_date_display || ''}
-                      onChange={e => handleDateTimeChange('start_date', e.target.value, e)}
-                      onFocus={handleDateTimeFocus}
-                      onBlur={handleDateTimeBlur}
-                      fullWidth
-                      size="medium"
-                      placeholder="dd/mm/yyyy hh:mm"
-                      inputProps={{
-                        pattern: "\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}",
-                        title: "Định dạng: dd/mm/yyyy hh:mm"
-                      }}
-                      InputLabelProps={{ 
-                        shrink: true,
-                        sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } 
-                      }}
-                      sx={{ 
-                        '& .MuiOutlinedInput-root': { 
-                          borderRadius: 3, 
-                          bgcolor: 'background.paper',
-                          boxShadow: '0 2px 8px rgba(25,118,210,0.06)',
-                          '&:hover': { boxShadow: '0 4px 16px rgba(25,118,210,0.10)' },
-                          '&.Mui-focused': { boxShadow: '0 4px 24px rgba(25,118,210,0.16)' }
-                        },
-                      }}
-                    />
-                    <div 
-                      className="placeholder-text"
-                      onClick={() => handleCalendarClick('start_date')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      dd/mm/yyyy hh:mm
-                    </div>
-                    <div 
-                      className="calendar-icon"
-                      onClick={() => handleCalendarClick('start_date')}
-                      style={{
-                        position: 'absolute',
-                        right: '8px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        cursor: 'pointer',
-                        opacity: 0.6,
-                        fontSize: '16px',
-                        zIndex: 10
-                      }}
-                    >
-                      📅
-                    </div>
+                  <div
+                    className="placeholder-text"
+                    onClick={() => handleCalendarClick('start_date')}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    dd/mm/yyyy hh:mm
                   </div>
-                </Grid>
-                
-                <Grid item xs={12} md={3}>
-                  <div className="custom-datetime-input">
-                    <TextField
-                      label="Đến ngày giờ"
-                      type="text"
-                      value={searchFilters.end_date_display || ''}
-                      onChange={e => handleDateTimeChange('end_date', e.target.value, e)}
-                      onFocus={handleDateTimeFocus}
-                      onBlur={handleDateTimeBlur}
-                      fullWidth
-                      size="medium"
-                      placeholder="dd/mm/yyyy hh:mm"
-                      inputProps={{
-                        pattern: "\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}",
-                        title: "Định dạng: dd/mm/yyyy hh:mm"
-                      }}
-                      InputLabelProps={{ 
-                        shrink: true,
-                        sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 } 
-                      }}
-                      sx={{ 
-                        '& .MuiOutlinedInput-root': { 
-                          borderRadius: 3, 
-                          bgcolor: 'background.paper',
-                          boxShadow: '0 2px 8px rgba(17, 20, 22, 0.06)',
-                          '&:hover': { boxShadow: '0 4px 16px rgba(10, 11, 12, 0.1)' },
-                          '&.Mui-focused': { boxShadow: '0 4px 24px rgba(9, 11, 14, 0.16)' }
-                        },
-                      }}
-                    />
-                    <div 
-                      className="placeholder-text"
-                      onClick={() => handleCalendarClick('end_date')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      dd/mm/yyyy hh:mm
-                    </div>
-                    <div 
-                      className="calendar-icon"
-                      onClick={() => handleCalendarClick('end_date')}
-                      style={{
-                        position: 'absolute',
-                        right: '8px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        cursor: 'pointer',
-                        opacity: 0.6,
-                        fontSize: '16px',
-                        zIndex: 10
-                      }}
-                    >
-                      📅
-                    </div>
+                  <div
+                    className="calendar-icon"
+                    onClick={() => handleCalendarClick('start_date')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      cursor: 'pointer',
+                      opacity: 0.6,
+                      fontSize: '16px',
+                      zIndex: 10
+                    }}
+                  >
+                    📅
                   </div>
-                </Grid>
+                </div>
+              </Grid>
 
-                {/* Độ tin cậy */}
-                <Grid item xs={12} md={3}>
+              <Grid item xs={12} md={3}>
+                <div className="custom-datetime-input">
                   <TextField
-                    label="Độ tin cậy tối thiểu (%)"
-                    type="number"
-                    value={searchFilters.confidence_min}
-                    onChange={e => handleFilterChange('confidence_min', e.target.value)}
+                    label="Đến ngày giờ"
+                    type="text"
+                    value={searchFilters.end_date_display || ''}
+                    onChange={e => handleDateTimeChange('end_date', e.target.value, e)}
+                    onFocus={handleDateTimeFocus}
+                    onBlur={handleDateTimeBlur}
                     fullWidth
                     size="medium"
-                    inputProps={{ min: 0, max: 100 }}
-                    sx={{ 
-                      '& .MuiOutlinedInput-root': { 
-                        borderRadius: 3, 
+                    placeholder="dd/mm/yyyy hh:mm"
+                    inputProps={{
+                      pattern: "\\d{2}/\\d{2}/\\d{4} \\d{2}:\\d{2}",
+                      title: "Định dạng: dd/mm/yyyy hh:mm"
+                    }}
+                    InputLabelProps={{
+                      shrink: true,
+                      sx: { fontWeight: 700, fontSize: 16, letterSpacing: 0.5 }
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 3,
                         bgcolor: 'background.paper',
-                        boxShadow: '0 2px 8px rgba(25,118,210,0.06)'
-                      } 
+                        boxShadow: '0 2px 8px rgba(17, 20, 22, 0.06)',
+                        '&:hover': { boxShadow: '0 4px 16px rgba(10, 11, 12, 0.1)' },
+                        '&.Mui-focused': { boxShadow: '0 4px 24px rgba(9, 11, 14, 0.16)' }
+                      },
                     }}
                   />
-                </Grid>
-
-                <Grid item xs={12} md={3}>
-                  <TextField
-                    label="Độ tin cậy tối đa (%)"
-                    type="number"
-                    value={searchFilters.confidence_max}
-                    onChange={e => handleFilterChange('confidence_max', e.target.value)}
-                    fullWidth
-                    size="medium"
-                    inputProps={{ min: 0, max: 100 }}
-                    sx={{ 
-                      '& .MuiOutlinedInput-root': { 
-                        borderRadius: 3, 
-                        bgcolor: 'background.paper',
-                        boxShadow: '0 2px 8px rgba(25,118,210,0.06)'
-                      } 
+                  <div
+                    className="placeholder-text"
+                    onClick={() => handleCalendarClick('end_date')}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    dd/mm/yyyy hh:mm
+                  </div>
+                  <div
+                    className="calendar-icon"
+                    onClick={() => handleCalendarClick('end_date')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      cursor: 'pointer',
+                      opacity: 0.6,
+                      fontSize: '16px',
+                      zIndex: 10
                     }}
-                  />
-                </Grid>
+                  >
+                    📅
+                  </div>
+                </div>
+              </Grid>
 
-                {/* Trạng thái xác minh */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Trạng thái xác minh</InputLabel>
-                    <Select
-                      value={searchFilters.is_verified}
-                      label="Trạng thái xác minh"
-                      onChange={e => handleFilterChange('is_verified', e.target.value)}
-                      sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
-                    >
-                      {verificationStatusOptions.map(opt => (
-                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
+              {/* Độ tin cậy */}
+              <Grid item xs={12} md={3}>
+                <TextField
+                  label="Độ tin cậy tối thiểu (%)"
+                  type="number"
+                  value={searchFilters.confidence_min}
+                  onChange={e => handleFilterChange('confidence_min', e.target.value)}
+                  fullWidth
+                  size="medium"
+                  inputProps={{ min: 0, max: 100 }}
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 3,
+                      bgcolor: 'background.paper',
+                      boxShadow: '0 2px 8px rgba(25,118,210,0.06)'
+                    }
+                  }}
+                />
+              </Grid>
 
-                {/* Whitelist match */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Whitelist</InputLabel>
-                    <Select
-                      value={searchFilters.is_whitelist_match}
-                      label="Whitelist"
-                      onChange={e => handleFilterChange('is_whitelist_match', e.target.value)}
-                      sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
-                    >
-                      {whitelistMatchOptions.map(opt => (
-                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  label="Độ tin cậy tối đa (%)"
+                  type="number"
+                  value={searchFilters.confidence_max}
+                  onChange={e => handleFilterChange('confidence_max', e.target.value)}
+                  fullWidth
+                  size="medium"
+                  inputProps={{ min: 0, max: 100 }}
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 3,
+                      bgcolor: 'background.paper',
+                      boxShadow: '0 2px 8px rgba(25,118,210,0.06)'
+                    }
+                  }}
+                />
+              </Grid>
 
-                {/* Blacklist match */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Blacklist</InputLabel>
-                    <Select
-                      value={searchFilters.is_blacklist_match}
-                      label="Blacklist"
-                      onChange={e => handleFilterChange('is_blacklist_match', e.target.value)}
-                      sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
-                    >
-                      {blacklistMatchOptions.map(opt => (
-                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
+              {/* Trạng thái xác minh */}
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Trạng thái xác minh</InputLabel>
+                  <Select
+                    value={searchFilters.is_verified}
+                    label="Trạng thái xác minh"
+                    onChange={e => handleFilterChange('is_verified', e.target.value)}
+                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                  >
+                    {verificationStatusOptions.map(opt => (
+                      <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              {/* Whitelist match */}
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Whitelist</InputLabel>
+                  <Select
+                    value={searchFilters.is_whitelist_match}
+                    label="Whitelist"
+                    onChange={e => handleFilterChange('is_whitelist_match', e.target.value)}
+                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                  >
+                    {whitelistMatchOptions.map(opt => (
+                      <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              {/* Blacklist match */}
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Blacklist</InputLabel>
+                  <Select
+                    value={searchFilters.is_blacklist_match}
+                    label="Blacklist"
+                    onChange={e => handleFilterChange('is_blacklist_match', e.target.value)}
+                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                  >
+                    {blacklistMatchOptions.map(opt => (
+                      <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
 
 
-                {/* Nguồn video */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Nguồn</InputLabel>
-                    <Select
-                      value={searchFilters.source_type}
-                      label="Nguồn"
-                      onChange={e => handleFilterChange('source_type', e.target.value)}
-                      sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
-                    >
-                      {sourceTypeOptions.map(opt => (
-                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
+              {/* Nguồn video */}
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Nguồn</InputLabel>
+                  <Select
+                    value={searchFilters.source_type}
+                    label="Nguồn"
+                    onChange={e => handleFilterChange('source_type', e.target.value)}
+                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                  >
+                    {sourceTypeOptions.map(opt => (
+                      <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
 
-                {/* Cảnh báo */}
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
-                    <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Cảnh báo</InputLabel>
-                    <Select
-                      value={searchFilters.alert_triggered}
-                      label="Cảnh báo"
-                      onChange={e => handleFilterChange('alert_triggered', e.target.value)}
-                      sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
-                    >
-                      {alertOptions.map(opt => (
-                        <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
+              {/* Cảnh báo */}
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="medium" sx={{ borderRadius: 3, bgcolor: 'background.paper', boxShadow: '0 2px 8px rgba(25,118,210,0.06)' }}>
+                  <InputLabel sx={{ fontWeight: 700, fontSize: 15 }}>Cảnh báo</InputLabel>
+                  <Select
+                    value={searchFilters.alert_triggered}
+                    label="Cảnh báo"
+                    onChange={e => handleFilterChange('alert_triggered', e.target.value)}
+                    sx={{ borderRadius: 3, bgcolor: 'background.paper', fontSize: 15, fontWeight: 600 }}
+                  >
+                    {alertOptions.map(opt => (
+                      <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
 
 
 
@@ -2628,17 +2560,17 @@ useEffect(() => {
                         {(currentPage - 1) * itemsPerPage + index + 1}
                       </Typography>
                     </TableCell>
-                    
+
                     {/* Biển số với badges */}
                     <TableCell>
                       <Box>
                         <Typography variant="body1" fontWeight={600} color="primary">
                           {result.plate_number || 'N/A'}
                         </Typography>
-                        
+
                       </Box>
                     </TableCell>
-                    
+
                     {/* Ảnh biển số */}
                     <TableCell>
                       {result.cropped_plate_image_path ? (
@@ -2679,19 +2611,18 @@ useEffect(() => {
                               onClick={() => {
                                 // Xử lý đường dẫn ảnh - simplified logic
                                 let imagePath = result.cropped_plate_image_path;
-                                
+
                                 // Ensure path starts with /static/crops/
                                 if (!imagePath.startsWith('/static/crops/')) {
                                   imagePath = `/static/crops/${imagePath}`;
                                 }
-                                
+
                                 const cropImageUrl = `http://localhost:5000${imagePath}`;
-                                console.log('Opening image URL:', cropImageUrl);
                                 window.open(cropImageUrl, '_blank');
                               }}
                               onError={(e) => {
                                 console.error('Error loading image:', result.cropped_plate_image_path);
-                                
+
                                 // Simplified error handling
                                 let imagePath = result.cropped_plate_image_path;
                                 if (!imagePath.startsWith('/static/crops/')) {
@@ -2699,7 +2630,7 @@ useEffect(() => {
                                 }
                                 const fullUrl = `http://localhost:5000${imagePath}`;
                                 console.error('Full URL:', fullUrl);
-                                
+
                                 e.target.style.display = 'none';
                                 // Show fallback
                                 const fallback = e.target.parentElement.querySelector('.image-fallback');
@@ -2708,15 +2639,14 @@ useEffect(() => {
                                 }
                               }}
                               onLoad={() => {
-                                console.log('Image loaded successfully:', result.cropped_plate_image_path);
                               }}
                             />
                             {/* Fallback khi ảnh lỗi */}
-                            <Box 
+                            <Box
                               className="image-fallback"
-                              sx={{ 
-                                width: 120, 
-                                height: 80, 
+                              sx={{
+                                width: 120,
+                                height: 80,
                                 backgroundColor: '#f5f5f5',
                                 borderRadius: 1,
                                 border: '1px solid #e0e0e0',
@@ -2734,9 +2664,9 @@ useEffect(() => {
                           </Box>
                         </Tooltip>
                       ) : (
-                        <Box sx={{ 
-                          width: 120, 
-                          height: 80, 
+                        <Box sx={{
+                          width: 120,
+                          height: 80,
                           backgroundColor: '#f5f5f5',
                           borderRadius: 1,
                           border: '1px solid #e0e0e0',
@@ -2752,85 +2682,85 @@ useEffect(() => {
                         </Box>
                       )}
                     </TableCell>
-                    
+
                     {/* Nguồn */}
                     <TableCell>
                       <Box>
                         <Box display="flex" alignItems="center" gap={1} mb={0.5}>
-                        {result.source_type === 'camera' ? (
-                          <Box sx={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: 0.5,
-                            padding: '4px 8px',
-                            backgroundColor: '#e3f2fd',
-                            borderRadius: '12px',
-                            border: '1px solid #bbdefb'
-                          }}>
-                            <Box sx={{ 
-                              width: 8, 
-                              height: 8, 
-                              borderRadius: '50%', 
-                              backgroundColor: '#2196f3',
-                              animation: 'pulse 2s infinite'
-                            }} />
-                            <Typography variant="caption" fontWeight={600} color="#1565c0">
-                              Camera Live
-                            </Typography>
-                          </Box>
-                        ) : result.source_type === 'video_upload' ? (
-                          <Box sx={{ 
-                            display: 'flex', 
-                            flexDirection: 'column',
-                            alignItems: 'flex-start', 
-                            gap: 0.5,
-                            padding: '4px 8px',
-                            backgroundColor: '#f3e5f5',
-                            borderRadius: '12px',
-                            border: '1px solid #e1bee7'
-                          }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <VideoLibrary sx={{ fontSize: 14, color: '#7b1fa2' }} />
-                              <Typography variant="caption" fontWeight={600} color="#6a1b9a">
-                                Video Upload
+                          {result.source_type === 'camera' ? (
+                            <Box sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                              padding: '4px 8px',
+                              backgroundColor: '#e3f2fd',
+                              borderRadius: '12px',
+                              border: '1px solid #bbdefb'
+                            }}>
+                              <Box sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                backgroundColor: '#2196f3',
+                                animation: 'pulse 2s infinite'
+                              }} />
+                              <Typography variant="caption" fontWeight={600} color="#1565c0">
+                                Camera Live
                               </Typography>
                             </Box>
-                            {result.camera_name && result.camera_name.includes(':') && (
-                              <Box sx={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                justifyContent: 'center',
-                                gap: 0.5, 
-                                mt: 0.5
-                              }}>
-                                <Description sx={{ fontSize: 12, color: '#9c27b0' }} />
-                                <Typography variant="caption" color="#8e24aa" sx={{ fontSize: '0.7rem' }}>
-                                  {result.camera_name.split(': ')[1]}
+                          ) : result.source_type === 'video_upload' ? (
+                            <Box sx={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'flex-start',
+                              gap: 0.5,
+                              padding: '4px 8px',
+                              backgroundColor: '#f3e5f5',
+                              borderRadius: '12px',
+                              border: '1px solid #e1bee7'
+                            }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <VideoLibrary sx={{ fontSize: 14, color: '#7b1fa2' }} />
+                                <Typography variant="caption" fontWeight={600} color="#6a1b9a">
+                                  Video Upload
                                 </Typography>
                               </Box>
-                            )}
-                          </Box>
-                        ) : (
-                          <Box sx={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: 0.5,
-                            padding: '4px 8px',
-                            backgroundColor: '#f5f5f5',
-                            borderRadius: '12px',
-                            border: '1px solid #e0e0e0'
-                          }}>
-                            <Typography variant="caption" fontWeight={600} color="#666">
-                              {result.source_type || 'Unknown'}
-                            </Typography>
-                          </Box>
-                        )}
+                              {result.camera_name && result.camera_name.includes(':') && (
+                                <Box sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: 0.5,
+                                  mt: 0.5
+                                }}>
+                                  <Description sx={{ fontSize: 12, color: '#9c27b0' }} />
+                                  <Typography variant="caption" color="#8e24aa" sx={{ fontSize: '0.7rem' }}>
+                                    {result.camera_name.split(': ')[1]}
+                                  </Typography>
+                                </Box>
+                              )}
+                            </Box>
+                          ) : (
+                            <Box sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                              padding: '4px 8px',
+                              backgroundColor: '#f5f5f5',
+                              borderRadius: '12px',
+                              border: '1px solid #e0e0e0'
+                            }}>
+                              <Typography variant="caption" fontWeight={600} color="#666">
+                                {result.source_type || 'Unknown'}
+                              </Typography>
+                            </Box>
+                          )}
                         </Box>
-                        
+
                         {result.source_type === 'video_upload' && result.video_filename && (
                           <Box>
-                            <Typography variant="caption" color="text.secondary" display="block" sx={{ 
-                              mb: 0.5, 
+                            <Typography variant="caption" color="text.secondary" display="block" sx={{
+                              mb: 0.5,
                               fontSize: '0.7rem',
                               fontWeight: 500,
                               color: '#666',
@@ -2840,50 +2770,42 @@ useEffect(() => {
                             </Typography>
                           </Box>
                         )}
-                        
+
                         {/* Hiển thị thông tin camera và khu vực */}
                         <Box>
-                          {/* Debug log để kiểm tra dữ liệu */}
-                          {console.log('Result data for source display:', {
-                            camera_name: result.camera_name,
-                            camera_id: result.camera_id,
-                            location_name: result.location_name,
-                            source_type: result.source_type
-                          })}
-                          
-                          {/* Dòng Camera - luôn hiển thị */}
-                          <Typography variant="caption" color="text.secondary" display="block" sx={{ 
-                            mb: 0.5, 
+
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{
+                            mb: 0.5,
                             fontSize: '0.7rem',
                             fontWeight: 500,
                             color: '#666',
                             wordBreak: 'break-word'
                           }}>
-                            📹 Camera: {result.camera_name || `Camera ${result.camera_id}` || 'N/A'}
+                            📹 Camera: {result.camera_name || (result.camera_id ? `Camera ${result.camera_id}` : 'Camera không xác định')}
                           </Typography>
-                          
+
                           {/* Dòng Khu vực - luôn hiển thị */}
-                          <Typography variant="caption" color="text.secondary" display="block" sx={{ 
-                            mb: 0.5, 
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{
+                            mb: 0.5,
                             fontSize: '0.7rem',
                             fontWeight: 500,
                             color: '#666',
                             wordBreak: 'break-word'
                           }}>
-                            📍 Khu vực: {result.location_name || 'N/A'}
+                            📍 Khu vực: {result.location_name || 'Khu vực không xác định'}
                           </Typography>
                         </Box>
                       </Box>
                     </TableCell>
-                    
+
                     {/* Thời gian */}
                     <TableCell>
                       <Box>
                         <Typography variant="body2">
-                          {result.detected_at ? 
-                            formatDateTimeForDisplay(result.detected_at) : 
+                          {result.detected_at ?
+                            formatDateTimeForDisplay(result.detected_at) :
                             'N/A'
-                        }
+                          }
                         </Typography>
                         {result.detected_at && (
                           <Typography variant="caption" color="text.secondary">
@@ -2892,7 +2814,7 @@ useEffect(() => {
                         )}
                       </Box>
                     </TableCell>
-                    
+
                     {/* Độ tin cậy */}
                     <TableCell>
                       <Box>
@@ -2903,114 +2825,114 @@ useEffect(() => {
                               <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', minWidth: '35px' }}>
                                 OCR:
                               </Typography>
-                              <Chip 
+                              <Chip
                                 label={`${(parseFloat(result.ocr_confidence) * 100).toFixed(0)}%`}
                                 size="small"
-                                sx={{ 
+                                sx={{
                                   height: 18,
                                   fontSize: '0.65rem',
-                                  backgroundColor: parseFloat(result.ocr_confidence) > 0.8 ? '#e8f5e9' : 
-                                                  parseFloat(result.ocr_confidence) > 0.6 ? '#fff3e0' : '#ffebee',
-                                  color: parseFloat(result.ocr_confidence) > 0.8 ? '#2e7d32' : 
-                                         parseFloat(result.ocr_confidence) > 0.6 ? '#f57c00' : '#d32f2f',
+                                  backgroundColor: parseFloat(result.ocr_confidence) > 0.8 ? '#e8f5e9' :
+                                    parseFloat(result.ocr_confidence) > 0.6 ? '#fff3e0' : '#ffebee',
+                                  color: parseFloat(result.ocr_confidence) > 0.8 ? '#2e7d32' :
+                                    parseFloat(result.ocr_confidence) > 0.6 ? '#f57c00' : '#d32f2f',
                                   border: '1px solid',
-                                  borderColor: parseFloat(result.ocr_confidence) > 0.8 ? '#c8e6c9' : 
-                                              parseFloat(result.ocr_confidence) > 0.6 ? '#ffcc02' : '#ffcdd2'
+                                  borderColor: parseFloat(result.ocr_confidence) > 0.8 ? '#c8e6c9' :
+                                    parseFloat(result.ocr_confidence) > 0.6 ? '#ffcc02' : '#ffcdd2'
                                 }}
                               />
                             </Box>
                           )}
-                          
+
                           {parseFloat(result.detection_confidence) > 0 && (
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', minWidth: '35px' }}>
                                 Det:
                               </Typography>
-                              <Chip 
+                              <Chip
                                 label={`${(parseFloat(result.detection_confidence) * 100).toFixed(0)}%`}
                                 size="small"
-                                sx={{ 
+                                sx={{
                                   height: 18,
                                   fontSize: '0.65rem',
-                                  backgroundColor: parseFloat(result.detection_confidence) > 0.8 ? '#e3f2fd' : 
-                                                  parseFloat(result.detection_confidence) > 0.6 ? '#fff8e1' : '#fce4ec',
-                                  color: parseFloat(result.detection_confidence) > 0.8 ? '#1565c0' : 
-                                         parseFloat(result.detection_confidence) > 0.6 ? '#f57f17' : '#c2185b',
+                                  backgroundColor: parseFloat(result.detection_confidence) > 0.8 ? '#e3f2fd' :
+                                    parseFloat(result.detection_confidence) > 0.6 ? '#fff8e1' : '#fce4ec',
+                                  color: parseFloat(result.detection_confidence) > 0.8 ? '#1565c0' :
+                                    parseFloat(result.detection_confidence) > 0.6 ? '#f57f17' : '#c2185b',
                                   border: '1px solid',
-                                  borderColor: parseFloat(result.detection_confidence) > 0.8 ? '#bbdefb' : 
-                                              parseFloat(result.detection_confidence) > 0.6 ? '#ffecb3' : '#f8bbd9'
+                                  borderColor: parseFloat(result.detection_confidence) > 0.8 ? '#bbdefb' :
+                                    parseFloat(result.detection_confidence) > 0.6 ? '#ffecb3' : '#f8bbd9'
                                 }}
                               />
                             </Box>
                           )}
-                          
+
                           {/* Hiển thị thông báo nếu không có độ tin cậy nào */}
-                          {parseFloat(result.confidence_score) === 0 && 
-                           parseFloat(result.ocr_confidence) === 0 && 
-                           parseFloat(result.detection_confidence) === 0 && (
-                            <Typography variant="caption" color="error" sx={{ fontSize: '0.7rem', fontStyle: 'italic' }}>
-                              Chưa có dữ liệu độ tin cậy
-                            </Typography>
-                          )}
+                          {parseFloat(result.confidence_score) === 0 &&
+                            parseFloat(result.ocr_confidence) === 0 &&
+                            parseFloat(result.detection_confidence) === 0 && (
+                              <Typography variant="caption" color="error" sx={{ fontSize: '0.7rem', fontStyle: 'italic' }}>
+                                Chưa có dữ liệu độ tin cậy
+                              </Typography>
+                            )}
                         </Box>
                       </Box>
                     </TableCell>
-                    
+
                     {/* Danh sách */}
                     <TableCell>
                       <Box display="flex" flexDirection="column" gap={0.5} alignItems="center">
                         {Boolean(result.is_whitelist_match) && (
-                          <Chip 
-                            label="✓ Whitelist" 
-                            size="small" 
-                            sx={{ 
-                              height: 24, 
+                          <Chip
+                            label="✓ Whitelist"
+                            size="small"
+                            sx={{
+                              height: 24,
                               fontSize: '0.7rem',
-                              bgcolor: '#e8f5e9', 
+                              bgcolor: '#e8f5e9',
                               color: '#2e7d32',
                               fontWeight: 600,
                               border: '1px solid #c8e6c9',
                               boxShadow: '0 2px 4px rgba(46, 125, 50, 0.2)'
-                            }} 
+                            }}
                           />
                         )}
                         {Boolean(result.is_blacklist_match) && (
-                          <Chip 
-                            label="▲ Blacklist" 
-                            size="small" 
-                            sx={{ 
-                              height: 24, 
+                          <Chip
+                            label="▲ Blacklist"
+                            size="small"
+                            sx={{
+                              height: 24,
                               fontSize: '0.7rem',
-                              bgcolor: '#ffebee', 
+                              bgcolor: '#ffebee',
                               color: '#d32f2f',
                               fontWeight: 600,
                               border: '1px solid #ffcdd2',
                               boxShadow: '0 2px 4px rgba(211, 47, 47, 0.2)',
                               animation: 'pulse 2s infinite'
-                            }} 
+                            }}
                           />
                         )}
                         {Boolean(result.alert_triggered) && (
-                          <Chip 
-                            label="▲ Alert" 
-                            size="small" 
-                            sx={{ 
-                              height: 24, 
+                          <Chip
+                            label="▲ Alert"
+                            size="small"
+                            sx={{
+                              height: 24,
                               fontSize: '0.7rem',
-                              bgcolor: '#fff3e0', 
+                              bgcolor: '#fff3e0',
                               color: '#f57c00',
                               fontWeight: 600,
                               border: '1px solid #ffcc02',
                               boxShadow: '0 2px 4px rgba(245, 124, 0, 0.2)',
                               animation: 'pulse 1.5s infinite'
-                            }} 
+                            }}
                           />
                         )}
                         {!Boolean(result.is_whitelist_match) && !Boolean(result.is_blacklist_match) && !Boolean(result.alert_triggered) && (
-                          <Box 
-                            sx={{ 
-                              display: 'flex', 
-                              flexDirection: 'column', 
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              flexDirection: 'column',
                               alignItems: 'center',
                               gap: 0.5,
                               py: 1
@@ -3028,9 +2950,9 @@ useEffect(() => {
                                 border: '2px solid #e0e0e0'
                               }}
                             >
-                              <Typography 
-                                variant="body2" 
-                                sx={{ 
+                              <Typography
+                                variant="body2"
+                                sx={{
                                   fontSize: '1.2rem',
                                   color: '#9e9e9e',
                                   fontWeight: 600
@@ -3039,10 +2961,10 @@ useEffect(() => {
                                 —
                               </Typography>
                             </Box>
-                            <Typography 
-                              variant="caption" 
-                              sx={{ 
-                                fontSize: '0.65rem', 
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                fontSize: '0.65rem',
                                 color: '#9e9e9e',
                                 fontWeight: 500,
                                 textAlign: 'center'
@@ -3054,23 +2976,23 @@ useEffect(() => {
                         )}
                       </Box>
                     </TableCell>
-                    
+
                     {/* Trạng thái */}
                     <TableCell>
                       <Box display="flex" flexDirection="column" gap={0.5}>
-                        <Chip 
+                        <Chip
                           label={result.is_verified ? 'Đã xác minh' : 'Chưa xác minh'}
                           size="small"
-                          sx={{ 
+                          sx={{
                             fontWeight: 600,
                             backgroundColor: result.is_verified ? '#4caf50' : '#ff9800',
                             color: 'white'
                           }}
                         />
-                        
+
                       </Box>
                     </TableCell>
-                    
+
                     {/* Hành động */}
                     <TableCell>
                       <Box display="flex" gap={0.5} alignItems="center">
@@ -3078,65 +3000,22 @@ useEffect(() => {
                         <Tooltip title="Xem chi tiết">
                           <span>
                             {hasViewPlate && (
-<IconButton 
-                              size="small" 
-                              color="primary"
-                              onClick={() => handleViewDetails(result)}
-                              disabled={actionLoading.view.has(result.id)}
-                              sx={{
-                                opacity: actionLoading.view.has(result.id) ? 0.6 : 1,
-                                transition: 'all 0.2s ease'
-                              }}
-                            >
-                              {actionLoading.view.has(result.id) ? (
-                                <Box
-                                  sx={{
-                                    width: 16,
-                                    height: 16,
-                                    border: '2px solid #1976d2',
-                                    borderTop: '2px solid transparent',
-                                    borderRadius: '50%',
-                                    animation: 'spin 1s linear infinite',
-                                    '@keyframes spin': {
-                                      '0%': { transform: 'rotate(0deg)' },
-                                      '100%': { transform: 'rotate(360deg)' }
-                                    }
-                                  }}
-                                />
-                              ) : (
-                                <ViewIcon fontSize="small" />
-                              )}
-                            </IconButton>
-                            )}
-                            
-                          </span>
-                        </Tooltip>
-                        
-                        {/* Nút Xác minh - chỉ hiển thị nếu chưa xác minh */}
-                        {!result.is_verified && (
-                          <Tooltip title="Xác minh biển số">
-                            <span>
-                              {hasVerifyPlate && (
-<IconButton 
-                                size="small" 
-                                color="success"
-                                onClick={() => handleVerify(result.id)}
-                                disabled={actionLoading.verify.has(result.id)}
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => handleViewDetails(result)}
+                                disabled={actionLoading.view.has(result.id)}
                                 sx={{
-                                  opacity: actionLoading.verify.has(result.id) ? 0.6 : 1,
-                                  transition: 'all 0.2s ease',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                                    transform: 'scale(1.1)'
-                                  }
+                                  opacity: actionLoading.view.has(result.id) ? 0.6 : 1,
+                                  transition: 'all 0.2s ease'
                                 }}
                               >
-                                {actionLoading.verify.has(result.id) ? (
+                                {actionLoading.view.has(result.id) ? (
                                   <Box
                                     sx={{
                                       width: 16,
                                       height: 16,
-                                      border: '2px solid #4caf50',
+                                      border: '2px solid #1976d2',
                                       borderTop: '2px solid transparent',
                                       borderRadius: '50%',
                                       animation: 'spin 1s linear infinite',
@@ -3147,54 +3026,97 @@ useEffect(() => {
                                     }}
                                   />
                                 ) : (
-                                  <UploadIcon fontSize="small" />
+                                  <ViewIcon fontSize="small" />
                                 )}
                               </IconButton>
+                            )}
+
+                          </span>
+                        </Tooltip>
+
+                        {/* Nút Xác minh - chỉ hiển thị nếu chưa xác minh */}
+                        {!result.is_verified && (
+                          <Tooltip title="Xác minh biển số">
+                            <span>
+                              {hasVerifyPlate && (
+                                <IconButton
+                                  size="small"
+                                  color="success"
+                                  onClick={() => handleVerify(result.id)}
+                                  disabled={actionLoading.verify.has(result.id)}
+                                  sx={{
+                                    opacity: actionLoading.verify.has(result.id) ? 0.6 : 1,
+                                    transition: 'all 0.2s ease',
+                                    '&:hover': {
+                                      backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                                      transform: 'scale(1.1)'
+                                    }
+                                  }}
+                                >
+                                  {actionLoading.verify.has(result.id) ? (
+                                    <Box
+                                      sx={{
+                                        width: 16,
+                                        height: 16,
+                                        border: '2px solid #4caf50',
+                                        borderTop: '2px solid transparent',
+                                        borderRadius: '50%',
+                                        animation: 'spin 1s linear infinite',
+                                        '@keyframes spin': {
+                                          '0%': { transform: 'rotate(0deg)' },
+                                          '100%': { transform: 'rotate(360deg)' }
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <UploadIcon fontSize="small" />
+                                  )}
+                                </IconButton>
                               )}
-                              
+
                             </span>
                           </Tooltip>
                         )}
-                        
+
                         {/* Nút Xóa */}
                         <Tooltip title="Xóa kết quả">
                           <span>
                             {hasDeletePlate && (
-<IconButton 
-                              size="small" 
-                              color="error"
-                              onClick={() => handleDelete(result.id)}
-                              disabled={actionLoading.delete.has(result.id)}
-                              sx={{
-                                opacity: actionLoading.delete.has(result.id) ? 0.6 : 1,
-                                transition: 'all 0.2s ease',
-                                '&:hover': {
-                                  backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                                  transform: 'scale(1.1)'
-                                }
-                              }}
-                            >
-                              {actionLoading.delete.has(result.id) ? (
-                                <Box
-                                  sx={{
-                                    width: 16,
-                                    height: 16,
-                                    border: '2px solid #f44336',
-                                    borderTop: '2px solid transparent',
-                                    borderRadius: '50%',
-                                    animation: 'spin 1s linear infinite',
-                                    '@keyframes spin': {
-                                      '0%': { transform: 'rotate(0deg)' },
-                                      '100%': { transform: 'rotate(360deg)' }
-                                    }
-                                  }}
-                                />
-                              ) : (
-                                <ClearIcon fontSize="small" />
-                              )}
-                            </IconButton>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleDelete(result.id)}
+                                disabled={actionLoading.delete.has(result.id)}
+                                sx={{
+                                  opacity: actionLoading.delete.has(result.id) ? 0.6 : 1,
+                                  transition: 'all 0.2s ease',
+                                  '&:hover': {
+                                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                                    transform: 'scale(1.1)'
+                                  }
+                                }}
+                              >
+                                {actionLoading.delete.has(result.id) ? (
+                                  <Box
+                                    sx={{
+                                      width: 16,
+                                      height: 16,
+                                      border: '2px solid #f44336',
+                                      borderTop: '2px solid transparent',
+                                      borderRadius: '50%',
+                                      animation: 'spin 1s linear infinite',
+                                      '@keyframes spin': {
+                                        '0%': { transform: 'rotate(0deg)' },
+                                        '100%': { transform: 'rotate(360deg)' }
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <ClearIcon fontSize="small" />
+                                )}
+                              </IconButton>
                             )}
-                            
+
                           </span>
                         </Tooltip>
                       </Box>
@@ -3207,27 +3129,27 @@ useEffect(() => {
         </TableContainer>
 
         {/* Enhanced Pagination - Giống WhiteList */}
-        <Box sx={{ 
-          display: 'flex', 
-          flexDirection: { xs: 'column', md: 'row' }, 
-          alignItems: { xs: 'stretch', md: 'center' }, 
-          justifyContent: 'space-between', 
-          gap: 2, 
-          p: 2, 
-          borderTop: '1px solid #e0e0e0', 
-          backgroundColor: '#fafafa' 
+        <Box sx={{
+          display: 'flex',
+          flexDirection: { xs: 'column', md: 'row' },
+          alignItems: { xs: 'stretch', md: 'center' },
+          justifyContent: 'space-between',
+          gap: 2,
+          p: 2,
+          borderTop: '1px solid #e0e0e0',
+          backgroundColor: '#fafafa'
         }}>
           <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
             Hiển thị <strong>{((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)}</strong> của <strong>{totalItems}</strong> bản ghi
           </Typography>
-          
+
           <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="body2" color="text.secondary">Hiển thị:</Typography>
-              <Select 
-                value={itemsPerPage} 
-                onChange={handleItemsPerPageChange} 
-                size="small" 
+              <Select
+                value={itemsPerPage}
+                onChange={handleItemsPerPageChange}
+                size="small"
                 sx={{ minWidth: 80, '& .MuiSelect-select': { py: 0.5, fontSize: '0.875rem' } }}
                 renderValue={v => `${v}/ trang`}
               >
@@ -3236,143 +3158,143 @@ useEffect(() => {
                 ))}
               </Select>
             </Box>
-            
+
             {/* Pagination controls - giống như WhiteList */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Button 
-                size="small" 
-                variant="outlined" 
+              <Button
+                size="small"
+                variant="outlined"
                 onClick={() => {
                   setCurrentPage(1);
                   setSearchError(null);
-                }} 
-                disabled={currentPage === 1} 
+                }}
+                disabled={currentPage === 1}
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
                 <FirstPage fontSize="small" />
               </Button>
-              
-              <Button 
-                size="small" 
-                variant="outlined" 
+
+              <Button
+                size="small"
+                variant="outlined"
                 onClick={() => {
                   setCurrentPage(prev => Math.max(1, prev - 1));
                   setSearchError(null);
-                }} 
-                disabled={currentPage === 1} 
+                }}
+                disabled={currentPage === 1}
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
                 <ChevronLeft fontSize="small" />
               </Button>
-              
+
               {getPaginationItems(currentPage, totalPages).map((item, idx) => (
                 item === '...'
                   ? <Box key={`dots-${idx}`} sx={{ px: 1, color: '#999' }}>...</Box>
-                  : <Button 
-                      key={item} 
-                      variant={item === currentPage ? 'contained' : 'outlined'} 
-                      size="small" 
-                      onClick={() => {
-                        setCurrentPage(item);
-                        setSearchError(null);
-                      }} 
-                      sx={{ 
-                        minWidth: 32, 
-                        width: 32, 
-                        height: 32, 
-                        borderRadius: 1, 
-                        fontSize: '0.875rem', 
-                        fontWeight: item === currentPage ? 600 : 400, 
-                        ...(item === currentPage ? { 
-                          backgroundColor: '#4caf50', 
-                          color: 'white', 
-                          border: 'none', 
-                          '&:hover': { backgroundColor: '#388e3c' } 
-                        } : { 
-                          borderColor: '#e0e0e0', 
-                          color: '#666', 
-                          '&:hover': { 
-                            backgroundColor: '#f5f5f5', 
-                            borderColor: '#4caf50' 
-                          } 
-                        }) 
-                      }}
-                    >
-                      {item}
-                    </Button>
+                  : <Button
+                    key={item}
+                    variant={item === currentPage ? 'contained' : 'outlined'}
+                    size="small"
+                    onClick={() => {
+                      setCurrentPage(item);
+                      setSearchError(null);
+                    }}
+                    sx={{
+                      minWidth: 32,
+                      width: 32,
+                      height: 32,
+                      borderRadius: 1,
+                      fontSize: '0.875rem',
+                      fontWeight: item === currentPage ? 600 : 400,
+                      ...(item === currentPage ? {
+                        backgroundColor: '#4caf50',
+                        color: 'white',
+                        border: 'none',
+                        '&:hover': { backgroundColor: '#388e3c' }
+                      } : {
+                        borderColor: '#e0e0e0',
+                        color: '#666',
+                        '&:hover': {
+                          backgroundColor: '#f5f5f5',
+                          borderColor: '#4caf50'
+                        }
+                      })
+                    }}
+                  >
+                    {item}
+                  </Button>
               ))}
-              
-              <Button 
-                size="small" 
-                variant="outlined" 
+
+              <Button
+                size="small"
+                variant="outlined"
                 onClick={() => {
                   setCurrentPage(prev => Math.min(totalPages, prev + 1));
                   setSearchError(null);
-                }} 
-                disabled={currentPage === totalPages || totalPages === 0} 
+                }}
+                disabled={currentPage === totalPages || totalPages === 0}
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
                 <ChevronRight fontSize="small" />
               </Button>
-              
-              <Button 
-                size="small" 
-                variant="outlined" 
+
+              <Button
+                size="small"
+                variant="outlined"
                 onClick={() => {
                   setCurrentPage(totalPages);
                   setSearchError(null);
-                }} 
-                disabled={currentPage === totalPages || totalPages === 0} 
+                }}
+                disabled={currentPage === totalPages || totalPages === 0}
                 sx={{ minWidth: 32, width: 32, height: 32, border: '1px solid #e0e0e0', borderRadius: 1, p: 0 }}
               >
                 <LastPage fontSize="small" />
               </Button>
             </Box>
-            
+
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="body2" color="text.secondary">Đến trang:</Typography>
-              <InputBase 
-                value={gotoPage} 
-                onChange={e => setGotoPage(e.target.value.replace(/[^0-9]/g, ''))} 
-                onKeyDown={e => { 
-                  if (e.key === 'Enter') { 
-                    const page = parseInt(gotoPage, 10); 
-                    if (page && page >= 1 && page <= totalPages) { 
-                      setCurrentPage(page); 
-                      setGotoPage(''); 
+              <InputBase
+                value={gotoPage}
+                onChange={e => setGotoPage(e.target.value.replace(/[^0-9]/g, ''))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    const page = parseInt(gotoPage, 10);
+                    if (page && page >= 1 && page <= totalPages) {
+                      setCurrentPage(page);
+                      setGotoPage('');
                       setSearchError(null);
-                    } 
-                  } 
-                }} 
-                placeholder="1" 
-                sx={{ 
-                  width: 60, 
-                  height: 32, 
-                  border: '1px solid #e0e0e0', 
-                  borderRadius: 1, 
-                  px: 1, 
-                  fontSize: '0.875rem', 
-                  '& input': { textAlign: 'center' } 
-                }} 
+                    }
+                  }
+                }}
+                placeholder="1"
+                sx={{
+                  width: 60,
+                  height: 32,
+                  border: '1px solid #e0e0e0',
+                  borderRadius: 1,
+                  px: 1,
+                  fontSize: '0.875rem',
+                  '& input': { textAlign: 'center' }
+                }}
               />
-              <Button 
-                size="small" 
-                variant="outlined" 
-                onClick={() => { 
-                  const page = parseInt(gotoPage, 10); 
-                  if (page && page >= 1 && page <= totalPages) { 
-                    setCurrentPage(page); 
-                    setGotoPage(''); 
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  const page = parseInt(gotoPage, 10);
+                  if (page && page >= 1 && page <= totalPages) {
+                    setCurrentPage(page);
+                    setGotoPage('');
                     setSearchError(null);
-                  } 
-                }} 
-                disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > totalPages} 
-                sx={{ 
-                  minWidth: 'auto', 
-                  px: 2, 
-                  height: 32, 
-                  textTransform: 'none', 
-                  fontSize: '0.875rem' 
+                  }
+                }}
+                disabled={!gotoPage || parseInt(gotoPage, 10) < 1 || parseInt(gotoPage, 10) > totalPages}
+                sx={{
+                  minWidth: 'auto',
+                  px: 2,
+                  height: 32,
+                  textTransform: 'none',
+                  fontSize: '0.875rem'
                 }}
               >
                 Đi
@@ -3444,229 +3366,229 @@ useEffect(() => {
           document.body
         )}
 
-        {/* Modal xem chi tiết - Thiết kế cải tiến */}
-        {showDetailsModal && selectedResult && (
+      {/* Modal xem chi tiết - Thiết kế cải tiến */}
+      {showDetailsModal && selectedResult && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px',
+          }}
+          onClick={() => setShowDetailsModal(false)}
+        >
           <div
             style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              backgroundColor: 'white',
+              borderRadius: '16px',
+              padding: '0',
+              width: '90%',
+              maxWidth: '900px',
+              maxHeight: '90vh',
+              overflow: 'hidden',
+              position: 'relative',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 9999,
-              padding: '20px',
+              flexDirection: 'column',
             }}
-            onClick={() => setShowDetailsModal(false)}
+            onClick={(e) => e.stopPropagation()}
           >
+            {/* Header với gradient */}
             <div
               style={{
-                backgroundColor: 'white',
-                borderRadius: '16px',
-                padding: '0',
-                width: '90%',
-                maxWidth: '900px',
-                maxHeight: '90vh',
-                overflow: 'hidden',
-                position: 'relative',
-                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+                background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                padding: '20px 24px',
                 display: 'flex',
-                flexDirection: 'column',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                color: 'white',
               }}
-              onClick={(e) => e.stopPropagation()}
             >
-              {/* Header với gradient */}
-              <div
-                style={{
-                  background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                  padding: '20px 24px',
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                  borderRadius: '50%',
                   display: 'flex',
-                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  color: 'white',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{
-                    width: '40px',
-                    height: '40px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                    borderRadius: '50%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '20px'
-                  }}>
-                    🚗
-                  </div>
-                  <div>
-                    <h2 style={{ 
-                      margin: 0, 
-                      fontSize: '20px',
-                      fontWeight: '600',
-                      color: 'white'
-                    }}>
-                      Chi tiết nhận diện biển số
-                    </h2>
-                    <p style={{ 
-                      margin: '4px 0 0 0', 
-                      fontSize: '14px',
-                      color: 'rgba(255, 255, 255, 0.8)'
-                    }}>
-                      Thông tin chi tiết về kết quả nhận diện
-                    </p>
-                  </div>
-                </div>
-                <button
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.2)',
-                    border: 'none',
-                    fontSize: '24px',
-                    cursor: 'pointer',
-                    color: 'white',
-                    padding: '8px',
-                    borderRadius: '50%',
-                    width: '40px',
-                    height: '40px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'background 0.2s ease',
-                  }}
-                  onClick={() => setShowDetailsModal(false)}
-                  onMouseOver={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.3)'}
-                  onMouseOut={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
-                >
-                  ×
-                </button>
-              </div>
-              
-              {/* Content với scroll */}
-              <div style={{ 
-                padding: '24px', 
-                maxHeight: 'calc(90vh - 120px)', 
-                overflow: 'auto',
-                flex: 1
-              }}>
-                {/* Thông tin chính - Layout 2 cột */}
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: '1fr 1fr', 
-                  gap: '20px', 
-                  marginBottom: '24px' 
+                  justifyContent: 'center',
+                  fontSize: '20px'
                 }}>
-                  {/* Biển số xe */}
-                  <div style={{
-                    background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
-                    padding: '20px',
-                    borderRadius: '12px',
-                    textAlign: 'center',
-                    border: '2px solid #1976d2',
-                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.15)'
+                  🚗
+                </div>
+                <div>
+                  <h2 style={{
+                    margin: 0,
+                    fontSize: '20px',
+                    fontWeight: '600',
+                    color: 'white'
                   }}>
-                    <div style={{ fontSize: '14px', color: '#1565c0', marginBottom: '8px', fontWeight: '500' }}>
-                      🚗 Biển số xe
-                    </div>
-                    <div style={{ 
-                      fontSize: '24px', 
-                      fontWeight: 'bold', 
-                      color: '#1976d2',
-                      textShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                    }}>
-                      {selectedResult.plate_number || 'N/A'}
-                    </div>
-                    {selectedResult.ocr_raw_text && selectedResult.ocr_raw_text !== selectedResult.plate_number && (
-                      <div style={{ 
-                        fontSize: '12px', 
-                        color: '#666', 
-                        marginTop: '4px',
-                        fontStyle: 'italic'
-                      }}>
-                        Raw: {selectedResult.ocr_raw_text}
-                      </div>
-                    )}
+                    Chi tiết nhận diện biển số
+                  </h2>
+                  <p style={{
+                    margin: '4px 0 0 0',
+                    fontSize: '14px',
+                    color: 'rgba(255, 255, 255, 0.8)'
+                  }}>
+                    Thông tin chi tiết về kết quả nhận diện
+                  </p>
+                </div>
+              </div>
+              <button
+                style={{
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: 'white',
+                  padding: '8px',
+                  borderRadius: '50%',
+                  width: '40px',
+                  height: '40px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s ease',
+                }}
+                onClick={() => setShowDetailsModal(false)}
+                onMouseOver={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.3)'}
+                onMouseOut={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content với scroll */}
+            <div style={{
+              padding: '24px',
+              maxHeight: 'calc(90vh - 120px)',
+              overflow: 'auto',
+              flex: 1
+            }}>
+              {/* Thông tin chính - Layout 2 cột */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '20px',
+                marginBottom: '24px'
+              }}>
+                {/* Biển số xe */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+                  padding: '20px',
+                  borderRadius: '12px',
+                  textAlign: 'center',
+                  border: '2px solid #1976d2',
+                  boxShadow: '0 4px 12px rgba(25, 118, 210, 0.15)'
+                }}>
+                  <div style={{ fontSize: '14px', color: '#1565c0', marginBottom: '8px', fontWeight: '500' }}>
+                    🚗 Biển số xe
                   </div>
-                  
-                  {/* Độ tin cậy */}
                   <div style={{
-                    background: 'linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%)',
-                    padding: '20px',
-                    borderRadius: '12px',
-                    textAlign: 'center',
-                    border: '2px solid #7b1fa2',
-                    boxShadow: '0 4px 12px rgba(123, 31, 162, 0.15)'
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                    color: '#1976d2',
+                    textShadow: '0 1px 2px rgba(0,0,0,0.1)'
                   }}>
-                    <div style={{ fontSize: '14px', color: '#6a1b9a', marginBottom: '12px', fontWeight: '500' }}>
-                      🎯 Độ tin cậy
+                    {selectedResult.plate_number || 'N/A'}
+                  </div>
+                  {selectedResult.ocr_raw_text && selectedResult.ocr_raw_text !== selectedResult.plate_number && (
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#666',
+                      marginTop: '4px',
+                      fontStyle: 'italic'
+                    }}>
+                      Raw: {selectedResult.ocr_raw_text}
                     </div>
-                    
-                    {/* Confidence Score chính */}
-                    {parseFloat(selectedResult.confidence_score) > 0 && (
-                      <div style={{ 
-                        fontSize: '20px', 
-                        fontWeight: 'bold', 
-                        color: '#7b1fa2',
-                        textShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                        marginBottom: '8px'
+                  )}
+                </div>
+
+                {/* Độ tin cậy */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%)',
+                  padding: '20px',
+                  borderRadius: '12px',
+                  textAlign: 'center',
+                  border: '2px solid #7b1fa2',
+                  boxShadow: '0 4px 12px rgba(123, 31, 162, 0.15)'
+                }}>
+                  <div style={{ fontSize: '14px', color: '#6a1b9a', marginBottom: '12px', fontWeight: '500' }}>
+                    🎯 Độ tin cậy
+                  </div>
+
+                  {/* Confidence Score chính */}
+                  {parseFloat(selectedResult.confidence_score) > 0 && (
+                    <div style={{
+                      fontSize: '20px',
+                      fontWeight: 'bold',
+                      color: '#7b1fa2',
+                      textShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                      marginBottom: '8px'
+                    }}>
+                      Tổng: {(parseFloat(selectedResult.confidence_score) * 100).toFixed(1)}%
+                    </div>
+                  )}
+
+                  {/* Chi tiết OCR và Detection */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'center' }}>
+                    {parseFloat(selectedResult.ocr_confidence) > 0 && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        background: 'rgba(255,255,255,0.7)',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        fontSize: '12px'
                       }}>
-                        Tổng: {(parseFloat(selectedResult.confidence_score) * 100).toFixed(1)}%
+                        <span style={{ fontWeight: '500', color: '#6a1b9a' }}>OCR:</span>
+                        <span style={{
+                          fontWeight: 'bold',
+                          color: parseFloat(selectedResult.ocr_confidence) > 0.8 ? '#2e7d32' :
+                            parseFloat(selectedResult.ocr_confidence) > 0.6 ? '#f57c00' : '#d32f2f'
+                        }}>
+                          {(parseFloat(selectedResult.ocr_confidence) * 100).toFixed(0)}%
+                        </span>
                       </div>
                     )}
-                    
-                    {/* Chi tiết OCR và Detection */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'center' }}>
-                      {parseFloat(selectedResult.ocr_confidence) > 0 && (
-                        <div style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: '8px',
-                          background: 'rgba(255,255,255,0.7)',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          fontSize: '12px'
+
+                    {parseFloat(selectedResult.detection_confidence) > 0 && (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        background: 'rgba(255,255,255,0.7)',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        fontSize: '12px'
+                      }}>
+                        <span style={{ fontWeight: '500', color: '#6a1b9a' }}>Detection:</span>
+                        <span style={{
+                          fontWeight: 'bold',
+                          color: parseFloat(selectedResult.detection_confidence) > 0.8 ? '#1565c0' :
+                            parseFloat(selectedResult.detection_confidence) > 0.6 ? '#f57f17' : '#c2185b'
                         }}>
-                          <span style={{ fontWeight: '500', color: '#6a1b9a' }}>OCR:</span>
-                          <span style={{ 
-                            fontWeight: 'bold',
-                            color: parseFloat(selectedResult.ocr_confidence) > 0.8 ? '#2e7d32' : 
-                                   parseFloat(selectedResult.ocr_confidence) > 0.6 ? '#f57c00' : '#d32f2f'
-                          }}>
-                            {(parseFloat(selectedResult.ocr_confidence) * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      )}
-                      
-                      {parseFloat(selectedResult.detection_confidence) > 0 && (
-                        <div style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: '8px',
-                          background: 'rgba(255,255,255,0.7)',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          fontSize: '12px'
-                        }}>
-                          <span style={{ fontWeight: '500', color: '#6a1b9a' }}>Detection:</span>
-                          <span style={{ 
-                            fontWeight: 'bold',
-                            color: parseFloat(selectedResult.detection_confidence) > 0.8 ? '#1565c0' : 
-                                   parseFloat(selectedResult.detection_confidence) > 0.6 ? '#f57f17' : '#c2185b'
-                          }}>
-                            {(parseFloat(selectedResult.detection_confidence) * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      )}
-                      
-                      {/* Hiển thị thông báo nếu không có độ tin cậy nào */}
-                      {parseFloat(selectedResult.confidence_score) === 0 && 
-                       parseFloat(selectedResult.ocr_confidence) === 0 && 
-                       parseFloat(selectedResult.detection_confidence) === 0 && (
-                        <div style={{ 
-                          fontSize: '12px', 
-                          color: '#d32f2f', 
+                          {(parseFloat(selectedResult.detection_confidence) * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Hiển thị thông báo nếu không có độ tin cậy nào */}
+                    {parseFloat(selectedResult.confidence_score) === 0 &&
+                      parseFloat(selectedResult.ocr_confidence) === 0 &&
+                      parseFloat(selectedResult.detection_confidence) === 0 && (
+                        <div style={{
+                          fontSize: '12px',
+                          color: '#d32f2f',
                           fontStyle: 'italic',
                           background: 'rgba(255,255,255,0.7)',
                           padding: '4px 8px',
@@ -3675,11 +3597,379 @@ useEffect(() => {
                           Chưa có dữ liệu độ tin cậy
                         </div>
                       )}
-                    </div>
                   </div>
                 </div>
-                
-                {/* Thông tin chi tiết - Layout 3 cột */}
+              </div>
+
+              {/* Thông tin chi tiết - Layout 3 cột */}
+              <div style={{
+                background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '24px',
+                border: '1px solid #e0e0e0',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+              }}>
+                <h3 style={{
+                  margin: '0 0 16px 0',
+                  color: '#333',
+                  fontSize: '18px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  📋 Thông tin chi tiết
+                </h3>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '16px'
+                }}>
+                  <div style={{
+                    background: 'white',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid #e0e0e0'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
+                      🕐 Thời gian nhận diện
+                    </div>
+                    <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
+                      {selectedResult.detected_at ?
+                        formatDateTimeForDisplay(selectedResult.detected_at) :
+                        'N/A'
+                      }
+                    </div>
+                  </div>
+
+                  <div style={{
+                    background: 'white',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid #e0e0e0'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
+                      ✅ Trạng thái xác minh
+                    </div>
+                    <div style={{
+                      fontWeight: '600',
+                      color: selectedResult.is_verified ? '#4caf50' : '#ff9800',
+                      fontSize: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      {selectedResult.is_verified ? '✅ Đã xác minh' : '⏳ Chưa xác minh'}
+                    </div>
+                  </div>
+
+                  {selectedResult.source_type === 'video_upload' ? (
+                    <div style={{
+                      background: 'white',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: '1px solid #e0e0e0'
+                    }}>
+                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
+                        🎬 Video Upload
+                      </div>
+                      <div style={{ fontWeight: '600', color: '#333', fontSize: '14px', wordBreak: 'break-all' }}>
+                        {selectedResult.video_filename || 'N/A'}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{
+                        background: 'white',
+                        padding: '12px',
+                        borderRadius: '8px',
+                        border: '1px solid #e0e0e0'
+                      }}>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
+                          📹 Camera
+                        </div>
+                        <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
+                          {selectedResult.camera_name || `Camera ${selectedResult.camera_id}` || 'N/A'}
+                        </div>
+                      </div>
+
+                      <div style={{
+                        background: 'white',
+                        padding: '12px',
+                        borderRadius: '8px',
+                        border: '1px solid #e0e0e0'
+                      }}>
+                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
+                          📍 Khu vực
+                        </div>
+                        <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
+                          {selectedResult.location_name || 'N/A'}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                </div>
+              </div>
+
+              {/* Hình ảnh biển số */}
+              {selectedResult.cropped_plate_image_path && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid #e0e0e0',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+                }}>
+                  <h3 style={{
+                    margin: '0 0 16px 0',
+                    color: '#333',
+                    fontSize: '18px',
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    📸 Hình ảnh biển số
+                  </h3>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    background: 'white',
+                    borderRadius: '8px',
+                    padding: '16px',
+                    border: '2px solid #e0e0e0',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  }}>
+                    <img
+                      src={(() => {
+                        let imagePath = selectedResult.cropped_plate_image_path;
+                        if (imagePath.includes('/static/crops//static/crops/')) {
+                          imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                        }
+                        // Xử lý đường dẫn ảnh
+                        if (imagePath.startsWith('/static/crops/')) {
+                          return `http://localhost:5000${imagePath}`;
+                        } else if (imagePath.startsWith('static/crops/')) {
+                          return `http://localhost:5000/${imagePath}`;
+                        } else {
+                          return `http://localhost:5000/static/crops/${imagePath}`;
+                        }
+                      })()}
+                      alt="Biển số xe"
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '300px',
+                        width: '100%',
+                        height: 'auto',
+                        objectFit: 'contain',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                      }}
+                      onError={(e) => {
+                        console.error('Error loading image:', selectedResult.cropped_plate_image_path);
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer với gradient */}
+            <div style={{
+              background: 'linear-gradient(135deg, #f5f5f5 0%, #eeeeee 100%)',
+              padding: '16px 24px',
+              borderTop: '1px solid #e0e0e0',
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              borderRadius: '0 0 16px 16px'
+            }}>
+              {selectedResult.cropped_plate_image_path && (
+                <button
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: '#2196f3',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'all 0.2s ease',
+                    boxShadow: '0 2px 8px rgba(33, 150, 243, 0.3)'
+                  }}
+                  onClick={() => {
+                    if (selectedResult.cropped_plate_image_path) {
+                      let imagePath = selectedResult.cropped_plate_image_path;
+                      if (imagePath.includes('/static/crops//static/crops/')) {
+                        imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                      }
+                      const imageUrl = imagePath.startsWith('/static/crops/')
+                        ? `http://localhost:5000${imagePath}`
+                        : `http://localhost:5000/static/crops/${imagePath}`;
+                      window.open(imageUrl, '_blank');
+                    }
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.backgroundColor = '#1976d2';
+                    e.target.style.transform = 'translateY(-1px)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.backgroundColor = '#2196f3';
+                    e.target.style.transform = 'translateY(0)';
+                  }}
+                >
+                  📷 Mở hình ảnh
+                </button>
+              )}
+              <button
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#757575',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 2px 8px rgba(117, 117, 117, 0.3)'
+                }}
+                onClick={() => setShowDetailsModal(false)}
+                onMouseOver={(e) => {
+                  e.target.style.backgroundColor = '#616161';
+                  e.target.style.transform = 'translateY(-1px)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.backgroundColor = '#757575';
+                  e.target.style.transform = 'translateY(0)';
+                }}
+              >
+                ✕ Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* Modal xác nhận hành động - Format giống modal xem chi tiết */}
+      {confirmationModal.open && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            padding: '20px',
+          }}
+          onClick={closeConfirmationModal}
+        >
+          <div
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '16px',
+              padding: '0',
+              width: '90%',
+              maxWidth: '600px',
+              maxHeight: '90vh',
+              overflow: 'hidden',
+              position: 'relative',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header với gradient - Format giống modal xem chi tiết */}
+            <div
+              style={{
+                background: confirmationModal.type === 'delete'
+                  ? 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)'
+                  : 'linear-gradient(135deg, #4caf50 0%, #388e3c 100%)',
+                padding: '20px 24px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                color: 'white',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '20px'
+                }}>
+                  {confirmationModal.type === 'delete' ? '🗑️' : '🔍'}
+                </div>
+                <div>
+                  <h2 style={{
+                    margin: 0,
+                    fontSize: '20px',
+                    fontWeight: '600',
+                    color: 'white'
+                  }}>
+                    {confirmationModal.title}
+                  </h2>
+                  <p style={{
+                    margin: '4px 0 0 0',
+                    fontSize: '14px',
+                    color: 'rgba(255, 255, 255, 0.8)'
+                  }}>
+                    {confirmationModal.message}
+                  </p>
+                </div>
+              </div>
+              <button
+                style={{
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: 'white',
+                  padding: '8px',
+                  borderRadius: '50%',
+                  width: '40px',
+                  height: '40px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s ease',
+                }}
+                onClick={closeConfirmationModal}
+                onMouseOver={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.3)'}
+                onMouseOut={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content với scroll - Format giống modal xem chi tiết */}
+            <div style={{
+              padding: '24px',
+              maxHeight: 'calc(90vh - 120px)',
+              overflow: 'auto',
+              flex: 1
+            }}>
+              {/* Chỉ hiển thị chi tiết cho chức năng xác minh */}
+              {confirmationModal.type === 'verify' && confirmationModal.details.length > 0 && (
                 <div style={{
                   background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
                   borderRadius: '12px',
@@ -3688,9 +3978,9 @@ useEffect(() => {
                   border: '1px solid #e0e0e0',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
                 }}>
-                  <h3 style={{ 
-                    margin: '0 0 16px 0', 
-                    color: '#333', 
+                  <h3 style={{
+                    margin: '0 0 16px 0',
+                    color: '#333',
                     fontSize: '18px',
                     fontWeight: '600',
                     display: 'flex',
@@ -3699,563 +3989,195 @@ useEffect(() => {
                   }}>
                     📋 Thông tin chi tiết
                   </h3>
-                  <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                    gap: '16px' 
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '16px'
                   }}>
-                    <div style={{
-                      background: 'white',
-                      padding: '12px',
-                      borderRadius: '8px',
-                      border: '1px solid #e0e0e0'
-                    }}>
-                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
-                        🕐 Thời gian nhận diện
-                      </div>
-                      <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
-                        {selectedResult.detected_at ? 
-                          formatDateTimeForDisplay(selectedResult.detected_at) : 
-                          'N/A'
-                        }
-                      </div>
-                    </div>
-                    
-                    <div style={{
-                      background: 'white',
-                      padding: '12px',
-                      borderRadius: '8px',
-                      border: '1px solid #e0e0e0'
-                    }}>
-                      <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
-                        ✅ Trạng thái xác minh
-                      </div>
-                      <div style={{ 
-                        fontWeight: '600', 
-                        color: selectedResult.is_verified ? '#4caf50' : '#ff9800',
-                        fontSize: '14px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}>
-                        {selectedResult.is_verified ? '✅ Đã xác minh' : '⏳ Chưa xác minh'}
-                      </div>
-                    </div>
-                    
-                    {selectedResult.source_type === 'video_upload' ? (
-                      <div style={{
-                        background: 'white',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        border: '1px solid #e0e0e0'
-                      }}>
-                        <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
-                          🎬 Video Upload
-                        </div>
-                        <div style={{ fontWeight: '600', color: '#333', fontSize: '14px', wordBreak: 'break-all' }}>
-                          {selectedResult.video_filename || 'N/A'}
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{
+                    {confirmationModal.details.map((detail, index) => (
+                      <div
+                        key={index}
+                        style={{
                           background: 'white',
                           padding: '12px',
                           borderRadius: '8px',
-                          border: '1px solid #e0e0e0'
-                        }}>
-                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
-                            📹 Camera
-                          </div>
-                          <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
-                            {selectedResult.camera_name || `Camera ${selectedResult.camera_id}` || 'N/A'}
-                          </div>
-                        </div>
-                        
-                        <div style={{
-                          background: 'white',
-                          padding: '12px',
-                          borderRadius: '8px',
-                          border: '1px solid #e0e0e0'
-                        }}>
-                          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px', fontWeight: '500' }}>
-                            📍 Khu vực
-                          </div>
-                          <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
-                            {selectedResult.location_name || 'N/A'}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                    
+                          border: '1px solid #e0e0e0',
+                          fontSize: '14px',
+                          color: '#333',
+                          fontWeight: '500'
+                        }}
+                      >
+                        {detail}
+                      </div>
+                    ))}
                   </div>
                 </div>
-                
-                {/* Hình ảnh biển số */}
-                {selectedResult.cropped_plate_image_path && (
-                  <div style={{
-                    background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    border: '1px solid #e0e0e0',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
-                  }}>
-                    <h3 style={{ 
-                      margin: '0 0 16px 0', 
-                      color: '#333', 
-                      fontSize: '18px',
-                      fontWeight: '600',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}>
-                      📸 Hình ảnh biển số
-                    </h3>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'center',
-                      background: 'white',
-                      borderRadius: '8px',
-                      padding: '16px',
-                      border: '2px solid #e0e0e0',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                    }}>
-                      <img
-                        src={(() => {
-                          let imagePath = selectedResult.cropped_plate_image_path;
-                          if (imagePath.includes('/static/crops//static/crops/')) {
-                            imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
-                          }
-                                // Xử lý đường dẫn ảnh
-                                if (imagePath.startsWith('/static/crops/')) {
-                                  return `http://localhost:5000${imagePath}`;
-                                } else if (imagePath.startsWith('static/crops/')) {
-                                  return `http://localhost:5000/${imagePath}`;
-                                } else {
-                                  return `http://localhost:5000/static/crops/${imagePath}`;
-                                }
-                        })()}
-                        alt="Biển số xe"
-                        style={{
-                          maxWidth: '100%',
-                          maxHeight: '300px',
-                          width: '100%',
-                          height: 'auto',
-                          objectFit: 'contain',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                        }}
-                        onError={(e) => {
-                          console.error('Error loading image:', selectedResult.cropped_plate_image_path);
-                          e.target.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              {/* Footer với gradient */}
-              <div style={{
-                background: 'linear-gradient(135deg, #f5f5f5 0%, #eeeeee 100%)',
-                padding: '16px 24px',
-                borderTop: '1px solid #e0e0e0',
-                display: 'flex',
-                gap: '12px',
-                justifyContent: 'flex-end',
-                borderRadius: '0 0 16px 16px'
-              }}>
-                {selectedResult.cropped_plate_image_path && (
-                  <button
-                    style={{
-                      padding: '10px 20px',
-                      backgroundColor: '#2196f3',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      transition: 'all 0.2s ease',
-                      boxShadow: '0 2px 8px rgba(33, 150, 243, 0.3)'
-                    }}
-                    onClick={() => {
-                      if (selectedResult.cropped_plate_image_path) {
-                        let imagePath = selectedResult.cropped_plate_image_path;
-                        if (imagePath.includes('/static/crops//static/crops/')) {
-                          imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
-                        }
-                        const imageUrl = imagePath.startsWith('/static/crops/') 
-                          ? `http://localhost:5000${imagePath}`
-                          : `http://localhost:5000/static/crops/${imagePath}`;
-                        window.open(imageUrl, '_blank');
-                      }
-                    }}
-                    onMouseOver={(e) => {
-                      e.target.style.backgroundColor = '#1976d2';
-                      e.target.style.transform = 'translateY(-1px)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.target.style.backgroundColor = '#2196f3';
-                      e.target.style.transform = 'translateY(0)';
-                    }}
-                  >
-                    📷 Mở hình ảnh
-                  </button>
-                )}
-                <button
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#757575',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'all 0.2s ease',
-                    boxShadow: '0 2px 8px rgba(117, 117, 117, 0.3)'
-                  }}
-                  onClick={() => setShowDetailsModal(false)}
-                  onMouseOver={(e) => {
-                    e.target.style.backgroundColor = '#616161';
-                    e.target.style.transform = 'translateY(-1px)';
-                  }}
-                  onMouseOut={(e) => {
-                    e.target.style.backgroundColor = '#757575';
-                    e.target.style.transform = 'translateY(0)';
-                  }}
-                >
-                  ✕ Đóng
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+              )}
 
-
-        {/* Modal xác nhận hành động - Format giống modal xem chi tiết */}
-        {confirmationModal.open && (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.6)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 10000,
-              padding: '20px',
-            }}
-            onClick={closeConfirmationModal}
-          >
-            <div
-              style={{
-                backgroundColor: 'white',
-                borderRadius: '16px',
-                padding: '0',
-                width: '90%',
-                maxWidth: '600px',
-                maxHeight: '90vh',
-                overflow: 'hidden',
-                position: 'relative',
-                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header với gradient - Format giống modal xem chi tiết */}
-              <div
-                style={{
-                  background: confirmationModal.type === 'delete' 
-                    ? 'linear-gradient(135deg, #f44336 0%, #d32f2f 100%)'
-                    : 'linear-gradient(135deg, #4caf50 0%, #388e3c 100%)',
-                  padding: '20px 24px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  color: 'white',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{
-                    width: '40px',
-                    height: '40px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                    borderRadius: '50%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '20px'
-                  }}>
-                    {confirmationModal.type === 'delete' ? '🗑️' : '🔍'}
-                  </div>
-                  <div>
-                    <h2 style={{ 
-                      margin: 0, 
-                      fontSize: '20px',
-                      fontWeight: '600',
-                      color: 'white'
-                    }}>
-                      {confirmationModal.title}
-                    </h2>
-                    <p style={{ 
-                      margin: '4px 0 0 0', 
-                      fontSize: '14px',
-                      color: 'rgba(255, 255, 255, 0.8)'
-                    }}>
-                      {confirmationModal.message}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.2)',
-                    border: 'none',
-                    fontSize: '24px',
-                    cursor: 'pointer',
-                    color: 'white',
-                    padding: '8px',
-                    borderRadius: '50%',
-                    width: '40px',
-                    height: '40px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'background 0.2s ease',
-                  }}
-                  onClick={closeConfirmationModal}
-                  onMouseOver={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.3)'}
-                  onMouseOut={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
-                >
-                  ×
-                </button>
-              </div>
-              
-              {/* Content với scroll - Format giống modal xem chi tiết */}
-              <div style={{ 
-                padding: '24px', 
-                maxHeight: 'calc(90vh - 120px)', 
-                overflow: 'auto',
-                flex: 1
-              }}>
-                {/* Chỉ hiển thị chi tiết cho chức năng xác minh */}
-                {confirmationModal.type === 'verify' && confirmationModal.details.length > 0 && (
-                  <div style={{
-                    background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    marginBottom: '24px',
-                    border: '1px solid #e0e0e0',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
-                  }}>
-                    <h3 style={{ 
-                      margin: '0 0 16px 0', 
-                      color: '#333', 
-                      fontSize: '18px',
-                      fontWeight: '600',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}>
-                      📋 Thông tin chi tiết
-                    </h3>
-                    <div style={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                      gap: '16px' 
-                    }}>
-                      {confirmationModal.details.map((detail, index) => (
-                        <div 
-                          key={index}
-                          style={{
-                            background: 'white',
-                            padding: '12px',
-                            borderRadius: '8px',
-                            border: '1px solid #e0e0e0',
-                            fontSize: '14px',
-                            color: '#333',
-                            fontWeight: '500'
-                          }}
-                        >
-                          {detail}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Hình ảnh biển số - chỉ hiển thị cho chức năng xác minh */}
-                {confirmationModal.type === 'verify' && confirmationModal.result && confirmationModal.result.cropped_plate_image_path && (
-                  <div style={{
-                    background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    border: '1px solid #e0e0e0',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
-                  }}>
-                    <h3 style={{ 
-                      margin: '0 0 16px 0', 
-                      color: '#333', 
-                      fontSize: '18px',
-                      fontWeight: '600',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}>
-                      📸 Hình ảnh biển số
-                    </h3>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'center',
-                      background: 'white',
-                      borderRadius: '8px',
-                      padding: '16px',
-                      border: '2px solid #e0e0e0',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                    }}>
-                      <img
-                        src={(() => {
-                          let imagePath = confirmationModal.result.cropped_plate_image_path;
-                          if (imagePath.includes('/static/crops//static/crops/')) {
-                            imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
-                          }
-                                // Xử lý đường dẫn ảnh
-                                if (imagePath.startsWith('/static/crops/')) {
-                                  return `http://localhost:5000${imagePath}`;
-                                } else if (imagePath.startsWith('static/crops/')) {
-                                  return `http://localhost:5000/${imagePath}`;
-                                } else {
-                                  return `http://localhost:5000/static/crops/${imagePath}`;
-                                }
-                        })()}
-                        alt="Biển số xe"
-                        style={{
-                          maxWidth: '100%',
-                          maxHeight: '200px',
-                          width: '100%',
-                          height: 'auto',
-                          objectFit: 'contain',
-                          borderRadius: '8px',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                        }}
-                        onError={(e) => {
-                          console.error('Error loading image:', confirmationModal.result.cropped_plate_image_path);
-                          e.target.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              {/* Footer với buttons - Format giống modal xem chi tiết */}
-              <div style={{
-                background: 'linear-gradient(135deg, #f5f5f5 0%, #eeeeee 100%)',
-                padding: '16px 24px',
-                borderTop: '1px solid #e0e0e0',
-                display: 'flex',
-                gap: '12px',
-                justifyContent: 'flex-end',
-                borderRadius: '0 0 16px 16px'
-              }}>
-                <button
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#757575',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'all 0.2s ease',
-                    boxShadow: '0 2px 8px rgba(117, 117, 117, 0.3)',
-                    opacity: confirmationModal.loading ? 0.6 : 1,
-                    pointerEvents: confirmationModal.loading ? 'none' : 'auto'
-                  }}
-                  onClick={closeConfirmationModal}
-                  onMouseOver={(e) => {
-                    if (!confirmationModal.loading) {
-                      e.target.style.backgroundColor = '#616161';
-                      e.target.style.transform = 'translateY(-1px)';
-                    }
-                  }}
-                  onMouseOut={(e) => {
-                    if (!confirmationModal.loading) {
-                      e.target.style.backgroundColor = '#757575';
-                      e.target.style.transform = 'translateY(0)';
-                    }
-                  }}
-                >
-                  ✕ Hủy bỏ
-                </button>
-                <button
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: confirmationModal.type === 'delete' ? '#f44336' : '#4caf50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: confirmationModal.loading ? 'not-allowed' : 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'all 0.2s ease',
-                    boxShadow: confirmationModal.type === 'delete' 
-                      ? '0 2px 8px rgba(244, 67, 54, 0.3)'
-                      : '0 2px 8px rgba(76, 175, 80, 0.3)',
-                    opacity: confirmationModal.loading ? 0.6 : 1,
-                    pointerEvents: confirmationModal.loading ? 'none' : 'auto',
+              {/* Hình ảnh biển số - chỉ hiển thị cho chức năng xác minh */}
+              {confirmationModal.type === 'verify' && confirmationModal.result && confirmationModal.result.cropped_plate_image_path && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  border: '1px solid #e0e0e0',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+                }}>
+                  <h3 style={{
+                    margin: '0 0 16px 0',
+                    color: '#333',
+                    fontSize: '18px',
+                    fontWeight: '600',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px'
-                  }}
-                  onClick={confirmationModal.onConfirm}
-                  onMouseOver={(e) => {
-                    if (!confirmationModal.loading) {
-                      e.target.style.backgroundColor = confirmationModal.type === 'delete' ? '#d32f2f' : '#388e3c';
-                      e.target.style.transform = 'translateY(-1px)';
-                    }
-                  }}
-                  onMouseOut={(e) => {
-                    if (!confirmationModal.loading) {
-                      e.target.style.backgroundColor = confirmationModal.type === 'delete' ? '#f44336' : '#4caf50';
-                      e.target.style.transform = 'translateY(0)';
-                    }
-                  }}
-                >
-                  {confirmationModal.loading ? (
-                    <>
-                      <div style={{
-                        width: '16px',
-                        height: '16px',
-                        border: '2px solid rgba(255,255,255,0.3)',
-                        borderTop: '2px solid white',
-                        borderRadius: '50%',
-                        animation: 'spin 1s linear infinite'
-                      }} />
-                      Đang xử lý...
-                    </>
-                  ) : (
-                    <>
-                      {confirmationModal.type === 'delete' ? '🗑️ Xóa' : '✅ Xác minh'}
-                    </>
-                  )}
-                </button>
-              </div>
+                  }}>
+                    📸 Hình ảnh biển số
+                  </h3>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    background: 'white',
+                    borderRadius: '8px',
+                    padding: '16px',
+                    border: '2px solid #e0e0e0',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  }}>
+                    <img
+                      src={(() => {
+                        let imagePath = confirmationModal.result.cropped_plate_image_path;
+                        if (imagePath.includes('/static/crops//static/crops/')) {
+                          imagePath = imagePath.replace('/static/crops//static/crops/', '/static/crops/');
+                        }
+                        // Xử lý đường dẫn ảnh
+                        if (imagePath.startsWith('/static/crops/')) {
+                          return `http://localhost:5000${imagePath}`;
+                        } else if (imagePath.startsWith('static/crops/')) {
+                          return `http://localhost:5000/${imagePath}`;
+                        } else {
+                          return `http://localhost:5000/static/crops/${imagePath}`;
+                        }
+                      })()}
+                      alt="Biển số xe"
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '200px',
+                        width: '100%',
+                        height: 'auto',
+                        objectFit: 'contain',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                      }}
+                      onError={(e) => {
+                        console.error('Error loading image:', confirmationModal.result.cropped_plate_image_path);
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer với buttons - Format giống modal xem chi tiết */}
+            <div style={{
+              background: 'linear-gradient(135deg, #f5f5f5 0%, #eeeeee 100%)',
+              padding: '16px 24px',
+              borderTop: '1px solid #e0e0e0',
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              borderRadius: '0 0 16px 16px'
+            }}>
+              <button
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#757575',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 2px 8px rgba(117, 117, 117, 0.3)',
+                  opacity: confirmationModal.loading ? 0.6 : 1,
+                  pointerEvents: confirmationModal.loading ? 'none' : 'auto'
+                }}
+                onClick={closeConfirmationModal}
+                onMouseOver={(e) => {
+                  if (!confirmationModal.loading) {
+                    e.target.style.backgroundColor = '#616161';
+                    e.target.style.transform = 'translateY(-1px)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!confirmationModal.loading) {
+                    e.target.style.backgroundColor = '#757575';
+                    e.target.style.transform = 'translateY(0)';
+                  }
+                }}
+              >
+                ✕ Hủy bỏ
+              </button>
+              <button
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: confirmationModal.type === 'delete' ? '#f44336' : '#4caf50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: confirmationModal.loading ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease',
+                  boxShadow: confirmationModal.type === 'delete'
+                    ? '0 2px 8px rgba(244, 67, 54, 0.3)'
+                    : '0 2px 8px rgba(76, 175, 80, 0.3)',
+                  opacity: confirmationModal.loading ? 0.6 : 1,
+                  pointerEvents: confirmationModal.loading ? 'none' : 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onClick={confirmationModal.onConfirm}
+                onMouseOver={(e) => {
+                  if (!confirmationModal.loading) {
+                    e.target.style.backgroundColor = confirmationModal.type === 'delete' ? '#d32f2f' : '#388e3c';
+                    e.target.style.transform = 'translateY(-1px)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!confirmationModal.loading) {
+                    e.target.style.backgroundColor = confirmationModal.type === 'delete' ? '#f44336' : '#4caf50';
+                    e.target.style.transform = 'translateY(0)';
+                  }
+                }}
+              >
+                {confirmationModal.loading ? (
+                  <>
+                    <div style={{
+                      width: '16px',
+                      height: '16px',
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderTop: '2px solid white',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite'
+                    }} />
+                    Đang xử lý...
+                  </>
+                ) : (
+                  <>
+                    {confirmationModal.type === 'delete' ? '🗑️ Xóa' : '✅ Xác minh'}
+                  </>
+                )}
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* CSS Animation */}
-        <style jsx>{`
+      {/* CSS Animation */}
+      <style jsx>{`
           @keyframes modalSlideIn {
             from {
               opacity: 0;
@@ -4273,35 +4195,35 @@ useEffect(() => {
           }
         `}</style>
 
-        {/* Enhanced Alert (giống User management) */}
-        {alertBox.open && (
-          <Alert 
-            severity={alertBox.error ? 'error' : 'success'}
-            onClose={() => setAlertBox({ ...alertBox, open: false })}
-            sx={{ 
-              position: 'fixed', 
-              top: 20, 
-              right: 20, 
-              zIndex: 9999,
-              minWidth: 350,
-              borderRadius: 3,
-              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
-              border: '1px solid #e0e0e0',
-              '& .MuiAlert-icon': {
-                fontSize: '1.5rem'
-              },
-              '& .MuiAlert-message': {
-                fontWeight: 500
-              }
-            }}
-          >
-            {alertBox.msg}
-          </Alert>
-        )}
+      {/* Enhanced Alert (giống User management) */}
+      {alertBox.open && (
+        <Alert
+          severity={alertBox.error ? 'error' : 'success'}
+          onClose={() => setAlertBox({ ...alertBox, open: false })}
+          sx={{
+            position: 'fixed',
+            top: 20,
+            right: 20,
+            zIndex: 9999,
+            minWidth: 350,
+            borderRadius: 3,
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.12)',
+            border: '1px solid #e0e0e0',
+            '& .MuiAlert-icon': {
+              fontSize: '1.5rem'
+            },
+            '& .MuiAlert-message': {
+              fontWeight: 500
+            }
+          }}
+        >
+          {alertBox.msg}
+        </Alert>
+      )}
 
       {/* Log Panel - Hiển thị thông báo nhận diện */}
       {showLogPanel && (
-        <Card sx={{ 
+        <Card sx={{
           position: 'fixed',
           bottom: 20,
           right: 20,
@@ -4316,7 +4238,7 @@ useEffect(() => {
           animation: 'fadeInUp 0.5s ease-out'
         }}>
           {/* Header của Log Panel */}
-          <Box sx={{ 
+          <Box sx={{
             background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
             color: 'white',
             p: 1.5
@@ -4325,17 +4247,17 @@ useEffect(() => {
             <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
               <Box display="flex" alignItems="center" gap={1}>
                 <NotificationIcon sx={{ fontSize: 18 }} />
-                <Typography variant="subtitle2" sx={{ 
+                <Typography variant="subtitle2" sx={{
                   fontWeight: 600,
                   fontSize: '0.875rem'
                 }}>
                   Thông báo nhận diện
                 </Typography>
-                <Chip 
-                  label={getFilteredLogEntries().length} 
-                  size="small" 
-                  sx={{ 
-                    backgroundColor: 'rgba(255,255,255,0.2)', 
+                <Chip
+                  label={getFilteredLogEntries().length}
+                  size="small"
+                  sx={{
+                    backgroundColor: 'rgba(255,255,255,0.2)',
                     color: 'white',
                     fontWeight: 600,
                     fontSize: '0.75rem',
@@ -4343,13 +4265,13 @@ useEffect(() => {
                     '& .MuiChip-label': {
                       px: 1
                     }
-                  }} 
+                  }}
                 />
               </Box>
               <Box display="flex" alignItems="center" gap={0.5}>
-                <IconButton 
+                <IconButton
                   onClick={() => loadDetectionResults()}
-                  sx={{ 
+                  sx={{
                     color: 'white',
                     p: 0.5,
                     '&:hover': {
@@ -4361,9 +4283,9 @@ useEffect(() => {
                 >
                   <Refresh sx={{ fontSize: 16 }} />
                 </IconButton>
-                <IconButton 
+                <IconButton
                   onClick={() => setLogEntries([])}
-                  sx={{ 
+                  sx={{
                     color: 'white',
                     p: 0.5,
                     '&:hover': {
@@ -4375,9 +4297,9 @@ useEffect(() => {
                 >
                   <ClearIcon sx={{ fontSize: 16 }} />
                 </IconButton>
-                <IconButton 
+                <IconButton
                   onClick={() => setShowLogPanel(false)}
-                  sx={{ 
+                  sx={{
                     color: 'white',
                     p: 0.5,
                     '&:hover': {
@@ -4391,14 +4313,14 @@ useEffect(() => {
                 </IconButton>
               </Box>
             </Box>
-            
+
             {/* Dòng 2: Filter dropdown */}
             <Box display="flex" alignItems="center" justifyContent="center">
               <FormControl size="small" sx={{ minWidth: 120, width: '100%' }}>
                 <Select
                   value={logFilter}
                   onChange={(e) => setLogFilter(e.target.value)}
-                  sx={{ 
+                  sx={{
                     color: 'white',
                     fontSize: '0.75rem',
                     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -4430,7 +4352,7 @@ useEffect(() => {
           </Box>
 
           {/* Nội dung Log Panel */}
-          <Box sx={{ 
+          <Box sx={{
             maxHeight: 450,
             overflowY: 'auto',
             overflowX: 'hidden',
@@ -4453,17 +4375,17 @@ useEffect(() => {
             }
           }}>
             {getFilteredLogEntries().length === 0 ? (
-              <Box sx={{ 
-                p: 3, 
+              <Box sx={{
+                p: 3,
                 textAlign: 'center',
                 color: 'text.secondary'
               }}>
                 <NotificationIcon sx={{ fontSize: 48, opacity: 0.3, mb: 1 }} />
                 <Typography variant="body2">
-                  {logFilter === 'all' ? 'Chưa có log nhận diện nào' : 
-                   logFilter === 'recent' ? 'Không có log gần đây' :
-                   logFilter === 'verified' ? 'Không có log đã xác minh' :
-                   'Không có log chưa xác minh'}
+                  {logFilter === 'all' ? 'Chưa có log nhận diện nào' :
+                    logFilter === 'recent' ? 'Không có log gần đây' :
+                      logFilter === 'verified' ? 'Không có log đã xác minh' :
+                        'Không có log chưa xác minh'}
                 </Typography>
               </Box>
             ) : (
@@ -4482,11 +4404,11 @@ useEffect(() => {
                 >
                   <Box display="flex" alignItems="flex-start" gap={2}>
                     {/* Icon trạng thái */}
-                    <Tooltip 
-                      title={entry.isVerified ? "Đã xác minh" : "Chưa xác minh"} 
+                    <Tooltip
+                      title={entry.isVerified ? "Đã xác minh" : "Chưa xác minh"}
                       placement="top"
                     >
-                      <Box sx={{ 
+                      <Box sx={{
                         mt: 0.5,
                         display: 'flex',
                         alignItems: 'center',
@@ -4508,7 +4430,7 @@ useEffect(() => {
 
                     {/* Nội dung log */}
                     <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="body2" sx={{ 
+                      <Typography variant="body2" sx={{
                         fontWeight: 600,
                         color: '#1976d2',
                         mb: 0.5,
@@ -4516,8 +4438,8 @@ useEffect(() => {
                       }}>
                         {entry.cameraName}
                       </Typography>
-                      
-                      <Typography variant="body2" sx={{ 
+
+                      <Typography variant="body2" sx={{
                         color: 'text.secondary',
                         mb: 0.5,
                         fontSize: '0.8rem',
@@ -4528,8 +4450,8 @@ useEffect(() => {
                         <LocationIcon sx={{ fontSize: 14 }} />
                         Tại {entry.location}
                       </Typography>
-                      
-                      <Typography variant="body2" sx={{ 
+
+                      <Typography variant="body2" sx={{
                         fontWeight: 500,
                         mb: 0.5,
                         fontSize: '0.875rem',
@@ -4537,11 +4459,11 @@ useEffect(() => {
                       }}>
                         Đã phát hiện phương tiện có biển số <strong>{entry.plateNumber}</strong>
                       </Typography>
-                      
+
                       <Box display="flex" alignItems="center" justifyContent="space-between" mt={1}>
                         <Box display="flex" alignItems="center" gap={1}>
                           <TimeIcon sx={{ fontSize: 14, color: '#1976d2' }} />
-                          <Typography variant="caption" sx={{ 
+                          <Typography variant="caption" sx={{
                             color: '#1976d2',
                             fontSize: '0.8rem',
                             fontWeight: 500,
@@ -4550,19 +4472,19 @@ useEffect(() => {
                             {formatLogTime(entry.timestamp)}
                           </Typography>
                         </Box>
-                        
+
                         <Box display="flex" alignItems="center" gap={1}>
                           {entry.confidence > 0 && (
-                            <Chip 
+                            <Chip
                               label={`${Math.round(entry.confidence * 100)}%`}
                               size="small"
-                              sx={{ 
+                              sx={{
                                 fontSize: '0.7rem',
                                 height: 22,
-                                backgroundColor: entry.confidence > 0.8 ? '#e8f5e8' : 
-                                              entry.confidence > 0.6 ? '#fff3e0' : '#ffebee',
-                                color: entry.confidence > 0.8 ? '#2e7d32' : 
-                                       entry.confidence > 0.6 ? '#f57c00' : '#c62828',
+                                backgroundColor: entry.confidence > 0.8 ? '#e8f5e8' :
+                                  entry.confidence > 0.6 ? '#fff3e0' : '#ffebee',
+                                color: entry.confidence > 0.8 ? '#2e7d32' :
+                                  entry.confidence > 0.6 ? '#f57c00' : '#c62828',
                                 fontWeight: 600
                               }}
                             />
@@ -4639,7 +4561,7 @@ useEffect(() => {
           <Alert
             onClose={() => setToastNotifications(prev => prev.filter(n => n.id !== notification.id))}
             severity={notification.severity}
-            sx={{ 
+            sx={{
               width: '100%',
               minWidth: 350,
               maxWidth: 500,
