@@ -889,6 +889,34 @@ def gpu_status():
         "timestamp": time.time()
     })
 
+@app.route('/alpr-status', methods=['GET'])
+def alpr_status():
+    """ALPR model status endpoint"""
+    try:
+        from detector import is_alpr_initialized, get_global_alpr
+        is_initialized = is_alpr_initialized()
+        
+        if is_initialized:
+            alpr_instance = get_global_alpr()
+            return jsonify({
+                "status": "initialized",
+                "model_loaded": True,
+                "timestamp": time.time()
+            })
+        else:
+            return jsonify({
+                "status": "not_initialized", 
+                "model_loaded": False,
+                "timestamp": time.time()
+            })
+    except Exception as e:
+        logger.error(f"Error checking ALPR status: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
 # REMOVED: Test detection endpoints - not needed in production
 
 
