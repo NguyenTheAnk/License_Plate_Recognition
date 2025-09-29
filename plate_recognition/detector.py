@@ -14,6 +14,9 @@ from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import platform
 import psutil
+import threading
+from threading import Lock, RLock
+import queue
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -155,14 +158,46 @@ except (redis.ConnectionError, redis.TimeoutError, TimeoutError, Exception) as e
         r = None
         logger.warning("Failed to start Redis server. Running without Redis support.")
 
-# Khởi tạo FastALPR
+# Global ALPR instance - shared across all threads
+global_alpr = None
+alpr_lock = Lock()
+
+def get_global_alpr():
+    """Get global ALPR instance - thread-safe singleton"""
+    global global_alpr
+    
+    if global_alpr is None:
+        with alpr_lock:
+            if global_alpr is None:  # Double-check locking
+                try:
+                    logger.info("Loading FastALPR model (first time only)...")
+                    global_alpr = ALPR(
+                        detector_model="yolo-v9-t-416-license-plate-end2end",
+                        ocr_model="cct-xs-v1-global-model",
+                    )
+                    logger.info("✅ FastALPR model loaded successfully")
+                except Exception as e:
+                    logger.error(f"Failed to load FastALPR model: {str(e)}")
+                    raise
+    return global_alpr
+
+def is_alpr_initialized():
+    """Check if ALPR is already initialized"""
+    global global_alpr
+    return global_alpr is not None
+
+def reset_global_alpr():
+    """Reset global ALPR instance (for debugging/testing)"""
+    global global_alpr
+    with alpr_lock:
+        global_alpr = None
+        logger.info("🔄 Global ALPR instance reset")
+
+# Initialize global ALPR instance
 try:
-    alpr = ALPR(
-        detector_model="yolo-v9-t-416-license-plate-end2end",
-        ocr_model="cct-xs-v1-global-model",
-    )
+    alpr = get_global_alpr()
 except Exception as e:
-    logger.error(f"Failed to load FastALPR model: {str(e)}")
+    logger.error(f"Failed to initialize global ALPR: {str(e)}")
     raise
     
 # Khởi tạo ByteTrack với tham số tối ưu
@@ -173,7 +208,8 @@ byte_tracker = BYTETracker(
     frame_rate=30
 )
 
-# Lưu lịch sử biển số và ánh xạ track_id
+# Thread-safe data structures with locks
+data_lock = RLock()  # Reentrant lock for thread safety
 plate_history = {}
 track_info = {}
 track_id_mapping = {}  # Ánh xạ từ track_id mới sang track_id cũ
@@ -184,7 +220,8 @@ plate_stability = {}  # track_id -> {'plate': str, 'count': int, 'last_seen': fl
 STABILITY_COUNT_THRESHOLD = 3  # Cần 3 lần liên tiếp để coi là ổn định
 STABILITY_TIME_WINDOW = 2.0  # Trong vòng 2 giây
 
-# Biến toàn cục để tính FPS
+# Biến toàn cục để tính FPS - thread-safe
+fps_lock = Lock()
 fps_counter = 0
 last_fps_time = time.time()
 current_fps = 0
@@ -195,8 +232,60 @@ sent_tracks = {}  # Track các track đã được gửi để tránh trùng l�
 FRAMES_FOLDER = '../public/frames_crops'
 os.makedirs(FRAMES_FOLDER, exist_ok=True)
 
-# Initialize thread pool
-thread_pool = ThreadPoolExecutor(max_workers=4)
+# Thread-local storage for per-thread data
+thread_local = threading.local()
+
+# Per-thread ByteTracker instances to avoid conflicts
+def get_thread_tracker():
+    """Get thread-local ByteTracker instance"""
+    if not hasattr(thread_local, 'byte_tracker'):
+        thread_local.byte_tracker = BYTETracker(
+            track_thresh=0.25,
+            track_buffer=300,
+            match_thresh=0.8,
+            frame_rate=30
+        )
+    return thread_local.byte_tracker
+
+# Use global ALPR instance for all threads (thread-safe)
+def get_thread_alpr():
+    """Get global ALPR instance - shared across all threads"""
+    return get_global_alpr()
+
+# Thread cleanup function
+def cleanup_thread_resources():
+    """Clean up thread-local resources"""
+    try:
+        # Only cleanup ByteTracker, ALPR is global and shared
+        if hasattr(thread_local, 'byte_tracker'):
+            del thread_local.byte_tracker
+        logger.debug(f"Cleaned up ByteTracker for thread {threading.current_thread().ident}")
+    except Exception as e:
+        logger.error(f"Error cleaning up thread resources: {e}")
+
+# Enhanced thread pool with better resource management
+def create_enhanced_thread_pool(max_workers=4):
+    """Create enhanced thread pool with better resource management"""
+    global thread_pool
+    
+    # Shutdown existing pool if any
+    if 'thread_pool' in globals() and thread_pool:
+        try:
+            thread_pool.shutdown(wait=True)
+        except Exception as e:
+            logger.error(f"Error shutting down existing thread pool: {e}")
+    
+    # Create new thread pool
+    thread_pool = ThreadPoolExecutor(
+        max_workers=max_workers,
+        thread_name_prefix="ALPR_Worker"
+    )
+    
+    logger.info(f"Created enhanced thread pool with {max_workers} workers")
+    return thread_pool
+
+# Thread pool for async processing - use enhanced version
+thread_pool = create_enhanced_thread_pool(max_workers=4)
 
 def send_plate_to_server(track_id, plate_data, frame_path=None, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
     global server_available, last_server_check
@@ -320,6 +409,24 @@ def calculate_similarity(s1, s2):
     similarity = (1 - distance / max_len) * 100
     return similarity
 
+def is_valid_vietnamese_plate(plate_text):
+    """Kiểm tra xem biển số có đúng format Việt Nam không"""
+    if not plate_text or len(plate_text) < 6:
+        return False
+    
+    # Clean text - remove all non-alphanumeric characters
+    clean_text = plate_text.upper().strip()
+    clean_text = ''.join(c for c in clean_text if c.isalnum())
+    
+    # Vietnamese plate format: XXA-YYY.ZZ (raw: XXAYYYZZ)
+    # Pattern: 2 số + 1 chữ cái + 5 số = 8 ký tự
+    if len(clean_text) == 8:
+        pattern = r'^[0-9]{2}[ABCDEFGH][0-9]{5}$'
+        import re
+        return bool(re.match(pattern, clean_text))
+    
+    return False
+
 def find_similar_plates(current_plate, plate_history, threshold=60):
     """Tìm các biển số tương tự trong lịch sử"""
     similar_plates = []
@@ -363,13 +470,15 @@ def find_existing_track_id(plate_text, threshold=3):
     return None
 
 def get_redis_plate(track_id):
-    """Lấy biển số từ Redis cho track_id"""
+    """Thread-safe lấy biển số từ Redis cho track_id"""
     if not redis_available or r is None:
         return None, 0.0
         
     try:
         redis_key = f"track:{track_id}"
-        existing_data = r.hgetall(redis_key)
+        # Thread-safe Redis operation
+        with threading.Lock():  # Simple lock for Redis operations
+            existing_data = r.hgetall(redis_key)
         if existing_data:
             plate_text = existing_data.get('plate', '')
             confidence = float(existing_data.get('confidence', 0.0))
@@ -380,7 +489,7 @@ def get_redis_plate(track_id):
     return None, 0.0
 
 def update_redis_plate(track_id, plate_text, confidence, bbox):
-    """Cập nhật biển số vào Redis - chỉ cập nhật khi confidence cao hơn"""
+    """Thread-safe cập nhật biển số vào Redis - ưu tiên biển số đúng format Việt Nam"""
     if not redis_available or r is None:
         return False
         
@@ -388,25 +497,43 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
         redis_key = f"track:{track_id}"
         plate_key = f"plate:{plate_text}"
         
-        # Kiểm tra xem có nên cập nhật không (confidence cao hơn)
-        existing_data = r.hgetall(redis_key)
-        if existing_data:
-            existing_confidence = float(existing_data.get('confidence', 0))
-            if existing_confidence >= confidence:
-                logger.info(f"⏭️ Not updating Redis for track {track_id}: existing confidence {existing_confidence:.3f} >= new confidence {confidence:.3f}")
-                return False  # Không cập nhật nếu confidence không cao hơn
-            
-        # Cập nhật Redis
-        r.hset(redis_key, mapping={
-            'plate': plate_text,
-            'confidence': confidence,
-            'bbox': bbox,
-            'timestamp': time.time(),
-            'last_seen': time.time()
-        })
-        r.set(plate_key, track_id)
-        r.expire(redis_key, 3600)  # Tự động xóa sau 1 giờ
-        r.expire(plate_key, 3600)  # Tự động xóa sau 1 giờ
+        # Thread-safe Redis operations
+        with threading.Lock():  # Simple lock for Redis operations
+            # Kiểm tra xem có nên cập nhật không
+            existing_data = r.hgetall(redis_key)
+            if existing_data:
+                existing_plate = existing_data.get('plate', '')
+                existing_confidence = float(existing_data.get('confidence', 0))
+                
+                # Kiểm tra format biển số
+                new_plate_valid = is_valid_vietnamese_plate(plate_text)
+                existing_plate_valid = is_valid_vietnamese_plate(existing_plate)
+                
+                # Logic ưu tiên:
+                # 1. Nếu biển số mới đúng format và biển số cũ không đúng format → cập nhật
+                # 2. Nếu biển số khác nhau → cập nhật
+                # 3. Nếu cùng biển số và confidence cao hơn → cập nhật
+                if new_plate_valid and not existing_plate_valid:
+                    logger.info(f"🇻🇳 Updating Redis for track {track_id}: new plate {plate_text} is valid Vietnamese format, old {existing_plate} is not")
+                elif plate_text != existing_plate:
+                    logger.info(f"🔄 Updating Redis for track {track_id}: plate changed from {existing_plate} to {plate_text}")
+                elif confidence > existing_confidence:
+                    logger.info(f"📈 Updating Redis for track {track_id}: same plate {plate_text}, higher confidence {confidence:.3f} > {existing_confidence:.3f}")
+                else:
+                    logger.info(f"⏭️ Not updating Redis for track {track_id}: existing confidence {existing_confidence:.3f} >= new confidence {confidence:.3f}")
+                    return False  # Không cập nhật nếu không có lý do
+                
+            # Cập nhật Redis
+            r.hset(redis_key, mapping={
+                'plate': plate_text,
+                'confidence': confidence,
+                'bbox': bbox,
+                'timestamp': time.time(),
+                'last_seen': time.time()
+            })
+            r.set(plate_key, track_id)
+            r.expire(redis_key, 3600)  # Tự động xóa sau 1 giờ
+            r.expire(plate_key, 3600)  # Tự động xóa sau 1 giờ
         
         # FIXED: Giảm logging để tăng FPS
         if confidence > 0.8:  # Chỉ log khi confidence cao
@@ -417,16 +544,17 @@ def update_redis_plate(track_id, plate_text, confidence, bbox):
         return False
 
 def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
-    """OPTIMIZED detection function - Simplified for 20 FPS performance while keeping all features"""
+    """THREAD-SAFE detection function - Optimized for multi-threading performance"""
     global plate_history, track_info, fps_counter, last_fps_time, current_fps, last_redis_update
 
-    # Tính FPS
-    current_time = time.time()
-    fps_counter += 1
-    if current_time - last_fps_time >= 1.0:
-        current_fps = fps_counter / (current_time - last_fps_time)
-        fps_counter = 0
-        last_fps_time = current_time
+    # Thread-safe FPS calculation
+    with fps_lock:
+        current_time = time.time()
+        fps_counter += 1
+        if current_time - last_fps_time >= 1.0:
+            current_fps = fps_counter / (current_time - last_fps_time)
+            fps_counter = 0
+            last_fps_time = current_time
     
     curr_time = time.time()
     original_height, original_width = frame.shape[:2]
@@ -437,10 +565,11 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     # CHỈ XỬ LÝ VÙNG ROI
     roi_frame = frame[ROI_YMIN:ROI_YMAX, ROI_XMIN:ROI_XMAX]
 
-    # Gọi FastALPR chỉ trên vùng ROI
+    # Gọi FastALPR chỉ trên vùng ROI - sử dụng global instance
     try:
         roi_frame_rgb = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2RGB)
-        alpr_results = alpr.predict(roi_frame_rgb)
+        global_alpr = get_thread_alpr()  # Get global ALPR instance (shared)
+        alpr_results = global_alpr.predict(roi_frame_rgb)
     except Exception as e:
         logger.error(f"FastALPR prediction failed: {str(e)}")
         return {
@@ -478,8 +607,9 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
     else:
         detections_np = np.zeros((0, 5), dtype=np.float32)
 
-    # Cập nhật tracker
-    tracks = byte_tracker.update(
+    # Cập nhật tracker - sử dụng thread-local instance
+    thread_tracker = get_thread_tracker()  # Get thread-local ByteTracker instance
+    tracks = thread_tracker.update(
         output_results=detections_np,
         img_info=(original_height, original_width),
         img_size=(original_height, original_width)
@@ -541,7 +671,7 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             logger.debug(f"⏭️ Skipping low confidence plate: {plate_text} (conf: {conf_val:.3f}, len: {len(plate_text)})")
             continue
 
-        # Gộp biển số tương tự (>=60% tương đồng) để tránh duplicate
+        # ENHANCED: Tạo track mới khi biển số thay đổi đáng kể
         final_track_id = current_track_id
         
         # Kiểm tra xem có biển số tương tự trong lịch sử không
@@ -559,48 +689,81 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 # Tính độ tương đồng giữa 2 biển số
                 similarity = calculate_similarity(plate_text, existing_plate)
                 
-                # Tìm biển số có độ tương đồng cao nhất (>=60%)
-                if similarity >= 60 and similarity > best_similarity:
+                # Tìm biển số có độ tương đồng cao nhất (>=80% để gộp track)
+                if similarity >= 80 and similarity > best_similarity:
                     best_similarity = similarity
                     best_existing_track_id = existing_track_id
                     best_existing_plate = existing_plate
                     best_existing_confidence = existing_confidence
         
-        # Gộp với biển số có độ tương đồng cao nhất
+        # ENHANCED: Chỉ gộp track nếu biển số rất tương tự (>=80%) và cùng format
         if best_existing_track_id is not None:
-            track_id_mapping[current_track_id] = best_existing_track_id
-            final_track_id = best_existing_track_id
+            # Kiểm tra format biển số
+            new_plate_valid = is_valid_vietnamese_plate(plate_text)
+            existing_plate_valid = is_valid_vietnamese_plate(best_existing_plate)
             
-            # Chọn biển số có confidence cao hơn
-            if conf_val > best_existing_confidence:
-                # Thay thế biển số cũ bằng biển số mới có confidence cao hơn
-                plate_history[final_track_id] = [(plate_text, conf_val)]
-                # FIXED: Giảm logging - chỉ log khi có thay đổi đáng kể
-                if conf_val > best_existing_confidence * 1.2:
+            # Chỉ gộp nếu cả hai đều đúng format hoặc cả hai đều sai format
+            if (new_plate_valid and existing_plate_valid) or (not new_plate_valid and not existing_plate_valid):
+                track_id_mapping[current_track_id] = best_existing_track_id
+                final_track_id = best_existing_track_id
+                
+                # Chọn biển số có confidence cao hơn
+                if conf_val > best_existing_confidence:
+                    # Thay thế biển số cũ bằng biển số mới có confidence cao hơn
+                    plate_history[final_track_id] = [(plate_text, conf_val)]
                     logger.info(f"🔄 Updated plate in history: {best_existing_plate} -> {plate_text} (conf: {best_existing_confidence:.3f} -> {conf_val:.3f})")
-                # Cập nhật track_info với biển số mới
-                if final_track_id in track_info:
-                    track_info[final_track_id]['plate'] = plate_text
-                    track_info[final_track_id]['confidence'] = conf_val
-            # FIXED: Bỏ log "keeping existing plate" để giảm noise
+                    # Cập nhật track_info với biển số mới
+                    if final_track_id in track_info:
+                        track_info[final_track_id]['plate'] = plate_text
+                        track_info[final_track_id]['confidence'] = conf_val
+            else:
+                # Tạo track mới nếu format khác nhau
+                # Tạo track ID mới bằng cách thêm timestamp
+                new_track_id = f"{current_track_id}_{int(time.time() * 1000)}"
+                track_id_mapping[current_track_id] = new_track_id
+                final_track_id = new_track_id
+                
+                # Xóa track cũ khỏi sent_tracks để tránh conflict
+                with data_lock:
+                    if current_track_id in sent_tracks:
+                        del sent_tracks[current_track_id]
+                        logger.info(f"🧹 Removed old track {current_track_id} from sent_tracks (new format detected)")
+                
+                logger.info(f"🆕 Creating new track for different format: {plate_text} (valid: {new_plate_valid}) vs {best_existing_plate} (valid: {existing_plate_valid}) - New ID: {new_track_id}")
+        else:
+            # Tạo track mới nếu không có biển số tương tự
+            # Tạo track ID mới bằng cách thêm timestamp
+            new_track_id = f"{current_track_id}_{int(time.time() * 1000)}"
+            track_id_mapping[current_track_id] = new_track_id
+            final_track_id = new_track_id
+            
+            # Xóa track cũ khỏi sent_tracks để tránh conflict
+            with data_lock:
+                if current_track_id in sent_tracks:
+                    del sent_tracks[current_track_id]
+                    logger.info(f"🧹 Removed old track {current_track_id} from sent_tracks (new plate detected)")
+            
+            logger.info(f"🆕 Creating new track for new plate: {plate_text} (ID: {current_track_id} -> {new_track_id})")
 
-        # Cập nhật ánh xạ biển số sang track_id
-        if plate_text not in plate_to_track_id:
-            plate_to_track_id[plate_text] = []
-        if final_track_id not in plate_to_track_id[plate_text]:
-            plate_to_track_id[plate_text].append(final_track_id)
+        # Thread-safe update of shared data structures
+        with data_lock:
+            # Cập nhật ánh xạ biển số sang track_id
+            if plate_text not in plate_to_track_id:
+                plate_to_track_id[plate_text] = []
+            if final_track_id not in plate_to_track_id[plate_text]:
+                plate_to_track_id[plate_text].append(final_track_id)
 
-        # Lưu vào lịch sử biển số
-        if final_track_id not in plate_history:
-            plate_history[final_track_id] = []
-            # FIXED: Giảm logging - chỉ log khi confidence cao
-            if conf_val > 0.8:
-                logger.info(f"🚗 NEW PLATE DETECTED: {plate_text} (ID: {final_track_id})")
+            # Lưu vào lịch sử biển số
+            if final_track_id not in plate_history:
+                plate_history[final_track_id] = []
+                # FIXED: Giảm logging - chỉ log khi confidence cao
+                if conf_val > 0.8:
+                    logger.info(f"🚗 NEW PLATE DETECTED: {plate_text} (ID: {final_track_id})")
 
-        if len(plate_history[final_track_id]) >= 5:
-            plate_history[final_track_id].pop(0)
+            if len(plate_history[final_track_id]) >= 5:
+                plate_history[final_track_id].pop(0)
 
-        plate_history[final_track_id].append((plate_text, conf_val))
+            plate_history[final_track_id].append((plate_text, conf_val))
         
         # Tách confidence thành detection và OCR
         detection_conf = conf_val  # Confidence từ detection
@@ -653,14 +816,26 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             final_confidence = redis_confidence
             logger.info(f"📊 Using Redis result (valid): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of invalid OCR: {plate_text}")
         elif ocr_valid and redis_valid:
-            # Cả hai đều hợp lệ → STABILITY LOGIC: chỉ lưu khi confidence cao và ổn định
-            # 1. Nếu OCR mới có confidence cao hơn đáng kể (>0.05) → ưu tiên OCR
-            # 2. Nếu confidence gần bằng nhau nhưng biển số khác → giữ Redis (ổn định hơn)
-            # 3. Nếu cùng biển số → ưu tiên confidence cao hơn
+            # Cả hai đều hợp lệ → FORMAT PRIORITY LOGIC: ưu tiên biển số đúng format Việt Nam
+            # 1. Nếu OCR mới đúng format Việt Nam và Redis không → ưu tiên OCR
+            # 2. Nếu cả hai đều đúng format → ưu tiên confidence cao hơn
+            # 3. Nếu cả hai đều sai format → ưu tiên confidence cao hơn
             
+            ocr_vietnamese = is_valid_vietnamese_plate(plate_text)
+            redis_vietnamese = is_valid_vietnamese_plate(redis_plate_text)
             confidence_diff = conf_val - redis_confidence
             
-            if plate_text == redis_plate_text:
+            if ocr_vietnamese and not redis_vietnamese:
+                # OCR đúng format Việt Nam, Redis sai → ưu tiên OCR
+                final_plate_text = plate_text
+                final_confidence = conf_val
+                logger.info(f"🇻🇳 Using new OCR result (valid Vietnamese format): {plate_text} (conf: {conf_val:.3f}) instead of invalid Redis: {redis_plate_text} (conf: {redis_confidence:.3f})")
+            elif not ocr_vietnamese and redis_vietnamese:
+                # Redis đúng format Việt Nam, OCR sai → ưu tiên Redis
+                final_plate_text = redis_plate_text
+                final_confidence = redis_confidence
+                logger.info(f"🇻🇳 Using Redis result (valid Vietnamese format): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of invalid OCR: {plate_text} (conf: {conf_val:.3f})")
+            elif plate_text == redis_plate_text:
                 # Cùng biển số → ưu tiên confidence cao hơn
                 if conf_val > redis_confidence:
                     final_plate_text = plate_text
@@ -675,11 +850,21 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 final_plate_text = plate_text
                 final_confidence = conf_val
                 logger.info(f"🔄 Using new OCR result (different plate, much higher conf): {plate_text} (conf: {conf_val:.3f}, diff: +{confidence_diff:.3f}) instead of Redis: {redis_plate_text} (conf: {redis_confidence:.3f})")
+            elif confidence_diff >= -0.01:
+                # Biển số khác nhau nhưng confidence gần bằng nhau (chênh lệch <= 0.01) → ưu tiên OCR mới
+                final_plate_text = plate_text
+                final_confidence = conf_val
+                logger.info(f"🔄 Using new OCR result (different plate, similar conf): {plate_text} (conf: {conf_val:.3f}, diff: {confidence_diff:+.3f}) instead of Redis: {redis_plate_text} (conf: {redis_confidence:.3f})")
+            elif ocr_vietnamese and not redis_vietnamese:
+                # OCR đúng format Việt Nam, Redis sai → ưu tiên OCR mới
+                final_plate_text = plate_text
+                final_confidence = conf_val
+                logger.info(f"🇻🇳 Using new OCR result (valid Vietnamese format): {plate_text} (conf: {conf_val:.3f}) instead of invalid Redis: {redis_plate_text} (conf: {redis_confidence:.3f})")
             else:
-                # Biển số khác nhau nhưng confidence gần bằng nhau → giữ Redis (ổn định hơn)
+                # Biển số khác nhau và Redis có confidence cao hơn đáng kể → giữ Redis
                 final_plate_text = redis_plate_text
                 final_confidence = redis_confidence
-                logger.info(f"📊 Using Redis result (stability priority): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of OCR: {plate_text} (conf: {conf_val:.3f}, diff: {confidence_diff:+.3f})")
+                logger.info(f"📊 Using Redis result (much higher conf): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of OCR: {plate_text} (conf: {conf_val:.3f}, diff: {confidence_diff:+.3f})")
         else:
             # Cả hai đều không hợp lệ → không lưu
             final_plate_text = None
@@ -788,15 +973,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                 if curr_time % 3 < 1:  # Chỉ log 1/3 lần
                     logger.info(f"⏭️ Track {final_track_id} already sent, skipping")
         
-        # Cập nhật track_info với biển số cuối cùng (có thể từ Redis hoặc OCR)
-        track_info[final_track_id] = {
-            'plate': final_plate_text if final_plate_text else redis_plate_text,  # Sử dụng biển số cuối cùng
-            'confidence': final_confidence if final_plate_text else redis_confidence,  # Sử dụng confidence cuối cùng
-            'detection_confidence': detection_conf,
-            'ocr_confidence': ocr_conf,
-            'bbox': f"{x1},{y1},{x2},{y2}",
-            'last_seen': curr_time
-        }
+        # Thread-safe update of track_info
+        with data_lock:
+            track_info[final_track_id] = {
+                'plate': final_plate_text if final_plate_text else redis_plate_text,  # Sử dụng biển số cuối cùng
+                'confidence': final_confidence if final_plate_text else redis_confidence,  # Sử dụng confidence cuối cùng
+                'detection_confidence': detection_conf,
+                'ocr_confidence': ocr_conf,
+                'bbox': f"{x1},{y1},{x2},{y2}",
+                'last_seen': curr_time
+            }
 
         current_track_ids.add(final_track_id)
 
@@ -956,15 +1142,16 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                         }
                         logger.info(f"📤 Sending enhanced plate data for track {final_track_id}: {final_plate_text} (conf: {final_confidence:.3f}, det: {detection_conf:.3f}, ocr: {ocr_conf:.3f})")
                         send_plate_to_server(final_track_id, plate_data, f"/static/crops/{crop_filename}", camera_id=camera_id, source_type=source_type, video_filename=video_filename, camera_location=camera_location, camera_name=camera_name)
-                        # Đánh dấu track đã được gửi (bao gồm camera_id)
-                        sent_tracks[final_track_id] = {
-                            'plate': final_plate_text,  # Sử dụng biển số cuối cùng
-                            'camera_id': camera_id,  # Thêm camera_id để phân biệt
-                            'confidence': final_confidence,
-                            'detection_confidence': detection_conf,
-                            'ocr_confidence': ocr_conf,
-                            'timestamp': curr_time
-                        }
+                        # Thread-safe update of sent_tracks
+                        with data_lock:
+                            sent_tracks[final_track_id] = {
+                                'plate': final_plate_text,  # Sử dụng biển số cuối cùng
+                                'camera_id': camera_id,  # Thêm camera_id để phân biệt
+                                'confidence': final_confidence,
+                                'detection_confidence': detection_conf,
+                                'ocr_confidence': ocr_conf,
+                                'timestamp': curr_time
+                            }
                     else:
                         logger.error(f"❌ Failed to save enhanced crop: {crop_filename}")
                         crop_filename = None
@@ -977,7 +1164,12 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
 
         # LUÔN VẼ hộp giới hạn và thông tin - chữ to hơn (SAU KHI ĐÃ CROP)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 4)
-        label = f"ID {final_track_id}: {redis_plate_text}"
+        # Đảm bảo không có None values
+        display_plate = final_plate_text if final_plate_text else (redis_plate_text if redis_plate_text else "Unknown")
+        
+        # Chỉ hiển thị phần số đầu tiên của track ID (bỏ timestamp)
+        simple_track_id = final_track_id.split('_')[0] if '_' in str(final_track_id) else final_track_id
+        label = f"ID: {simple_track_id} {display_plate}"
         
         (text_width, text_height), baseline = cv2.getTextSize(
             label, cv2.FONT_HERSHEY_SIMPLEX, 1.4, 4
@@ -1001,73 +1193,77 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             'crop_path': f"/static/crops/{crop_filename}" if crop_filename else None
         }
 
-    # FIXED: Giảm số tracks để tăng FPS - từ 5 xuống 3
-    if len(plate_history) > 3:
-        # Sắp xếp tracks theo thời gian last_seen và xóa track cũ nhất
-        sorted_tracks = sorted(plate_history.keys(), 
-                             key=lambda k: track_info.get(k, {}).get('last_seen', 0))
-        tracks_to_remove_old = sorted_tracks[:-3]  # Giữ lại 3 tracks mới nhất
-        
-        for old_track_id in tracks_to_remove_old:
-            if old_track_id in plate_history:
-                del plate_history[old_track_id]
-            if old_track_id in track_info:
-                del track_info[old_track_id]
-            if old_track_id in sent_tracks:
-                del sent_tracks[old_track_id]
-            logger.debug(f"🧹 Removed old track {old_track_id} (memory cleanup)")
+    # Thread-safe cleanup of old tracks
+    with data_lock:
+        # FIXED: Giảm số tracks để tăng FPS - từ 5 xuống 3
+        if len(plate_history) > 3:
+            # Sắp xếp tracks theo thời gian last_seen và xóa track cũ nhất
+            sorted_tracks = sorted(plate_history.keys(), 
+                                 key=lambda k: track_info.get(k, {}).get('last_seen', 0))
+            tracks_to_remove_old = sorted_tracks[:-3]  # Giữ lại 3 tracks mới nhất
+            
+            for old_track_id in tracks_to_remove_old:
+                if old_track_id in plate_history:
+                    del plate_history[old_track_id]
+                if old_track_id in track_info:
+                    del track_info[old_track_id]
+                if old_track_id in sent_tracks:
+                    del sent_tracks[old_track_id]
+                logger.debug(f"🧹 Removed old track {old_track_id} (memory cleanup)")
 
-    # FIXED: Tăng cleanup frequency để giảm overhead - từ 15s xuống 20s
-    if curr_time - last_redis_update > 20.0:  # Increased from 15s to 20s to reduce overhead
-        tracks_to_remove = []
-        # FIXED: Giảm logging - chỉ log khi có nhiều tracks
-        if len(track_info) > 5 or len(sent_tracks) > 10:
-            logger.info(f"🧹 Cleanup cycle: {len(track_info)} active tracks, {len(sent_tracks)} sent tracks")
-        
-        for track_id in list(track_info.keys()):
-            if curr_time - track_info[track_id]['last_seen'] > 10.0:
-                # Lấy thông tin biển số
-                plate_text = track_info[track_id]['plate']
+    # Thread-safe cleanup cycle
+    with data_lock:
+        # FIXED: Tăng cleanup frequency để giảm overhead - từ 15s xuống 20s
+        if curr_time - last_redis_update > 20.0:  # Increased from 15s to 20s to reduce overhead
+            tracks_to_remove = []
+            # FIXED: Giảm logging - chỉ log khi có nhiều tracks
+            if len(track_info) > 5 or len(sent_tracks) > 10:
+                logger.info(f"🧹 Cleanup cycle: {len(track_info)} active tracks, {len(sent_tracks)} sent tracks")
+            
+            for track_id in list(track_info.keys()):
+                if curr_time - track_info[track_id]['last_seen'] > 10.0:
+                    # Lấy thông tin biển số
+                    plate_text = track_info[track_id]['plate']
 
-                clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
+                    clean_plate_text = re.sub(r'[\\/*?:"<>|]', "_", plate_text)
 
-                # FIXED: Không gửi lại trong cleanup để tránh duplicate
-                # Track đã được gửi khi detect, không cần gửi lại khi cleanup
-                # FIXED: Bỏ logging cleanup để giảm noise
-                tracks_to_remove.append(track_id)
+                    # FIXED: Không gửi lại trong cleanup để tránh duplicate
+                    # Track đã được gửi khi detect, không cần gửi lại khi cleanup
+                    # FIXED: Bỏ logging cleanup để giảm noise
+                    tracks_to_remove.append(track_id)
 
-        for track_id in tracks_to_remove:
-            del track_info[track_id]
-            if track_id in plate_history:
-                del plate_history[track_id]
-            # Xóa khỏi sent_tracks khi track bị xóa để tránh conflict với track ID mới
-            if track_id in sent_tracks:
-                del sent_tracks[track_id]
-                logger.debug(f"🧹 Removed track {track_id} from sent_tracks (track deleted)")
+            for track_id in tracks_to_remove:
+                del track_info[track_id]
+                if track_id in plate_history:
+                    del plate_history[track_id]
+                # Xóa khỏi sent_tracks khi track bị xóa để tránh conflict với track ID mới
+                if track_id in sent_tracks:
+                    del sent_tracks[track_id]
+                    logger.debug(f"🧹 Removed track {track_id} from sent_tracks (track deleted)")
 
-        last_redis_update = curr_time
-        
-        # Cleanup sent_tracks cũ (sau 10 giây) và giới hạn tối đa 10 tracks
-        current_time_cleanup = time.time()
-        tracks_to_cleanup = []
-        
-        # Xóa tracks cũ hơn 10 giây
-        for track_id, sent_data in sent_tracks.items():
-            if current_time_cleanup - sent_data.get('timestamp', 0) > 10:
-                tracks_to_cleanup.append(track_id)
-        
-        # FIXED: Giảm sent_tracks để tăng FPS - từ 10 xuống 5
-        if len(sent_tracks) > 5:
-            sorted_sent_tracks = sorted(sent_tracks.items(), 
-                                      key=lambda x: x[1].get('timestamp', 0))
-            excess_tracks = sorted_sent_tracks[:-5]  # Giữ lại 5 tracks mới nhất
-            for track_id, _ in excess_tracks:
-                if track_id not in tracks_to_cleanup:
+            last_redis_update = curr_time
+            
+            # Cleanup sent_tracks cũ (sau 10 giây) và giới hạn tối đa 10 tracks
+            current_time_cleanup = time.time()
+            tracks_to_cleanup = []
+            
+            # Xóa tracks cũ hơn 10 giây
+            for track_id, sent_data in sent_tracks.items():
+                if current_time_cleanup - sent_data.get('timestamp', 0) > 10:
                     tracks_to_cleanup.append(track_id)
-        
-        for track_id in tracks_to_cleanup:
-            del sent_tracks[track_id]
-            # FIXED: Bỏ debug logging để giảm noise
+            
+            # FIXED: Giảm sent_tracks để tăng FPS - từ 10 xuống 5
+            if len(sent_tracks) > 5:
+                sorted_sent_tracks = sorted(sent_tracks.items(), 
+                                          key=lambda x: x[1].get('timestamp', 0))
+                excess_tracks = sorted_sent_tracks[:-5]  # Giữ lại 5 tracks mới nhất
+                for track_id, _ in excess_tracks:
+                    if track_id not in tracks_to_cleanup:
+                        tracks_to_cleanup.append(track_id)
+            
+            for track_id in tracks_to_cleanup:
+                del sent_tracks[track_id]
+                # FIXED: Bỏ debug logging để giảm noise
 
     # Encode frame with optimized quality for full detection streaming
     try:
@@ -1109,13 +1305,23 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
         }
 
 def detect_and_ocr_thread_safe(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
-    """Thread-safe wrapper for detect_and_ocr_stable"""
+    """Thread-safe wrapper for detect_and_ocr_stable with enhanced error handling"""
     try:
+        # Add thread identifier for debugging
+        thread_id = threading.current_thread().ident
+        logger.debug(f"Processing frame in thread {thread_id} for camera {camera_id}")
+        
         # Process frame with optimized detection
         result = detect_and_ocr_stable(frame, camera_id, source_type, video_filename, camera_location, camera_name)
+        
+        # Add thread info to result for debugging
+        if isinstance(result, dict):
+            result['thread_id'] = thread_id
+            result['camera_id'] = camera_id
+            
         return result
     except Exception as e:
-        logger.error(f"Error in thread-safe detection: {str(e)}")
+        logger.error(f"Error in thread-safe detection (thread {threading.current_thread().ident}): {str(e)}")
         # Return empty result on error
         return {
             'frame': b'',
@@ -1131,7 +1337,9 @@ def detect_and_ocr_thread_safe(frame, camera_id=None, source_type="camera", vide
             'detection_count': 0,
             'track_count': 0,
             'skipped': True,
-            'error': str(e)
+            'error': str(e),
+            'thread_id': threading.current_thread().ident,
+            'camera_id': camera_id
         }
 
 def process_frame_async(frame, camera_id=None, source_type="camera", video_filename=None, camera_location=None, camera_name=None):
@@ -1149,11 +1357,23 @@ def process_frame_async(frame, camera_id=None, source_type="camera", video_filen
 
 def get_thread_manager_stats():
     """Get thread manager statistics"""
-    return {
-        "active_threads": 1,
-        "total_processed": 0,
-        "average_processing_time": 0.0
-    }
+    try:
+        return {
+            "active_threads": thread_pool._threads.__len__() if hasattr(thread_pool, '_threads') else 0,
+            "max_workers": thread_pool._max_workers,
+            "total_processed": 0,
+            "average_processing_time": 0.0,
+            "thread_pool_status": "active" if not thread_pool._shutdown else "shutdown"
+        }
+    except Exception as e:
+        logger.error(f"Error getting thread stats: {e}")
+        return {
+            "active_threads": 0,
+            "max_workers": 4,
+            "total_processed": 0,
+            "average_processing_time": 0.0,
+            "thread_pool_status": "error"
+        }
 
 def get_thread_data_container():
     """Get thread data container"""
