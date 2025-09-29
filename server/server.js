@@ -127,6 +127,7 @@ const whiteList = require('./routes/whiteList');
 const blackList = require('./routes/blackList');
 const plateDetectionRoutes = require('./routes/plateDetection');
 const plateRecognitionRoutes = require('./routes/plateRecognition');
+const plateRouteRoutes = require('./routes/plateRoute');
 const dashboardRoutes = require('./routes/dashboard');
 
 app.use('/api/plates', plateRoutes);
@@ -141,6 +142,7 @@ app.use('/api/whitelist', whiteList);
 app.use('/api/blacklist', blackList);
 app.use('/api/plate-detections', plateDetectionRoutes);
 app.use('/api/plate-recognitions', plateRecognitionRoutes);
+app.use('/api/plate-routes', plateRouteRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
 // Health check endpoint
