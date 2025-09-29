@@ -1,0 +1,201 @@
+.camera-route-display {
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    padding: 20px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.no-data {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+}
+
+.no-data p {
+    margin: 0;
+    font-size: 1rem;
+}
+
+/* Header */
+.route-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.route-header h3 {
+    margin: 0 0 10px 0;
+    font-size: 1.3rem;
+    color: #333;
+    font-weight: 600;
+}
+
+.route-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.route-summary strong {
+    color: #333;
+    font-weight: 600;
+}
+
+/* Date Tabs */
+.date-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.date-tab {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: #495057;
+    font-size: 0.85rem;
+    min-width: 140px;
+}
+
+.date-tab:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.date-tab.active {
+    background: #007bff;
+    border-color: #007bff;
+    color: white;
+}
+
+.date-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.date-text {
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.date-stats {
+    font-size: 0.75rem;
+    opacity: 0.8;
+}
+
+/* Daily Route */
+.daily-route {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 15px;
+    border: 1px solid #e9ecef;
+}
+
+.daily-header {
+    margin-bottom: 15px;
+}
+
+.daily-header h4 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #333;
+    font-weight: 600;
+}
+
+/* Camera List */
+.camera-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.camera-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 12px;
+    transition: all 0.2s ease;
+}
+
+.camera-item:hover {
+    border-color: #007bff;
+    box-shadow: 0 2px 4px rgba(0, 123, 255, 0.1);
+}
+
+.camera-order {
+    background: #007bff;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.camera-info {
+    flex: 1;
+    cursor: pointer;
+}
+
+.camera-name {
+    font-weight: 600;
+    color: #333;
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+}
+
+.camera-details {
+    display: flex;
+    gap: 12px;
+    font-size: 0.8rem;
+    color: #666;
+    flex-wrap: wrap;
+}
+
+.camera-details span {
+    background: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid #e9ecef;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .camera-route-display {
+        padding: 15px;
+    }
+    
+    .date-tabs {
+        flex-direction: column;
+        gap: 6px;
+    }
+    
+    .date-tab {
+        min-width: auto;
+    }
+    
+    .camera-details {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    .camera-details span {
+        display: inline-block;
+        width: fit-content;
+    }
+}
