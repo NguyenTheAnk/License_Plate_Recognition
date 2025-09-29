@@ -179,6 +179,11 @@ track_info = {}
 track_id_mapping = {}  # Ánh xạ từ track_id mới sang track_id cũ
 plate_to_track_id = defaultdict(list)  # Ánh xạ từ biển số sang track_id
 
+# STABILITY TRACKING: theo dõi biển số ổn định
+plate_stability = {}  # track_id -> {'plate': str, 'count': int, 'last_seen': float, 'confidence': float}
+STABILITY_COUNT_THRESHOLD = 3  # Cần 3 lần liên tiếp để coi là ổn định
+STABILITY_TIME_WINDOW = 2.0  # Trong vòng 2 giây
+
 # Biến toàn cục để tính FPS
 fps_counter = 0
 last_fps_time = time.time()
@@ -648,42 +653,106 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             final_confidence = redis_confidence
             logger.info(f"📊 Using Redis result (valid): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of invalid OCR: {plate_text}")
         elif ocr_valid and redis_valid:
-            # Cả hai đều hợp lệ → so sánh confidence
-            if conf_val > redis_confidence:
+            # Cả hai đều hợp lệ → STABILITY LOGIC: chỉ lưu khi confidence cao và ổn định
+            # 1. Nếu OCR mới có confidence cao hơn đáng kể (>0.05) → ưu tiên OCR
+            # 2. Nếu confidence gần bằng nhau nhưng biển số khác → giữ Redis (ổn định hơn)
+            # 3. Nếu cùng biển số → ưu tiên confidence cao hơn
+            
+            confidence_diff = conf_val - redis_confidence
+            
+            if plate_text == redis_plate_text:
+                # Cùng biển số → ưu tiên confidence cao hơn
+                if conf_val > redis_confidence:
+                    final_plate_text = plate_text
+                    final_confidence = conf_val
+                    logger.info(f"🔄 Using new OCR result (same plate, higher conf): {plate_text} (conf: {conf_val:.3f}) instead of Redis: {redis_plate_text} (conf: {redis_confidence:.3f})")
+                else:
+                    final_plate_text = redis_plate_text
+                    final_confidence = redis_confidence
+                    logger.info(f"📊 Using Redis result (same plate, higher conf): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of OCR: {plate_text} (conf: {conf_val:.3f})")
+            elif confidence_diff > 0.05:
+                # Biển số khác nhau nhưng OCR mới có confidence cao hơn đáng kể → ưu tiên OCR
                 final_plate_text = plate_text
                 final_confidence = conf_val
-                logger.info(f"🔄 Using new OCR result (higher conf): {plate_text} (conf: {conf_val:.3f}) instead of Redis: {redis_plate_text} (conf: {redis_confidence:.3f})")
+                logger.info(f"🔄 Using new OCR result (different plate, much higher conf): {plate_text} (conf: {conf_val:.3f}, diff: +{confidence_diff:.3f}) instead of Redis: {redis_plate_text} (conf: {redis_confidence:.3f})")
             else:
+                # Biển số khác nhau nhưng confidence gần bằng nhau → giữ Redis (ổn định hơn)
                 final_plate_text = redis_plate_text
                 final_confidence = redis_confidence
-                logger.info(f"📊 Using Redis result (higher conf): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of OCR: {plate_text} (conf: {conf_val:.3f})")
+                logger.info(f"📊 Using Redis result (stability priority): {redis_plate_text} (conf: {redis_confidence:.3f}) instead of OCR: {plate_text} (conf: {conf_val:.3f}, diff: {confidence_diff:+.3f})")
         else:
             # Cả hai đều không hợp lệ → không lưu
             final_plate_text = None
             final_confidence = 0
             logger.info(f"❌ Both OCR and Redis invalid: OCR={plate_text}, Redis={redis_plate_text} - Skipping")
         
-        # Cập nhật Redis - chỉ cập nhật khi có biển số hợp lệ
+        # Cập nhật Redis - chỉ cập nhật khi có biển số hợp lệ và confidence đủ cao
         bbox_str = f"{x1},{y1},{x2},{y2}"
         redis_updated = False
-        if final_plate_text is not None:
+        
+        # CONFIDENCE THRESHOLD: chỉ lưu khi confidence >= 0.85
+        MIN_CONFIDENCE_THRESHOLD = 0.85
+        
+        if final_plate_text is not None and final_confidence >= MIN_CONFIDENCE_THRESHOLD:
             redis_updated = update_redis_plate(final_track_id, final_plate_text, final_confidence, bbox_str)
+        elif final_plate_text is not None:
+            logger.info(f"⏭️ Skipping Redis update for track {final_track_id}: confidence {final_confidence:.3f} < threshold {MIN_CONFIDENCE_THRESHOLD}")
         else:
             logger.info(f"⏭️ Skipping Redis update for track {final_track_id}: no valid plate format")
         
         # CHỈ GỬI 1 LẦN DUY NHẤT cho mỗi track_id HOẶC biển số tương tự
         should_send = False
         
-        # Chỉ xử lý gửi dữ liệu nếu có biển số hợp lệ
+        # Chỉ xử lý gửi dữ liệu nếu có biển số hợp lệ và confidence đủ cao
         if final_plate_text is None:
             logger.info(f"⏭️ Skipping send for track {final_track_id}: no valid plate format")
+            should_send = False
+        elif final_confidence < MIN_CONFIDENCE_THRESHOLD:
+            logger.info(f"⏭️ Skipping send for track {final_track_id}: confidence {final_confidence:.3f} < threshold {MIN_CONFIDENCE_THRESHOLD}")
             should_send = False
         
         # Chỉ xử lý logic gửi nếu có biển số hợp lệ
         if final_plate_text is not None:
+            # STABILITY CHECK: kiểm tra biển số có ổn định không
+            current_time_check = time.time()
+            
+            # Cập nhật stability tracking
+            if final_track_id not in plate_stability:
+                plate_stability[final_track_id] = {
+                    'plate': final_plate_text,
+                    'count': 1,
+                    'last_seen': current_time_check,
+                    'confidence': final_confidence
+                }
+            else:
+                stability_data = plate_stability[final_track_id]
+                
+                # Kiểm tra xem có cùng biển số không
+                if stability_data['plate'] == final_plate_text:
+                    # Cùng biển số → tăng count
+                    stability_data['count'] += 1
+                    stability_data['last_seen'] = current_time_check
+                    stability_data['confidence'] = max(stability_data['confidence'], final_confidence)
+                else:
+                    # Khác biển số → reset
+                    stability_data['plate'] = final_plate_text
+                    stability_data['count'] = 1
+                    stability_data['last_seen'] = current_time_check
+                    stability_data['confidence'] = final_confidence
+            
+            # Kiểm tra xem biển số có ổn định không
+            stability_data = plate_stability[final_track_id]
+            is_stable = (stability_data['count'] >= STABILITY_COUNT_THRESHOLD and 
+                        current_time_check - stability_data['last_seen'] <= STABILITY_TIME_WINDOW)
+            
+            if not is_stable:
+                logger.info(f"⏭️ Skipping send for track {final_track_id}: plate {final_plate_text} not stable yet (count: {stability_data['count']}/{STABILITY_COUNT_THRESHOLD})")
+                should_send = False
+            else:
+                logger.info(f"✅ Plate {final_plate_text} is stable for track {final_track_id} (count: {stability_data['count']}, conf: {stability_data['confidence']:.3f})")
+            
             # FIXED: Kiểm tra biển số đã gửi theo camera để cho phép cùng biển số ở camera khác
             plate_already_sent = False
-            current_time_check = time.time()
             plate_camera_key = f"{final_plate_text}_{camera_id}"  # Tạo key unique cho plate + camera
             
             for sent_track_id, sent_data in sent_tracks.items():
@@ -702,18 +771,18 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
                             logger.info(f"⏭️ Similar plate {final_plate_text} already sent recently for camera {camera_id} (track {sent_track_id}, plate: {sent_plate}), skipping")
                         break
             
-            if not plate_already_sent and final_track_id not in sent_tracks:
-                # Kiểm tra xem có nên gửi không - ưu tiên gửi khi Redis được cập nhật, nhưng vẫn gửi nếu confidence cao
+            if not plate_already_sent and final_track_id not in sent_tracks and is_stable:
+                # Kiểm tra xem có nên gửi không - chỉ gửi khi biển số ổn định
                 if redis_updated:
                     should_send = True
-                    logger.info(f"📤 Sending for track {final_track_id}: {final_plate_text} (conf: {final_confidence:.3f}) - Redis updated")
-                elif final_confidence > 0.70:  # Tăng threshold để chỉ gửi khi confidence rất cao
+                    logger.info(f"📤 Sending stable plate for track {final_track_id}: {final_plate_text} (conf: {final_confidence:.3f}) - Redis updated")
+                elif final_confidence > 0.90:  # Chỉ gửi khi confidence rất cao
                     should_send = True
-                    logger.info(f"📤 Sending for track {final_track_id}: {final_plate_text} (conf: {final_confidence:.3f}) - Very high confidence")
+                    logger.info(f"📤 Sending stable plate for track {final_track_id}: {final_plate_text} (conf: {final_confidence:.3f}) - Very high confidence")
                 else:
                     # FIXED: Giảm logging để tăng FPS
                     if curr_time % 3 < 1:  # Chỉ log 1/3 lần
-                        logger.info(f"⏭️ Not sending for track {final_track_id}: confidence {final_confidence:.3f} <= threshold 0.70")
+                        logger.info(f"⏭️ Not sending for track {final_track_id}: confidence {final_confidence:.3f} <= threshold 0.90")
             elif final_track_id in sent_tracks:
                 # FIXED: Giảm logging để tăng FPS
                 if curr_time % 3 < 1:  # Chỉ log 1/3 lần
@@ -741,26 +810,114 @@ def detect_and_ocr_stable(frame, camera_id=None, source_type="camera", video_fil
             # Lưu crop - crop chính xác vùng biển số từ OCR result
             crop_filename = f"plate_{final_track_id}_{final_plate_text}_{int(curr_time)}.jpg"
             
-            # SIMPLIFIED: Sử dụng detection bbox trực tiếp với padding lớn để đảm bảo lấy toàn bộ biển số
-            bbox_width = x2 - x1
-            bbox_height = y2 - y1
+            # IMPROVED: Sử dụng OCR bbox chính xác với padding nhỏ để crop chính xác
+            # Tìm OCR bbox chính xác từ kết quả OCR
+            ocr_bbox = None
+            character_bboxes = None
             
-            # Tính padding dựa trên kích thước bbox để đảm bảo lấy toàn bộ biển số
-            padding_x = max(int(bbox_width * 0.2), 20)  # 20% của width hoặc tối thiểu 20px
-            padding_y = max(int(bbox_height * 0.2), 15)  # 20% của height hoặc tối thiểu 15px
+            for res in alpr_results:
+                bbox = res.detection.bounding_box
+                res_x1 = int(bbox.x1) + ROI_XMIN
+                res_y1 = int(bbox.y1) + ROI_YMIN
+                
+                # Tìm OCR result khớp với biển số cuối cùng
+                if (abs(res_x1 - x1) < 20 and abs(res_y1 - y1) < 20 and
+                        res.ocr and res.ocr.text and res.ocr.text == final_plate_text):
+                    ocr_bbox = bbox
+                    
+                    # Thử lấy character-level bbox nếu có
+                    if hasattr(res.ocr, 'character_bboxes') and res.ocr.character_bboxes:
+                        character_bboxes = res.ocr.character_bboxes
+                        logger.info(f"🎯 Found character-level bboxes for precise crop")
+                    break
             
-            # Crop với padding lớn để lấy toàn bộ biển số
-            x1_crop = max(x1 - padding_x, 0)
-            y1_crop = max(y1 - padding_y, 0)
-            x2_crop = min(x2 + padding_x, original_width)
-            y2_crop = min(y2 + padding_y, original_height)
-            
-            logger.info(f"🎯 Full plate crop: bbox=({x1},{y1},{x2},{y2}), padding=({padding_x},{padding_y}), crop=({x1_crop},{y1_crop},{x2_crop},{y2_crop})")
+            # Sử dụng character-level bbox nếu có, nếu không thì dùng OCR bbox, cuối cùng là detection bbox
+            if character_bboxes and len(character_bboxes) > 0:
+                # Sử dụng character-level bbox để crop chính xác nhất
+                # Tính bounding box bao quanh tất cả characters
+                char_x1 = min(char_bbox[0] for char_bbox in character_bboxes) + ROI_XMIN
+                char_y1 = min(char_bbox[1] for char_bbox in character_bboxes) + ROI_YMIN
+                char_x2 = max(char_bbox[2] for char_bbox in character_bboxes) + ROI_XMIN
+                char_y2 = max(char_bbox[3] for char_bbox in character_bboxes) + ROI_YMIN
+                
+                # Padding rất nhỏ cho character-level bbox
+                bbox_width = char_x2 - char_x1
+                bbox_height = char_y2 - char_y1
+                padding_x = max(int(bbox_width * 0.02), 2)  # 2% của width hoặc tối thiểu 2px
+                padding_y = max(int(bbox_height * 0.02), 2)  # 2% của height hoặc tối thiểu 2px
+                
+                x1_crop = max(char_x1 - padding_x, 0)
+                y1_crop = max(char_y1 - padding_y, 0)
+                x2_crop = min(char_x2 + padding_x, original_width)
+                y2_crop = min(char_y2 + padding_y, original_height)
+                
+                logger.info(f"🎯 Using character-level bbox for ultra-precise crop: chars=({char_x1},{char_y1},{char_x2},{char_y2}), padding=({padding_x},{padding_y}), crop=({x1_crop},{y1_crop},{x2_crop},{y2_crop})")
+            elif ocr_bbox:
+                # OCR bbox đã được offset về ROI, cần chuyển về frame gốc
+                x1_ocr = int(ocr_bbox.x1) + ROI_XMIN
+                y1_ocr = int(ocr_bbox.y1) + ROI_YMIN
+                x2_ocr = int(ocr_bbox.x2) + ROI_XMIN
+                y2_ocr = int(ocr_bbox.y2) + ROI_YMIN
+                
+                # Sử dụng OCR bbox với padding nhỏ
+                bbox_width = x2_ocr - x1_ocr
+                bbox_height = y2_ocr - y1_ocr
+                padding_x = max(int(bbox_width * 0.05), 5)  # 5% của width hoặc tối thiểu 5px
+                padding_y = max(int(bbox_height * 0.05), 3)  # 5% của height hoặc tối thiểu 3px
+                
+                x1_crop = max(x1_ocr - padding_x, 0)
+                y1_crop = max(y1_ocr - padding_y, 0)
+                x2_crop = min(x2_ocr + padding_x, original_width)
+                y2_crop = min(y2_ocr + padding_y, original_height)
+                
+                logger.info(f"🎯 Using OCR bbox for precise crop: OCR=({x1_ocr},{y1_ocr},{x2_ocr},{y2_ocr}), padding=({padding_x},{padding_y}), crop=({x1_crop},{y1_crop},{x2_crop},{y2_crop})")
+            else:
+                # Fallback: sử dụng detection bbox với padding nhỏ hơn
+                bbox_width = x2 - x1
+                bbox_height = y2 - y1
+                padding_x = max(int(bbox_width * 0.1), 10)  # 10% của width hoặc tối thiểu 10px
+                padding_y = max(int(bbox_height * 0.1), 8)  # 10% của height hoặc tối thiểu 8px
+                
+                x1_crop = max(x1 - padding_x, 0)
+                y1_crop = max(y1 - padding_y, 0)
+                x2_crop = min(x2 + padding_x, original_width)
+                y2_crop = min(y2 + padding_y, original_height)
+                
+                logger.info(f"🎯 Using detection bbox for crop: bbox=({x1},{y1},{x2},{y2}), padding=({padding_x},{padding_y}), crop=({x1_crop},{y1_crop},{x2_crop},{y2_crop})")
             
             # Đảm bảo crop có kích thước hợp lệ
             if x2_crop > x1_crop and y2_crop > y1_crop:
                 # Crop trực tiếp để lấy toàn bộ biển số
                 crop = frame[y1_crop:y2_crop, x1_crop:x2_crop]
+                
+                # IMPROVED: Loại bỏ sọc trắng bằng cách crop chặt hơn
+                if crop.size > 0:
+                    # Chuyển sang grayscale để xử lý
+                    gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+                    
+                    # Tìm vùng có text (loại bỏ sọc trắng)
+                    # Sử dụng threshold để tìm vùng text
+                    _, thresh = cv2.threshold(gray_crop, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    
+                    # Tìm contours để xác định vùng text
+                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    if contours:
+                        # Tìm bounding box của tất cả contours
+                        all_points = np.concatenate(contours)
+                        x_min, y_min, w, h = cv2.boundingRect(all_points)
+                        
+                        # Thêm padding nhỏ cho text
+                        padding = 5
+                        x_min = max(0, x_min - padding)
+                        y_min = max(0, y_min - padding)
+                        x_max = min(crop.shape[1], x_min + w + 2*padding)
+                        y_max = min(crop.shape[0], y_min + h + 2*padding)
+                        
+                        # Crop lại để loại bỏ sọc trắng
+                        if x_max > x_min and y_max > y_min:
+                            crop = crop[y_min:y_max, x_min:x_max]
+                            logger.info(f"🎯 Trimmed crop to remove white stripes: ({x_min},{y_min},{x_max},{y_max})")
                 
                 # Cải thiện chất lượng ảnh crop
                 if crop.size > 0:
