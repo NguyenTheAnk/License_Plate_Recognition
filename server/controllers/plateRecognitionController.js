@@ -24,75 +24,79 @@ const setCachedData = (key, data) => {
     };
 };
 
-// Vietnamese license plate validation function - DISABLED: Accept all plates
-function validateVietnamesePlateFormat(plateText) {
-    if (!plateText || typeof plateText !== 'string') {
+// Vietnamese license plate validation function for RAW text (no dashes/dots)
+// CHỈ CHẤP NHẬN FORMAT: 30A12345 (XXA-YYY.ZZ)
+function validateRawVietnamesePlateFormat(rawPlateText) {
+    if (!rawPlateText || typeof rawPlateText !== 'string') {
+        return { isValid: false, normalized: '', reason: 'Empty or invalid input' };
+    }
+    
+    // Clean and normalize text - remove all non-alphanumeric characters
+    let text = rawPlateText.toUpperCase().trim();
+    text = text.replace(/[^A-Z0-9]/g, '');
+    
+    // CHỈ CHẤP NHẬN FORMAT: XXA-YYY.ZZ (raw: XXAYYYZZ)
+    // Pattern: 2 số + 1 chữ cái + 5 số = 8 ký tự
+    const pattern = /^[0-9]{2}[ABCDEFGH][0-9]{5}$/;
+    
+    const isValid = pattern.test(text);
+    
+    return { 
+        isValid: isValid, 
+        normalized: text, 
+        reason: isValid ? 'Valid Vietnamese raw license plate format (XXAYYYZZ)' : 'Invalid format - only accept XXAYYYZZ (XXA-YYY.ZZ)' 
+    };
+}
+
+// Vietnamese license plate validation function for FORMATTED text (with dashes/dots)
+// CHỈ CHẤP NHẬN FORMAT: 30A-123.45 (XXA-YYY.ZZ)
+function validateFormattedVietnamesePlateFormat(formattedPlateText) {
+    if (!formattedPlateText || typeof formattedPlateText !== 'string') {
         return { isValid: false, normalized: '', reason: 'Empty or invalid input' };
     }
     
     // Clean and normalize text
-    let text = plateText.toUpperCase().trim();
+    let text = formattedPlateText.toUpperCase().trim();
     text = text.replace(/[^A-Z0-9\-\.]/g, '');
     
-    // DISABLED: Always return valid to skip format validation
-    return { isValid: true, normalized: text, reason: 'Format validation disabled - accepting all plates' };
+    // CHỈ CHẤP NHẬN FORMAT: XXA-YYY.ZZ
+    // Pattern: 2 số + 1 chữ cái + dấu gạch + 3 số + dấu chấm + 2 số
+    const pattern = /^[0-9]{2}[ABCDEFGH]-[0-9]{3}\.[0-9]{2}$/;
+    
+    const isValid = pattern.test(text);
+    
+    return { 
+        isValid: isValid, 
+        normalized: text, 
+        reason: isValid ? 'Valid Vietnamese formatted license plate format (XXA-YYY.ZZ)' : 'Invalid format - only accept XXA-YYY.ZZ' 
+    };
 }
 
 // Format Vietnamese license plate for display
+// CHỈ FORMAT THEO PATTERN: XXA-YYY.ZZ
 function formatVietnamesePlate(plateText) {
     if (!plateText || typeof plateText !== 'string') {
         return plateText;
     }
     
-    // Clean and normalize text
+    // Clean and normalize text - remove all non-alphanumeric characters
     let text = plateText.toUpperCase().trim();
     text = text.replace(/[^A-Z0-9]/g, '');
     
     // Skip formatting if already formatted or too short
-    if (text.includes('-') || text.includes('.') || text.length < 5) {
+    if (text.includes('-') || text.includes('.') || text.length < 8) {
         return plateText;
     }
     
-    // Vietnamese license plate patterns
-    // Format: XX-XXXX.XX (e.g., 30A-390.59, 88A-410.10)
-    if (text.length >= 7) {
-        // Pattern: 2-3 chars + 3-4 digits + 2 digits
-        // Examples: 30A39059 -> 30A-390.59, 88A41010 -> 88A-410.10
+    // CHỈ FORMAT THEO PATTERN: XXA-YYY.ZZ
+    // Input: XXAYYYZZ (8 ký tự)
+    // Output: XXA-YYY.ZZ
+    if (text.length === 8) {
+        const prefix = text.substring(0, 3);      // XXA
+        const mainNumber = text.substring(3, 6);  // YYY
+        const suffix = text.substring(6, 8);      // ZZ
         
-        // Find the split point between letters and numbers
-        let letterEnd = 0;
-        for (let i = 0; i < text.length; i++) {
-            if (/\d/.test(text[i])) {
-                letterEnd = i;
-                break;
-            }
-        }
-        
-        if (letterEnd > 0 && letterEnd < text.length - 2) {
-            const prefix = text.substring(0, letterEnd);
-            const remaining = text.substring(letterEnd);
-            
-            // Split remaining into main number and suffix
-            if (remaining.length >= 5) {
-                const mainNumber = remaining.substring(0, remaining.length - 2);
-                const suffix = remaining.substring(remaining.length - 2);
-                
-                return `${prefix}-${mainNumber}.${suffix}`;
-            } else if (remaining.length >= 3) {
-                // For shorter plates, just add dash
-                const mainNumber = remaining.substring(0, remaining.length - 2);
-                const suffix = remaining.substring(remaining.length - 2);
-                return `${prefix}-${mainNumber}.${suffix}`;
-            }
-        }
-        
-        // Fallback: try to format as XX-XXXX.XX
-        if (text.length >= 7) {
-            const prefix = text.substring(0, 3);
-            const mainNumber = text.substring(3, text.length - 2);
-            const suffix = text.substring(text.length - 2);
-            return `${prefix}-${mainNumber}.${suffix}`;
-        }
+        return `${prefix}-${mainNumber}.${suffix}`;
     }
     
     // Return original if can't format
@@ -400,6 +404,25 @@ const getLicensePlateRecognitions = async (req, res) => {
                 } else {
                     console.log('Data query results count:', results ? results.length : 0);
                     console.log('Query duration:', queryDuration + 'ms');
+                    
+                    // Debug: Log first few results to check camera_name and location_name
+                    if (results && results.length > 0) {
+                        console.log('First detection result:', {
+                            id: results[0].id,
+                            plate_number: results[0].plate_number,
+                            camera_id: results[0].camera_id,
+                            camera_name: results[0].camera_name,
+                            location_name: results[0].location_name
+                        });
+                        
+                        // Debug: Check if camera_name or location_name are null/undefined
+                        if (!results[0].camera_name) {
+                            console.warn('⚠️ camera_name is null/undefined for detection:', results[0].id);
+                        }
+                        if (!results[0].location_name) {
+                            console.warn('⚠️ location_name is null/undefined for detection:', results[0].id);
+                        }
+                    }
                     
                     // Log slow queries
                     if (queryDuration > 1000) {
@@ -987,6 +1010,21 @@ const createLicensePlateRecognition = async (req, res) => {
                 message: 'Thiếu thông tin bắt buộc: plate_number'
             });
         }
+
+        // Validate RAW plate text (from OCR - no dashes/dots)
+        const rawPlateValidation = validateRawVietnamesePlateFormat(plate_number);
+        
+        if (!rawPlateValidation.isValid) {
+            console.log(`❌ Invalid Vietnamese raw license plate format: ${plate_number} - ${rawPlateValidation.reason}`);
+            return res.status(400).json({
+                success: false,
+                message: `Format biển số không hợp lệ: ${plate_number}. Vui lòng kiểm tra lại.`,
+                invalid_plate: plate_number,
+                reason: rawPlateValidation.reason
+            });
+        }
+
+        console.log(`✅ Valid Vietnamese raw license plate format: ${plate_number} - ${rawPlateValidation.reason}`);
         
         // Set default camera_id if not provided or invalid
         if (!camera_id || camera_id === 'default' || camera_id === 'null' || camera_id === 'test') {
@@ -1033,11 +1071,21 @@ const createLicensePlateRecognition = async (req, res) => {
                 actual_camera_name = cameraResult.camera_name;
                 actual_location_name = cameraResult.location_name || 'Unknown Location';
                 console.log(`📷 Camera found: ${actual_camera_name} at ${actual_location_name} (ID: ${camera_id}, Location ID: ${actual_location_id})`);
+                
+                // Debug: Check if camera_name or location_name are null/empty
+                if (!actual_camera_name || actual_camera_name.trim() === '') {
+                    console.warn(`⚠️ Camera name is empty for camera ID ${camera_id}, using fallback`);
+                    actual_camera_name = `Camera ${camera_id}`;
+                }
+                if (!actual_location_name || actual_location_name.trim() === '' || actual_location_name === 'Unknown Location') {
+                    console.warn(`⚠️ Location name is empty for camera ID ${camera_id}, using fallback`);
+                    actual_location_name = 'Khu vực không xác định';
+                }
             } else {
                 console.log(`⚠️ Camera ID ${camera_id} not found in database, using defaults`);
                 actual_location_id = 1; // Default location ID
                 actual_camera_name = `Camera ${camera_id}`;
-                actual_location_name = 'Unknown Location';
+                actual_location_name = 'Khu vực không xác định';
             }
         } catch (error) {
             console.error('Error querying camera information:', error);
@@ -1067,9 +1115,19 @@ const createLicensePlateRecognition = async (req, res) => {
         }
 
         // Format plate number for Vietnamese standard before saving
-        const formattedPlateNumber = formatVietnamesePlate(plate_number);
-        const plateValidation = { isValid: true, normalized: formattedPlateNumber, reason: 'Plate formatted for Vietnamese standard' };
-        console.log(`📋 Plate formatted: ${plate_number} -> ${formattedPlateNumber}`);
+        const formattedPlateNumber = formatVietnamesePlate(rawPlateValidation.normalized);
+        
+        // Validate formatted plate number
+        const formattedPlateValidation = validateFormattedVietnamesePlateFormat(formattedPlateNumber);
+        
+        if (!formattedPlateValidation.isValid) {
+            console.log(`⚠️ Formatted plate number is invalid: ${formattedPlateNumber} - ${formattedPlateValidation.reason}`);
+            // Use raw plate as fallback
+            const fallbackFormatted = rawPlateValidation.normalized;
+            console.log(`📋 Using fallback format: ${plate_number} -> ${fallbackFormatted}`);
+        } else {
+            console.log(`📋 Plate formatted: ${plate_number} -> ${formattedPlateNumber}`);
+        }
 
         // Generate UUID if not provided
         const detectionUuid = detection_uuid || require('crypto').randomUUID();
@@ -1085,9 +1143,13 @@ const createLicensePlateRecognition = async (req, res) => {
         let actual_blacklist_match = false;
         
         try {
+            // Sử dụng biển số đã được format (có dấu - và .) để đối chiếu
+            const plateToCheck = formattedPlateNumber;
+            
             // DEBUG: Log plate number being checked
-            console.log(`🔍 DEBUG: Checking plate number: "${plateValidation.normalized}"`);
+            console.log(`🔍 DEBUG: Checking formatted plate number: "${plateToCheck}"`);
             console.log(`🔍 DEBUG: Original plate number: "${plate_number}"`);
+            console.log(`🔍 DEBUG: Raw plate number: "${rawPlateValidation.normalized}"`);
             
             // Check whitelist - ENHANCED with validity and approval checks
             const whitelistQuery = `
@@ -1102,12 +1164,12 @@ const createLicensePlateRecognition = async (req, res) => {
             // DEBUG: First check all entries with this plate number (without conditions)
             const debugQuery = 'SELECT * FROM vehicle_whitelist WHERE plate_number = ?';
             const debugResult = await new Promise((resolve, reject) => {
-                db.query(debugQuery, [plateValidation.normalized], (error, results) => {
+                db.query(debugQuery, [plateToCheck], (error, results) => {
                     if (error) {
                         console.error('❌ DEBUG: Debug query error:', error);
                         reject(error);
                     } else {
-                        console.log(`🔍 DEBUG: All whitelist entries for "${plateValidation.normalized}":`, results);
+                        console.log(`🔍 DEBUG: All whitelist entries for "${plateToCheck}":`, results);
                         resolve(results);
                     }
                 });
@@ -1115,10 +1177,10 @@ const createLicensePlateRecognition = async (req, res) => {
             
             // DEBUG: Log the exact query being executed
             console.log(`🔍 DEBUG: Whitelist query:`, whitelistQuery);
-            console.log(`🔍 DEBUG: Query parameter:`, plateValidation.normalized);
+            console.log(`🔍 DEBUG: Query parameter:`, plateToCheck);
             
             const whitelistResult = await new Promise((resolve, reject) => {
-                db.query(whitelistQuery, [plateValidation.normalized], (error, results) => {
+                db.query(whitelistQuery, [plateToCheck], (error, results) => {
                     if (error) {
                         console.error('❌ DEBUG: Whitelist query error:', error);
                         reject(error);
@@ -1141,9 +1203,10 @@ const createLicensePlateRecognition = async (req, res) => {
             
             // DEBUG: Log blacklist query
             console.log(`🔍 DEBUG: Blacklist query:`, blacklistQuery);
+            console.log(`🔍 DEBUG: Blacklist query parameter:`, plateToCheck);
             
             const blacklistResult = await new Promise((resolve, reject) => {
-                db.query(blacklistQuery, [plateValidation.normalized], (error, results) => {
+                db.query(blacklistQuery, [plateToCheck], (error, results) => {
                     if (error) {
                         console.error('❌ DEBUG: Blacklist query error:', error);
                         reject(error);
@@ -1155,7 +1218,7 @@ const createLicensePlateRecognition = async (req, res) => {
             });
             actual_blacklist_match = blacklistResult.length > 0;
             
-            console.log(`🔍 ENHANCED BlackList/WhiteList check for ${plateValidation.normalized}:`, {
+            console.log(`🔍 ENHANCED BlackList/WhiteList check for "${plateToCheck}":`, {
                 whitelist_match: actual_whitelist_match,
                 blacklist_match: actual_blacklist_match,
                 whitelist_criteria: 'is_active=1 AND approval_status=approved AND valid_dates',
@@ -1181,10 +1244,12 @@ const createLicensePlateRecognition = async (req, res) => {
         });
 
         // Prepare data for insertion
+        const finalFormattedPlate = formattedPlateValidation.isValid ? formattedPlateNumber : rawPlateValidation.normalized;
+        
         const insertData = {
             detection_uuid: detectionUuid,
-            plate_number: formattedPlateNumber, // Use formatted plate number
-            raw_plate_text: raw_plate_text || plate_number, // Keep original raw text
+            plate_number: finalFormattedPlate, // Use formatted plate number for display
+            raw_plate_text: raw_plate_text || rawPlateValidation.normalized, // Keep original raw text from OCR
             camera_id: camera_id,
             location_id: actual_location_id,
             detected_at: detected_at ? new Date(detected_at * 1000) : new Date(),
@@ -1346,6 +1411,14 @@ const createLicensePlateRecognition = async (req, res) => {
             console.log(`⏭️ Skipped duplicate plate detection: ${insertData.plate_number} (BL:${insertData.is_blacklist_match}, WL:${insertData.is_whitelist_match})`);
         } else {
             console.log(`✅ Saved plate detection: ${insertData.plate_number} (BL:${insertData.is_blacklist_match}, WL:${insertData.is_whitelist_match})`);
+            
+            // Log kết quả đối chiếu blacklist/whitelist
+            if (insertData.is_blacklist_match) {
+                console.log(`🚨 BLACKLIST MATCH: ${formattedPlateNumber} - Camera ${insertData.camera_id} - ${actual_location_name}`);
+            }
+            if (insertData.is_whitelist_match) {
+                console.log(`✅ WHITELIST MATCH: ${formattedPlateNumber} - Camera ${insertData.camera_id} - ${actual_location_name}`);
+            }
         }
 
         res.status(201).json({
@@ -1436,6 +1509,203 @@ const getRealtimeDetections = async (req, res) => {
     }
 };
 
+// Lấy danh sách biển số nhận diện theo camera và ngày
+const getLicensePlateRecognitionsByCamera = async (req, res) => {
+    try {
+        const { cameraId } = req.params;
+        const { 
+            start_date, 
+            end_date, 
+            page = 1, 
+            limit = 50,
+            sort_by = 'detected_at',
+            sort_order = 'DESC'
+        } = req.query;
+
+        // Validate camera ID
+        if (!cameraId || isNaN(parseInt(cameraId))) {
+            return res.status(400).json({
+                success: false,
+                message: 'Camera ID không hợp lệ'
+            });
+        }
+
+        // Validate pagination parameters
+        const parsedPage = Math.max(1, parseInt(page) || 1);
+        const parsedLimit = Math.min(100, Math.max(1, parseInt(limit) || 50));
+        const offset = (parsedPage - 1) * parsedLimit;
+
+        // Build WHERE conditions
+        let whereConditions = ['lpd.camera_id = ?'];
+        let queryParams = [parseInt(cameraId)];
+
+        // Date range filters
+        if (start_date) {
+            const startDate = new Date(start_date);
+            if (!isNaN(startDate.getTime())) {
+                whereConditions.push('DATE(lpd.detected_at) >= ?');
+                queryParams.push(start_date);
+            }
+        }
+
+        if (end_date) {
+            const endDate = new Date(end_date);
+            if (!isNaN(endDate.getTime())) {
+                whereConditions.push('DATE(lpd.detected_at) <= ?');
+                queryParams.push(end_date);
+            }
+        }
+
+        const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+
+        // Validate sort parameters
+        const allowedSortFields = ['detected_at', 'plate_number', 'confidence_score', 'ocr_confidence', 'detection_confidence'];
+        const sortBy = allowedSortFields.includes(sort_by) ? sort_by : 'detected_at';
+        const sortOrder = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+        // Get total count
+        const countQuery = `SELECT COUNT(*) as total FROM license_plate_detections lpd ${whereClause}`;
+        const countResults = await new Promise((resolve, reject) => {
+            db.query(countQuery, queryParams, (error, results) => {
+                if (error) {
+                    console.error('Count query error:', error);
+                    reject(error);
+                } else {
+                    resolve(results);
+                }
+            });
+        });
+        
+        const total = countResults && countResults.length > 0 ? countResults[0].total : 0;
+
+        // Get data with pagination
+        const dataQuery = `
+            SELECT 
+                lpd.id, lpd.detection_uuid, lpd.plate_number, lpd.raw_plate_text, 
+                lpd.camera_id, lpd.location_id, lpd.detected_at, lpd.confidence_score, 
+                lpd.ocr_confidence, lpd.detection_confidence, lpd.cropped_plate_image_path,
+                lpd.is_verified, lpd.is_whitelist_match, lpd.is_blacklist_match,
+                lpd.source_type, lpd.video_filename, lpd.camera_name,
+                c.name as camera_name_db,
+                loc.name as location_name
+            FROM license_plate_detections lpd
+            LEFT JOIN cameras c ON lpd.camera_id = c.id
+            LEFT JOIN locations loc ON c.location_id = loc.id
+            ${whereClause}
+            ORDER BY lpd.${sortBy} ${sortOrder}
+            LIMIT ${parsedLimit} OFFSET ${offset}
+        `;
+
+        const detections = await new Promise((resolve, reject) => {
+            db.query(dataQuery, queryParams, (error, results) => {
+                if (error) {
+                    console.error('Data query error:', error);
+                    reject(error);
+                } else {
+                    resolve(results || []);
+                }
+            });
+        });
+
+        // Group by date for better organization
+        const detectionsByDate = {};
+        detections.forEach(detection => {
+            const date = new Date(detection.detected_at).toISOString().split('T')[0];
+            if (!detectionsByDate[date]) {
+                detectionsByDate[date] = [];
+            }
+            detectionsByDate[date].push(detection);
+        });
+
+        // Get camera information
+        const cameraQuery = `
+            SELECT c.id, c.name, c.code, c.status, l.name as location_name, l.Ox, l.Oy
+            FROM cameras c
+            LEFT JOIN locations l ON c.location_id = l.id
+            WHERE c.id = ?
+        `;
+        
+        const cameraInfo = await new Promise((resolve, reject) => {
+            db.query(cameraQuery, [parseInt(cameraId)], (error, results) => {
+                if (error) {
+                    console.error('Camera query error:', error);
+                    reject(error);
+                } else {
+                    resolve(results && results.length > 0 ? results[0] : null);
+                }
+            });
+        });
+
+        if (!cameraInfo) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy camera với ID này'
+            });
+        }
+
+        // Get daily statistics
+        const dailyStatsQuery = `
+            SELECT 
+                DATE(detected_at) as date,
+                COUNT(*) as total_detections,
+                COUNT(DISTINCT plate_number) as unique_plates,
+                AVG(confidence_score) as avg_confidence,
+                MIN(detected_at) as first_detection,
+                MAX(detected_at) as last_detection
+            FROM license_plate_detections 
+            ${whereClause}
+            GROUP BY DATE(detected_at)
+            ORDER BY DATE(detected_at) DESC
+        `;
+
+        const dailyStats = await new Promise((resolve, reject) => {
+            db.query(dailyStatsQuery, queryParams, (error, results) => {
+                if (error) {
+                    console.error('Daily stats query error:', error);
+                    reject(error);
+                } else {
+                    resolve(results || []);
+                }
+            });
+        });
+
+        res.status(200).json({
+            success: true,
+            message: `Lấy danh sách biển số nhận diện cho camera ${cameraInfo.name} thành công`,
+            data: {
+                camera: cameraInfo,
+                detections: detections,
+                detectionsByDate: detectionsByDate,
+                dailyStats: dailyStats,
+                pagination: {
+                    current_page: parsedPage,
+                    per_page: parsedLimit,
+                    total: total,
+                    total_pages: Math.ceil(total / parsedLimit),
+                    has_next: (parsedPage * parsedLimit) < total,
+                    has_prev: parsedPage > 1
+                },
+                filters_applied: {
+                    camera_id: cameraId,
+                    start_date: start_date || null,
+                    end_date: end_date || null,
+                    sort_by: sortBy,
+                    sort_order: sortOrder
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error getting license plate recognitions by camera:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy danh sách biển số nhận diện theo camera',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+
 module.exports = {
     getLicensePlateRecognitions,
     getLicensePlateRecognitionById,
@@ -1443,5 +1713,6 @@ module.exports = {
     deleteLicensePlateRecognition,
     updateRecognitionVerification,
     createLicensePlateRecognition,
-    getRealtimeDetections
+    getRealtimeDetections,
+    getLicensePlateRecognitionsByCamera
 };
