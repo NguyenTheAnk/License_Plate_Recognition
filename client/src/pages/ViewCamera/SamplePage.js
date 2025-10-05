@@ -95,6 +95,9 @@ const SamplePage = () => {
   const [hasVerifyPlate, setHasVerifyPlate] = useState(false);
   const [hasDeletePlate, setHasDeletePlate] = useState(false);
   const [hasSearchPlate, setHasSearchPlate] = useState(false);
+  
+  // State để track trạng thái nhận diện từ CameraViewer
+  const [isRecognizing, setIsRecognizing] = useState(false);
 
   // States cho Log Panel
   const [logEntries, setLogEntries] = useState([]);
@@ -221,7 +224,7 @@ const SamplePage = () => {
         id: notificationId,
         type: 'blacklist',
         plateNumber: result.plate_number,
-        message: `🚨 CẢNH BÁO: Phương tiện có biển số xe ${result.plate_number} đang nằm trong BlackList, không được phép vào khu vực này.`,
+        message: `Cảnh báo: Phương tiện có biển số xe ${result.plate_number} đang nằm trong BlackList, không được phép vào khu vực này.`,
         severity: 'error',
         details: result
       };
@@ -243,7 +246,7 @@ const SamplePage = () => {
         id: notificationId,
         type: 'whitelist',
         plateNumber: result.plate_number,
-        message: `✅ CHO PHÉP: Phương tiện có biển số xe ${result.plate_number} được phép vào khu vực này (có trong WhiteList).`,
+        message: `Cho phép: Phương tiện có biển số xe ${result.plate_number} được phép vào khu vực này (có trong WhiteList).`,
         severity: 'success',
         details: result
       };
@@ -771,14 +774,17 @@ const SamplePage = () => {
     loadDetectionResults();
   }, [loadDetectionResults]); // Chỉ chạy một lần khi mount
 
-  // Add polling mechanism for real-time updates
+  // Add polling mechanism for real-time updates - CHỈ KHI ĐANG NHẬN DIỆN
   useEffect(() => {
     const pollingInterval = setInterval(() => {
-      loadDetectionResults();
+      // CHỈ RELOAD KHI ĐANG NHẬN DIỆN (isRecognizing = true)
+      if (isRecognizing) {
+        loadDetectionResults();
+      }
     }, 3000); // Poll every 3 seconds
 
     return () => clearInterval(pollingInterval);
-  }, [loadDetectionResults]);
+  }, [isRecognizing, loadDetectionResults]);
 
   // Load lại khi có thay đổi pagination
   useEffect(() => {
@@ -829,16 +835,17 @@ const SamplePage = () => {
     return () => clearInterval(cleanupInterval);
   }, []);
 
-  // Auto polling để refresh dữ liệu real-time mỗi 3 giây
+  // Auto polling để refresh dữ liệu real-time - CHỈ KHI ĐANG NHẬN DIỆN
   useEffect(() => {
     const pollingInterval = setInterval(() => {
-      if (!isLoadingDetections && !isPolling) {
+      // CHỈ RELOAD KHI ĐANG NHẬN DIỆN (isRecognizing = true)
+      if (isRecognizing && !isLoadingDetections && !isPolling) {
         handleAutoRefresh();
       }
     }, 3000); // Polling mỗi 3 giây
 
     return () => clearInterval(pollingInterval);
-  }, [isLoadingDetections, isPolling, handleAutoRefresh]);
+  }, [isRecognizing, isLoadingDetections, isPolling, handleAutoRefresh]);
 
   // Reset gotoPage khi currentPage thay đổi
   useEffect(() => { setGotoPage(''); }, [currentPage]);
@@ -2010,10 +2017,16 @@ const SamplePage = () => {
                             startRecognition,
                             stopRecognition,
                             closeVideo,
-                            isRecognizing,
+                            isRecognizing: cameraIsRecognizing,
                             isProcessing,
                             onForcePlay,
-                          }) => (
+                          }) => {
+                            // Cập nhật state isRecognizing từ CameraViewer
+                            if (cameraIsRecognizing !== isRecognizing) {
+                              setIsRecognizing(cameraIsRecognizing);
+                            }
+                            
+                            return (
                             <CameraActionBar
                               cameraName={originalCameraName}
                               cameraId={cameraId}
@@ -2026,7 +2039,7 @@ const SamplePage = () => {
                               onClose={closeVideo || (() => handleCloseCameraFeed(streamId))}  // FIXED: Sử dụng closeVideo nếu có
                               onStartRecognize={startRecognition}
                               onStopRecognize={stopRecognition}
-                              isRecognizing={isRecognizing}
+                              isRecognizing={cameraIsRecognizing}
                               isProcessing={isProcessing}
                               onStartRecording={() => handleStartRecording(streamId)}
                               onStopRecording={() => handleStopRecording(streamId)}
@@ -2040,7 +2053,8 @@ const SamplePage = () => {
                               currentQuality={currentQuality[streamId] || 'medium'}
                               onSelectSource={() => handleSelectSource(streamId)}
                             />
-                          )}
+                            );
+                          }}
                           onClose={() => handleCloseCameraFeed(streamId)}
                           recordingTimer={recordingTimers[streamId] || 0}
                           style={{
