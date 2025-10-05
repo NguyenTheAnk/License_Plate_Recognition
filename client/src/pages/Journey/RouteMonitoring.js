@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import CameraRouteDisplay from '../../components/RouteMonitoring/CameraRouteDisplay';
 import './RouteMonitoring.css';
 
 const RouteMonitoring = () => {
@@ -28,6 +29,17 @@ const RouteMonitoring = () => {
   const [endDate, setEndDate] = useState('');
   const [startDateDisplay, setStartDateDisplay] = useState('');
   const [endDateDisplay, setEndDateDisplay] = useState('');
+  
+  // State cho gợi ý biển số
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  
+  // State cho route data
+  const [routeData, setRouteData] = useState(null);
+  const [totalDetections, setTotalDetections] = useState(0);
+  const [totalCameras, setTotalCameras] = useState(0);
+  const [timeRange, setTimeRange] = useState(null);
   
   // State cho UI/UX cải thiện
   const [selectedDetection, setSelectedDetection] = useState(null);
@@ -311,6 +323,98 @@ const RouteMonitoring = () => {
     }
   };
 
+  // Hàm tìm kiếm gợi ý biển số
+  const searchSuggestions = async (query) => {
+    if (!query || query.trim().length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    console.log('🔍 Searching suggestions for:', query);
+    setIsLoadingSuggestions(true);
+    try {
+      const token = localStorage.getItem('token');
+      const url = `/api/plate-routes/search-similar?query=${encodeURIComponent(query)}&limit=8`;
+      console.log('🌐 API URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('📡 Response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Suggestions data:', data);
+        if (data.success) {
+          setSuggestions(data.data || []);
+          setShowSuggestions(true);
+          console.log('📋 Set suggestions:', data.data);
+        } else {
+          console.error('❌ API returned success: false', data);
+        }
+      } else {
+        const errorText = await response.text();
+        console.error('❌ API Error:', response.status, errorText);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching suggestions:', error);
+    } finally {
+      setIsLoadingSuggestions(false);
+    }
+  };
+
+  // Debounce search suggestions
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (searchPlateNumber && searchPlateNumber.trim().length >= 2) {
+        searchSuggestions(searchPlateNumber);
+      } else {
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchPlateNumber]);
+
+  // Handle click outside to close suggestions
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.suggestions-container') && !event.target.closest('input[type="text"]')) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Handle suggestion click
+  const handleSuggestionClick = (plateNumber) => {
+    setSearchPlateNumber(plateNumber);
+    setShowSuggestions(false);
+    handleSearchPlate(plateNumber);
+  };
+
+  // Handle input change
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setSearchPlateNumber(value);
+    if (value.trim().length >= 2) {
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
   // Hàm tìm kiếm biển số xe với cải thiện
   const handleSearchPlate = async (plateNumber) => {
     if (!plateNumber.trim()) {
@@ -384,6 +488,31 @@ const RouteMonitoring = () => {
         }
         
         setSearchResults(detections);
+        
+      // Lưu route data cho CameraRouteDisplay
+      if (detections.length > 0) {
+        setRouteData({
+          orderedCameras: data.orderedCameras || [],
+          routeData: data.routeData || []
+        });
+        setTotalDetections(data.totalDetections || detections.length);
+        setTotalCameras(data.totalCameras || (data.routeData?.length || 0));
+        setTimeRange(data.timeRange || null);
+        
+        // Giữ nguyên tab "Tìm kiếm" thay vì chuyển sang tab "Lộ trình"
+        // setActiveTab('route'); // Commented out to stay on search tab
+        
+        console.log('📊 Route data saved:', {
+          totalDetections: data.totalDetections || detections.length,
+          totalCameras: data.totalCameras || (data.routeData?.length || 0),
+          orderedCameras: data.orderedCameras?.length || 0
+        });
+      } else {
+        setRouteData(null);
+        setTotalDetections(0);
+        setTotalCameras(0);
+        setTimeRange(null);
+      }
         
         // Thêm vào lịch sử tìm kiếm
         const newSearchHistory = [
@@ -1746,6 +1875,10 @@ const RouteMonitoring = () => {
     updateCamera();
   }
 
+
+  // State cho tabs
+  const [activeTab, setActiveTab] = useState('search');
+
   return (
     <div className="route-monitoring-container" style={{ display: 'flex', height: '100vh', backgroundColor: '#f5f7fa' }}>
       {/* Bên trái - Map 3D */}
@@ -1819,87 +1952,176 @@ const RouteMonitoring = () => {
 
       {/* Bên phải - Control Panel */}
       <div style={{ flex: '0 0 30%', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff', borderLeft: '1px solid #e9ecef' }}>
-        {/* Header */}
+        {/* Tab Navigation */}
         <div style={{ 
-          backgroundColor: '#007bff', 
-          padding: '16px',
-          color: 'white'
+          display: 'flex',
+          backgroundColor: '#f8f9fa',
+          borderBottom: '1px solid #e9ecef'
         }}>
-          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            🔍 Tìm kiếm biển số xe
-          </h2>
-          <p style={{ margin: '4px 0 0 0', fontSize: '12px', opacity: 0.9 }}>
-            Tìm kiếm và theo dõi lộ trình di chuyển của phương tiện
-          </p>
+          <button
+            onClick={() => setActiveTab('search')}
+            style={{
+              flex: 1,
+              padding: '12px 16px',
+              border: 'none',
+              backgroundColor: activeTab === 'search' ? '#007bff' : 'transparent',
+              color: activeTab === 'search' ? 'white' : '#495057',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              borderBottom: activeTab === 'search' ? '2px solid #007bff' : '2px solid transparent'
+            }}
+          >
+            🔍 Tìm kiếm
+          </button>
+          <button
+            onClick={() => setActiveTab('route')}
+            style={{
+              flex: 1,
+              padding: '12px 16px',
+              border: 'none',
+              backgroundColor: activeTab === 'route' ? '#007bff' : 'transparent',
+              color: activeTab === 'route' ? 'white' : '#495057',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              borderBottom: activeTab === 'route' ? '2px solid #007bff' : '2px solid transparent'
+            }}
+          >
+            📍 Lộ trình
+          </button>
         </div>
 
         {/* Content area */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-            <div>
-            {/* Search form */}
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                <h3 style={{ margin: 0, fontSize: '16px', color: '#333', fontWeight: '600' }}>
-                  Thông tin tìm kiếm
-            </h3>
-            <button
-              onClick={refreshAll}
-              style={{
-                    padding: '8px 12px',
-                    backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                    borderRadius: '6px',
-                cursor: 'pointer',
-                    fontSize: '12px',
-                    fontWeight: '500',
-                display: 'flex',
-                alignItems: 'center',
-                    gap: '6px',
-                    transition: 'all 0.2s ease'
-                  }}
-                  onMouseOver={(e) => e.target.style.backgroundColor = '#5a6268'}
-                  onMouseOut={(e) => e.target.style.backgroundColor = '#6c757d'}
-                >
-                  🔄 Reset
-                </button>
-              </div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {/* Tab Content */}
+          {activeTab === 'search' && (
+            <div style={{ padding: '16px' }}>
+              {/* Search form */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, fontSize: '16px', color: '#333', fontWeight: '600' }}>
+                    Thông tin tìm kiếm
+                  </h3>
+                  <button
+                    onClick={refreshAll}
+                    style={{
+                      padding: '8px 12px',
+                      backgroundColor: '#6c757d',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseOver={(e) => e.target.style.backgroundColor = '#5a6268'}
+                    onMouseOut={(e) => e.target.style.backgroundColor = '#6c757d'}
+                  >
+                    🔄 Reset
+                  </button>
+                </div>
 
               {/* Biển số xe input */}
-              <div style={{ marginBottom: '16px' }}>
+              <div style={{ marginBottom: '16px', position: 'relative' }}>
                 <label style={{ fontSize: '14px', color: '#333', marginBottom: '8px', display: 'block', fontWeight: '600' }}>
                   🚗 Biển số xe:
                 </label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    value={searchPlateNumber}
-                    onChange={(e) => setSearchPlateNumber(e.target.value)}
-                    placeholder="Ví dụ: 30A-12345, 88A-410.10..."
-                    style={{
-                      flex: 1,
-                      padding: '12px 16px',
-                      border: '2px solid #e9ecef',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      backgroundColor: 'white',
-                      transition: 'all 0.2s ease',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
-                    }}
-                    onFocus={(e) => {
-                      e.target.style.borderColor = '#007bff';
-                      e.target.style.boxShadow = '0 0 0 3px rgba(0,123,255,0.1)';
-                    }}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = '#e9ecef';
-                      e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
-                    }}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter') {
-                        handleSearchPlate(searchPlateNumber);
-                      }
-                    }}
-                  />
+                <div style={{ display: 'flex', gap: '8px', position: 'relative' }}>
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={searchPlateNumber}
+                      onChange={handleInputChange}
+                      onFocus={() => {
+                        if (suggestions.length > 0) {
+                          setShowSuggestions(true);
+                        }
+                      }}
+                      placeholder="Ví dụ: 30A-123.45,..."
+                      style={{
+                        width: '100%',
+                        padding: '12px 16px',
+                        border: '2px solid #e9ecef',
+                        borderRadius: '8px',
+                        fontSize: '14px',
+                        backgroundColor: 'white',
+                        transition: 'all 0.2s ease',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                      }}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSearchPlate(searchPlateNumber);
+                        }
+                      }}
+                    />
+                    
+                    {/* Suggestions dropdown */}
+                    {console.log('🎯 Render check - showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length)}
+                    {showSuggestions && suggestions.length > 0 && (
+                      <div 
+                        className="suggestions-container"
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          backgroundColor: 'white',
+                          border: '1px solid #e9ecef',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                          zIndex: 1000,
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          marginTop: '4px'
+                        }}>
+                        {isLoadingSuggestions && (
+                          <div style={{ padding: '12px', textAlign: 'center', color: '#666' }}>
+                            ⏳ Đang tìm kiếm...
+                          </div>
+                        )}
+                        {!isLoadingSuggestions && suggestions.map((suggestion, index) => (
+                          <div
+                            key={index}
+                            onClick={() => handleSuggestionClick(suggestion.plate_number)}
+                            style={{
+                              padding: '12px 16px',
+                              cursor: 'pointer',
+                              borderBottom: index < suggestions.length - 1 ? '1px solid #f0f0f0' : 'none',
+                              transition: 'all 0.2s ease',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}
+                            onMouseOver={(e) => {
+                              e.target.style.backgroundColor = '#f8f9fa';
+                            }}
+                            onMouseOut={(e) => {
+                              e.target.style.backgroundColor = 'white';
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>
+                                {suggestion.plate_number}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#666' }}>
+                                {suggestion.detection_count} lần phát hiện
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#999' }}>
+                              {new Date(suggestion.last_seen).toLocaleDateString('vi-VN')}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <button
                     onClick={() => handleSearchPlate(searchPlateNumber)}
                     disabled={isSearching || !searchPlateNumber.trim()}
@@ -2434,8 +2656,98 @@ const RouteMonitoring = () => {
             </div>
           )}
 
-            {/* Detection Detail Modal */}
-            {selectedDetection && (
+            </div>
+          )}
+
+          {/* Route Tab */}
+          {activeTab === 'route' && (
+            <div style={{ padding: '16px' }}>
+              {searchResults.length > 0 && searchPlateNumber ? (
+                <CameraRouteDisplay
+                  routeData={{
+                    ...routeData,
+                    // FIXED: Sử dụng searchResults đầy đủ thay vì chỉ orderedCameras
+                    orderedCameras: (() => {
+                      const dailyDetails = getDailyDetails();
+                      console.log('🔍 getDailyDetails() result:', dailyDetails);
+                      console.log('🔍 searchResults length:', searchResults.length);
+                      console.log('🔍 searchResults sample:', searchResults[0]);
+                      
+                      // FALLBACK: Nếu getDailyDetails() không có dữ liệu, tạo từ searchResults trực tiếp
+                      if (dailyDetails.length === 0 && searchResults.length > 0) {
+                        console.log('🔍 Using fallback logic from searchResults');
+                        
+                        // Group searchResults by camera_id
+                        const cameraGroups = {};
+                        searchResults.forEach(detection => {
+                          const cameraId = detection.camera_id;
+                          if (!cameraGroups[cameraId]) {
+                            cameraGroups[cameraId] = {
+                              camera_id: cameraId,
+                              camera_name: detection.camera_name || `Camera ${cameraId}`,
+                              detections: []
+                            };
+                          }
+                          cameraGroups[cameraId].detections.push(detection);
+                        });
+                        
+                        const fallbackCameras = Object.values(cameraGroups).map(camera => ({
+                          ...camera,
+                          detection_count: camera.detections.length,
+                          first_detected_at: camera.detections[0]?.detected_at
+                        }));
+                        
+                        console.log('🔍 Fallback orderedCameras:', fallbackCameras);
+                        return fallbackCameras;
+                      }
+                      
+                      const orderedCameras = dailyDetails.flatMap(dayData => 
+                        dayData.cameras.map(cameraData => ({
+                          camera_id: cameraData.cameraId,
+                          camera_name: cameraData.cameraName,
+                          detection_count: cameraData.detections.length,
+                          first_detected_at: cameraData.detections[0]?.detected_at,
+                          detections: cameraData.detections
+                        }))
+                      );
+                      
+                      console.log('🔍 Generated orderedCameras:', orderedCameras);
+                      return orderedCameras;
+                    })()
+                  }}
+                  plateNumber={searchPlateNumber}
+                  totalDetections={totalDetections}
+                  totalCameras={totalCameras}
+                  timeRange={timeRange}
+                  onCameraClick={(camera) => {
+                    console.log('Camera clicked:', camera);
+                    // Có thể thêm logic để focus vào camera trên bản đồ
+                    flyToCamera(camera.camera_id);
+                  }}
+                />
+              ) : (
+                <div style={{ 
+                  textAlign: 'center', 
+                  padding: '40px 20px', 
+                  color: '#666',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '8px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>📍</div>
+                  <h3 style={{ margin: '0 0 8px 0', color: '#333' }}>Chưa có dữ liệu lộ trình</h3>
+                  <p style={{ margin: 0, fontSize: '14px' }}>
+                    Vui lòng tìm kiếm biển số xe ở tab "Tìm kiếm" để xem lộ trình
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+
+        {/* Detection Detail Modal */}
+        {selectedDetection && (
               <div style={{
                 position: 'fixed',
                 top: 0,
@@ -2501,8 +2813,6 @@ const RouteMonitoring = () => {
                 </div>
               </div>
             )}
-          </div>
-        </div>
       </div>
     </div>
   );
