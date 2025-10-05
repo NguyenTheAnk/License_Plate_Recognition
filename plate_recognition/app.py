@@ -121,10 +121,12 @@ def recognize_ws(ws):
     camera_location = None
     camera_name = None
     
-    # FPS control variables
-    target_fps = 20
-    frame_delay = 1.0 / target_fps  # 50ms per frame
+    # FPS control variables - OPTIMIZED for 25 FPS
+    target_fps = 25
+    frame_delay = 1.0 / target_fps  # 40ms per frame
     last_frame_time = time.time()
+    frame_skip_counter = 0
+    skip_every_n_frames = 2  # Skip every 2nd frame for smoother video
 
     try:
         while True:
@@ -134,12 +136,17 @@ def recognize_ws(ws):
                 break
 
             if isinstance(message, bytes):
-                # Xử lý frame từ frontend với FPS control
+                # Xử lý frame từ frontend với FPS control và skip frame
                 try:
                     current_time = time.time()
                     
                     # Skip frames if we're ahead of target FPS
                     if current_time - last_frame_time < frame_delay:
+                        continue
+                    
+                    # FRAME SKIPPING: Skip every nth frame for smoother video
+                    frame_skip_counter += 1
+                    if frame_skip_counter % skip_every_n_frames != 0:
                         continue
                     
                     # Chuyển đổi bytes thành numpy array
@@ -163,8 +170,8 @@ def recognize_ws(ws):
                                 if processed_frame_bytes:
                                     ws.send(processed_frame_bytes)
                                 else:
-                                    # Fallback: encode frame manually with optimized quality
-                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                                    # Fallback: encode frame manually with optimized quality for 25 FPS
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 45])
                                     ws.send(buffer.tobytes())
                                 
                                 last_frame_time = current_time
@@ -173,9 +180,9 @@ def recognize_ws(ws):
                                 break  # Exit the loop if WebSocket is closed
                                 
                         else:
-                            # Legacy support: result is direct frame
+                            # Legacy support: result is direct frame - OPTIMIZED for 25 FPS
                             if isinstance(result, np.ndarray):
-                                _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 50])
                                 frame_bytes = buffer.tobytes()
                             else:
                                 frame_bytes = result
@@ -245,16 +252,23 @@ def recognize_ws(ws):
                             
                             logger.info(f"Bắt đầu xử lý video file: {video_url}")
                             
-                            # Xử lý video file và gửi frames đã xử lý
-                            target_fps = 20
+                            # Xử lý video file và gửi frames đã xử lý - OPTIMIZED for 25 FPS
+                            target_fps = 25
                             frame_delay = 1.0 / target_fps
                             last_frame_time = time.time()
+                            frame_skip_counter = 0
+                            skip_every_n_frames = 2  # Skip every 2nd frame for smoother video
                             
                             while cap.isOpened():
                                 current_time = time.time()
                                 
                                 # Skip frames if we're ahead of target FPS
                                 if current_time - last_frame_time < frame_delay:
+                                    continue
+                                
+                                # FRAME SKIPPING: Skip every nth frame for smoother video
+                                frame_skip_counter += 1
+                                if frame_skip_counter % skip_every_n_frames != 0:
                                     continue
                                     
                                 ret, frame = cap.read()
@@ -276,19 +290,19 @@ def recognize_ws(ws):
                                     if detection_count > 2:  # Chỉ log khi có nhiều hơn 2 detections
                                         logger.info(f"📤 Sending processed frame - FPS: {fps:.1f}, Detections: {detection_count}")
                                     
-                                    # Send processed frame
+                                    # Send processed frame - OPTIMIZED for 25 FPS
                                     if processed_frame_bytes:
                                         ws.send(processed_frame_bytes)
                                     else:
-                                        # Fallback
-                                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                        # Fallback with optimized quality
+                                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
                                         ws.send(buffer.tobytes())
                                     
                                     last_frame_time = current_time
                                 else:
-                                    # Legacy support
+                                    # Legacy support - OPTIMIZED for 25 FPS
                                     if isinstance(result, np.ndarray):
-                                        _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                        _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 50])
                                         frame_bytes = buffer.tobytes()
                                     else:
                                         frame_bytes = result
@@ -337,16 +351,23 @@ def recognize_ws(ws):
 
                         logger.info(f"Bắt đầu xử lý RTSP stream: {stream_url}")
 
-                        # Xử lý stream và gửi frames đã xử lý với 20 FPS
-                        target_fps = 20
-                        frame_delay = 1.0 / target_fps  # 50ms per frame
+                        # Xử lý stream và gửi frames đã xử lý với 25 FPS - OPTIMIZED
+                        target_fps = 25
+                        frame_delay = 1.0 / target_fps  # 40ms per frame
                         last_frame_time = time.time()
+                        frame_skip_counter = 0
+                        skip_every_n_frames = 2  # Skip every 2nd frame for smoother video
                         
                         while cap.isOpened():
                             current_time = time.time()
                             
                             # Skip frames if we're ahead of target FPS
                             if current_time - last_frame_time < frame_delay:
+                                continue
+                            
+                            # FRAME SKIPPING: Skip every nth frame for smoother video
+                            frame_skip_counter += 1
+                            if frame_skip_counter % skip_every_n_frames != 0:
                                 continue
                                 
                             ret, frame = cap.read()
@@ -370,19 +391,19 @@ def recognize_ws(ws):
                                 
                                 # SIMPLIFIED: Detector.py sẽ tự gửi dữ liệu tới database
                                 
-                                # Send processed frame for consistent FPS
+                                # Send processed frame for consistent 25 FPS - OPTIMIZED
                                 if processed_frame_bytes:
                                     ws.send(processed_frame_bytes)
                                 else:
-                                    # Fallback
-                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                    # Fallback with optimized quality
+                                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
                                     ws.send(buffer.tobytes())
                                 
                                 last_frame_time = current_time
                             else:
-                                # Legacy support
+                                # Legacy support - OPTIMIZED for 25 FPS
                                 if isinstance(result, np.ndarray):
-                                    _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                                    _, buffer = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 50])
                                     frame_bytes = buffer.tobytes()
                                 else:
                                     frame_bytes = result
@@ -583,10 +604,12 @@ def stream_recognition(camera_id):
             
             logger.info(f"Starting HTTP streaming for camera {camera_id}")
             
-            # FULL DETECTION: Process every frame for complete recognition
-            target_fps = 20  # Optimized FPS for full detection load
+            # FULL DETECTION: Process every frame for complete recognition - OPTIMIZED for 25 FPS
+            target_fps = 25  # Optimized FPS for full detection load
             frame_delay = 1.0 / target_fps
             last_frame_time = time.time()
+            frame_skip_counter = 0
+            skip_every_n_frames = 2  # Skip every 2nd frame for smoother video
             
             while cap.isOpened():
                 current_time = time.time()
@@ -797,17 +820,24 @@ def stream_full_detection(camera_id):
             
             logger.info(f"Starting FULL DETECTION streaming for camera {camera_id}")
             
-            # FULL DETECTION: Process every frame with maximum optimization
-            target_fps = 20  # Optimized FPS for full detection
+            # FULL DETECTION: Process every frame with maximum optimization - OPTIMIZED for 25 FPS
+            target_fps = 25  # Optimized FPS for full detection
             frame_delay = 1.0 / target_fps
             last_frame_time = time.time()
             frame_count = 0
+            frame_skip_counter = 0
+            skip_every_n_frames = 2  # Skip every 2nd frame for smoother video
             
             while cap.isOpened():
                 current_time = time.time()
                 
                 # Skip frames if we're ahead of target FPS
                 if current_time - last_frame_time < frame_delay:
+                    continue
+                
+                # FRAME SKIPPING: Skip every nth frame for smoother video
+                frame_skip_counter += 1
+                if frame_skip_counter % skip_every_n_frames != 0:
                     continue
                 
                 ret, frame = cap.read()
